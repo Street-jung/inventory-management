@@ -1,0 +1,1681 @@
+{
+  "title": "일쩜오도 재고현황",
+  "master_products": [
+    {
+      "id": "P_10GL02",
+      "seller_code": "10GL02",
+      "name": "구욘 다이제스티브 오렌지맛 265g 마스터",
+      "product_type": "수입",
+      "note": "",
+      "category": "쿠키/스낵",
+      "gaemi_codes": [
+        "PJ1489270_ORANGE",
+        "PJ1489270"
+      ],
+      "gaemi_filter": "오렌지",
+      "options": [
+        {
+          "id": "95893427561",
+          "bundle": 1,
+          "name": "1개 265g"
+        },
+        {
+          "id": "95893640100",
+          "bundle": 2,
+          "name": "2개 265g"
+        },
+        {
+          "id": "95893640102",
+          "bundle": 3,
+          "name": "3개 265g"
+        }
+      ]
+    },
+    {
+      "id": "P_10GL04",
+      "seller_code": "10GL04",
+      "name": "구욘 다이제스티브 초코칩 265g 마스터",
+      "product_type": "수입",
+      "note": "",
+      "category": "쿠키/스낵",
+      "gaemi_codes": [
+        "PJ1489270"
+      ],
+      "gaemi_filter": "",
+      "options": [
+        {
+          "id": "95893436821",
+          "bundle": 1,
+          "name": "1개 265g"
+        },
+        {
+          "id": "95893661910",
+          "bundle": 2,
+          "name": "2개 265g"
+        },
+        {
+          "id": "95893661912",
+          "bundle": 3,
+          "name": "3개 265g"
+        }
+      ]
+    },
+    {
+      "id": "P_10GL05",
+      "seller_code": "10GL05",
+      "name": "구욘 다이제스티브 뮤즐리 230g 마스터",
+      "product_type": "수입",
+      "note": "",
+      "category": "쿠키/스낵",
+      "gaemi_codes": [
+        "PJ1489271"
+      ],
+      "gaemi_filter": "",
+      "options": [
+        {
+          "id": "95893433438",
+          "bundle": 1,
+          "name": "1개 230g"
+        },
+        {
+          "id": "95893642827",
+          "bundle": 2,
+          "name": "2개 230g"
+        },
+        {
+          "id": "95893642826",
+          "bundle": 3,
+          "name": "3개 230g"
+        }
+      ]
+    },
+    {
+      "id": "P_10GL06",
+      "seller_code": "10GL06",
+      "name": "구욘 다이제스티브 클래식 250g 마스터",
+      "product_type": "수입",
+      "note": "",
+      "category": "쿠키/스낵",
+      "gaemi_codes": [
+        "PJ1489270_CLASSIC",
+        "PJ1489270"
+      ],
+      "gaemi_filter": "클래식",
+      "options": [
+        {
+          "id": "95893435622",
+          "bundle": 1,
+          "name": "1개 250g"
+        },
+        {
+          "id": "95893649650",
+          "bundle": 2,
+          "name": "2개 250g"
+        },
+        {
+          "id": "95893649651",
+          "bundle": 3,
+          "name": "3개 250g"
+        }
+      ]
+    },
+    {
+      "id": "P_20DC02",
+      "seller_code": "20DC02",
+      "name": "데체코 엑스트라버진 올리브오일 500ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1489516"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_20DC03",
+      "seller_code": "20DC03",
+      "name": "데체코 스파게티 500g",
+      "product_type": "사입",
+      "note": "",
+      "category": "파스타",
+      "gaemi_codes": [
+        "PJ1489577"
+      ],
+      "gaemi_filter": "스파게티",
+      "options": []
+    },
+    {
+      "id": "P_20DC04",
+      "seller_code": "20DC04",
+      "name": "데체코 페투첼레 500g",
+      "product_type": "사입",
+      "note": "",
+      "category": "파스타",
+      "gaemi_codes": [
+        "PJ1489577"
+      ],
+      "gaemi_filter": "페투첼레",
+      "options": []
+    },
+    {
+      "id": "P_20DC05",
+      "seller_code": "20DC05",
+      "name": "데체코 리가토니 500g",
+      "product_type": "사입",
+      "note": "",
+      "category": "파스타",
+      "gaemi_codes": [
+        "PJ1489577"
+      ],
+      "gaemi_filter": "리가토니",
+      "options": []
+    },
+    {
+      "id": "P_20ek01",
+      "seller_code": "20ek01",
+      "name": "에코 카놀라유 비정제 500ml",
+      "product_type": "수입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1489273"
+      ],
+      "gaemi_filter": "",
+      "options": [
+        {
+          "id": "95856264111",
+          "bundle": 1,
+          "name": "1개 500ml"
+        },
+        {
+          "id": "95856264109",
+          "bundle": 2,
+          "name": "2개 500ml"
+        },
+        {
+          "id": "95856264110",
+          "bundle": 3,
+          "name": "3개 500ml"
+        }
+      ]
+    },
+    {
+      "id": "P_20EK02",
+      "seller_code": "20EK02",
+      "name": "에코 카놀라유 정제 1L",
+      "product_type": "수입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1491144"
+      ],
+      "gaemi_filter": "1L",
+      "options": [
+        {
+          "id": "95856286078",
+          "bundle": 1,
+          "name": "1개 1L"
+        },
+        {
+          "id": "95856286080",
+          "bundle": 2,
+          "name": "2개 1L"
+        },
+        {
+          "id": "95856286077",
+          "bundle": 3,
+          "name": "3개 1L"
+        }
+      ]
+    },
+    {
+      "id": "P_20EK03",
+      "seller_code": "20EK03",
+      "name": "에코 카놀라유 정제 500ml",
+      "product_type": "수입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1491144"
+      ],
+      "gaemi_filter": "500",
+      "options": [
+        {
+          "id": "95856286081",
+          "bundle": 1,
+          "name": "1개 500ml"
+        },
+        {
+          "id": "95856286079",
+          "bundle": 2,
+          "name": "2개 500ml"
+        },
+        {
+          "id": "95856286082",
+          "bundle": 3,
+          "name": "3개 500ml"
+        }
+      ]
+    },
+    {
+      "id": "P_20EO02",
+      "seller_code": "20EO02",
+      "name": "엘레올로지 싱글버라이어티 500ml",
+      "product_type": "수입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1489503"
+      ],
+      "gaemi_filter": "",
+      "options": [
+        {
+          "id": "95844803290",
+          "bundle": 1,
+          "name": "1개 500ml"
+        },
+        {
+          "id": "95849997061",
+          "bundle": 2,
+          "name": "2개 500ml"
+        },
+        {
+          "id": "95849997062",
+          "bundle": 3,
+          "name": "3개 500ml"
+        }
+      ]
+    },
+    {
+      "id": "P_20PB01",
+      "seller_code": "20PB01",
+      "name": "올리오도 유기농 엑스트라버진 올리브오일 캡슐 30포",
+      "product_type": "수입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1492159"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_20TZ01",
+      "seller_code": "20TZ01",
+      "name": "테라찌노 라노첼라라 500ml",
+      "product_type": "수입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1489272"
+      ],
+      "gaemi_filter": "500",
+      "options": [
+        {
+          "id": "95856248619",
+          "bundle": 1,
+          "name": "1개 500ml"
+        },
+        {
+          "id": "95856248617",
+          "bundle": 2,
+          "name": "2개 500ml"
+        },
+        {
+          "id": "95856248618",
+          "bundle": 3,
+          "name": "3개 500ml"
+        }
+      ]
+    },
+    {
+      "id": "P_20TZ03",
+      "seller_code": "20TZ03",
+      "name": "테라찌노 비앙콜릴라 250ml",
+      "product_type": "수입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1489272"
+      ],
+      "gaemi_filter": "250",
+      "options": [
+        {
+          "id": "95856228901",
+          "bundle": 1,
+          "name": "1개 250ml"
+        },
+        {
+          "id": "95856228900",
+          "bundle": 2,
+          "name": "2개 250ml"
+        },
+        {
+          "id": "95856228899",
+          "bundle": 3,
+          "name": "3개 250ml"
+        }
+      ]
+    },
+    {
+      "id": "P_20XO01",
+      "seller_code": "20XO01",
+      "name": "알티보 엑스트라 버진 올리브오일 1L",
+      "product_type": "사입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1489537"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_20XO02",
+      "seller_code": "20XO02",
+      "name": "팜투마켓 현미유 500ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1489540"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_20XO07",
+      "seller_code": "20XO07",
+      "name": "시타 엑스트라 버진 올리브 오일 500ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1489512"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_20XO09",
+      "seller_code": "20XO09",
+      "name": "그로브 아보카도오일 250ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "오일/식용유",
+      "gaemi_codes": [
+        "PJ1489536"
+      ],
+      "gaemi_filter": "250",
+      "options": []
+    },
+    {
+      "id": "P_30BR02",
+      "seller_code": "30BR02",
+      "name": "브래그 유기농 사과식초 946ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "식초/애사비",
+      "gaemi_codes": [
+        "PJ1489514"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_30DN05",
+      "seller_code": "30DN05",
+      "name": "드니그리스 펌킨 스파이스 500ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "식초/애사비",
+      "gaemi_codes": [
+        "PJ1489544"
+      ],
+      "gaemi_filter": "펌킨",
+      "options": []
+    },
+    {
+      "id": "P_30DN06",
+      "seller_code": "30DN06",
+      "name": "드니그리스 허니크랜베리 500ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "식초/애사비",
+      "gaemi_codes": [
+        "PJ1489544"
+      ],
+      "gaemi_filter": "크랜베리",
+      "options": []
+    },
+    {
+      "id": "P_30DN07",
+      "seller_code": "30DN07",
+      "name": "드니그리스 허니 500ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "식초/애사비",
+      "gaemi_codes": [
+        "PJ1489544"
+      ],
+      "gaemi_filter": "허니 500",
+      "options": []
+    },
+    {
+      "id": "P_30PM01",
+      "seller_code": "30PM01",
+      "name": "피에몬테 유기농 사과식초 1000ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "식초/애사비",
+      "gaemi_codes": [
+        "PJ1489511"
+      ],
+      "gaemi_filter": "1L",
+      "options": []
+    },
+    {
+      "id": "P_30PM02",
+      "seller_code": "30PM02",
+      "name": "피에몬테 유기농 사과식초 500ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "식초/애사비",
+      "gaemi_codes": [
+        "PJ1489511"
+      ],
+      "gaemi_filter": "500",
+      "options": []
+    },
+    {
+      "id": "P_30pm03",
+      "seller_code": "30pm03",
+      "name": "피에몬테 유기농 사과식초 스틱 225ml (15g x 15ea)",
+      "product_type": "사입",
+      "note": "",
+      "category": "식초/애사비",
+      "gaemi_codes": [
+        "PJ1489508"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_31MZ02",
+      "seller_code": "31MZ02",
+      "name": "맹가졸리 발사믹식초 8년산 250ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "발사믹",
+      "gaemi_codes": [
+        "PJ1489580"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_31XB02",
+      "seller_code": "31XB02",
+      "name": "모데나 아이솔라이 유기농 화이트발사믹 250ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "발사믹",
+      "gaemi_codes": [
+        "PJ1489548"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_31XB03",
+      "seller_code": "31XB03",
+      "name": "바이오비니거 유기농 발사믹 식초 750ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "발사믹",
+      "gaemi_codes": [
+        "PJ1489566"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_31XB04",
+      "seller_code": "31XB04",
+      "name": "안드레아 밀라노 모데나산 유기농 발사믹 식초3년산(실버) 500ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "발사믹",
+      "gaemi_codes": [
+        "PJ1489539"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_40EF04",
+      "seller_code": "40EF04",
+      "name": "유로푸드 유기농 레몬즙 스틱형 (20g x 15ea) 300㎖",
+      "product_type": "사입",
+      "note": "",
+      "category": "레몬즙",
+      "gaemi_codes": [
+        "PJ1489567"
+      ],
+      "gaemi_filter": "스틱",
+      "options": []
+    },
+    {
+      "id": "P_80FC01",
+      "seller_code": "80FC01",
+      "name": "펠리체티 유기농 통밀 파스타 리가티 500g",
+      "product_type": "사입",
+      "note": "",
+      "category": "파스타",
+      "gaemi_codes": [
+        "PJ1489578"
+      ],
+      "gaemi_filter": "리가티",
+      "options": []
+    },
+    {
+      "id": "P_80FC02",
+      "seller_code": "80FC02",
+      "name": "펠리체티 유기농 통밀 파스타 펜네 500g",
+      "product_type": "사입",
+      "note": "",
+      "category": "파스타",
+      "gaemi_codes": [
+        "PJ1489578"
+      ],
+      "gaemi_filter": "펜네",
+      "options": []
+    },
+    {
+      "id": "P_80FC03",
+      "seller_code": "80FC03",
+      "name": "펠리체티 유기농 통밀 파스타 스파게티 500g",
+      "product_type": "사입",
+      "note": "",
+      "category": "파스타",
+      "gaemi_codes": [
+        "PJ1489578"
+      ],
+      "gaemi_filter": "스파게티",
+      "options": []
+    },
+    {
+      "id": "P_80FC04",
+      "seller_code": "80FC04",
+      "name": "펠리체티 유기농 통밀 파스타 먹물 스파게티 500g",
+      "product_type": "사입",
+      "note": "",
+      "category": "파스타",
+      "gaemi_codes": [
+        "PJ1489578"
+      ],
+      "gaemi_filter": "먹물",
+      "options": []
+    },
+    {
+      "id": "P_80FC05",
+      "seller_code": "80FC05",
+      "name": "펠리체티 유기농 통밀 파스타 푸질리 500g",
+      "product_type": "사입",
+      "note": "",
+      "category": "파스타",
+      "gaemi_codes": [
+        "PJ1489578"
+      ],
+      "gaemi_filter": "푸질리",
+      "options": []
+    },
+    {
+      "id": "P_80OR01",
+      "seller_code": "80OR01",
+      "name": "크라스탄 유기농 오르조 35g",
+      "product_type": "사입",
+      "note": "",
+      "category": "차/음료",
+      "gaemi_codes": [
+        "PJ1489561"
+      ],
+      "gaemi_filter": "35g",
+      "options": []
+    },
+    {
+      "id": "P_80XP03",
+      "seller_code": "80XP03",
+      "name": "위내추럴 피넛버터 475g 크런치",
+      "product_type": "사입",
+      "note": "",
+      "category": "스프레드/잼",
+      "gaemi_codes": [
+        "PJ1489562"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_S100005",
+      "seller_code": "S100005",
+      "name": "[B2B]구욘 다이제스티브 오렌지 265g",
+      "product_type": "수입",
+      "note": "10GL02 제품이 12개 단위로 판매되는 B2B 상품.",
+      "category": "쿠키/스낵(B2B)",
+      "gaemi_codes": [
+        "PJ1489270_ORANGE",
+        "PJ1489270"
+      ],
+      "gaemi_filter": "오렌지",
+      "options": []
+    },
+    {
+      "id": "P_S100009",
+      "seller_code": "S100009",
+      "name": "[B2B]구욘 다이제스티브 초코 265g",
+      "product_type": "수입",
+      "note": "10GL04 제품이 12개 단위로 판매되는 B2B 상품.",
+      "category": "쿠키/스낵(B2B)",
+      "gaemi_codes": [
+        "PJ1489270"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_S100011",
+      "seller_code": "S100011",
+      "name": "[B2B]구욘 다이제스티브 뮤즐리 230g",
+      "product_type": "수입",
+      "note": "10GL05 제품이 12개 단위로 판매되는 B2B 상품.",
+      "category": "쿠키/스낵(B2B)",
+      "gaemi_codes": [
+        "PJ1489271"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    },
+    {
+      "id": "P_S100033",
+      "seller_code": "S100033",
+      "name": "[B2B]구욘 다이제스티브 클래식 250g",
+      "product_type": "수입",
+      "note": "10GL06 제품이 12개 단위로 판매되는 B2B 상품.",
+      "category": "쿠키/스낵(B2B)",
+      "gaemi_codes": [
+        "PJ1489270_CLASSIC",
+        "PJ1489270"
+      ],
+      "gaemi_filter": "클래식",
+      "options": []
+    },
+    {
+      "id": "P_S200018",
+      "seller_code": "S200018",
+      "name": "만능 프리미엄 올리브오일 기프트세트-테라찌노 라노첼라라 500ml 2병",
+      "product_type": "수입",
+      "note": "20TZ01 제품이 2개 단위로 판매되는 선물세트 상품.",
+      "category": "기프트세트",
+      "gaemi_codes": [
+        "PJ1489272"
+      ],
+      "gaemi_filter": "라노 500",
+      "options": []
+    },
+    {
+      "id": "P_S200019",
+      "seller_code": "S200019",
+      "name": "하이엔드 이너뷰티 올리브오일 기프트세트-엘레올로지 싱글버라이어티 500ml 2병",
+      "product_type": "수입",
+      "note": "20EO02 제품이 2개 단위로 판매되는 선물세트 상품.",
+      "category": "기프트세트",
+      "gaemi_codes": [
+        "PJ1489503"
+      ],
+      "gaemi_filter": "",
+      "options": []
+    }
+  ],
+  "gaemi_inventory": {
+    "PJ1492159": [
+      {
+        "product_name": "올리오도 올리브캡슐",
+        "option_name": "30포",
+        "stock": 8601,
+        "reg_date": "2026-10-20 04:41:24"
+      }
+    ],
+    "PJ1491957": [
+      {
+        "product_name": "일쩜오도기프트쇼핑백",
+        "option_name": "병2입",
+        "stock": 701,
+        "reg_date": "2026-09-17 09:46:26"
+      }
+    ],
+    "PJ1491956": [
+      {
+        "product_name": "일쩜오도기프트박스",
+        "option_name": "병2입",
+        "stock": 732,
+        "reg_date": "2026-09-17 09:46:23"
+      }
+    ],
+    "PJ1491144": [
+      {
+        "product_name": "에코 유기농 카놀라유 정제",
+        "option_name": "정제 1L",
+        "stock": 982,
+        "reg_date": "2026-10-21 16:25:37"
+      },
+      {
+        "product_name": "에코 유기농 카놀라유 정제",
+        "option_name": "정제 1L-1",
+        "stock": 1080,
+        "reg_date": "2026-10-23 16:34:29"
+      },
+      {
+        "product_name": "에코 유기농 카놀라유 정제",
+        "option_name": "정제 500",
+        "stock": 0,
+        "reg_date": "2026-10-20 04:36:29"
+      },
+      {
+        "product_name": "에코 유기농 카놀라유 정제",
+        "option_name": "정제 500-1",
+        "stock": 1788,
+        "reg_date": "2026-10-23 16:32:34"
+      }
+    ],
+    "PJ1489601": [
+      {
+        "product_name": "구욘 기프트박스",
+        "option_name": "기프트박스",
+        "stock": 245,
+        "reg_date": "2026-02-25 13:21:58"
+      }
+    ],
+    "PJ1489577": [
+      {
+        "product_name": "데체코 구르메 파스타",
+        "option_name": "리가토니 500g",
+        "stock": 12,
+        "reg_date": "2026-05-20 12:51:29"
+      },
+      {
+        "product_name": "데체코 구르메 파스타",
+        "option_name": "링귀니 500g",
+        "stock": 0,
+        "reg_date": "2026-05-20 12:49:22"
+      },
+      {
+        "product_name": "데체코 구르메 파스타",
+        "option_name": "스파게티 500g",
+        "stock": 12,
+        "reg_date": "2026-05-20 12:48:04"
+      },
+      {
+        "product_name": "데체코 구르메 파스타",
+        "option_name": "페투첼레 500g",
+        "stock": 13,
+        "reg_date": "2026-05-20 12:53:24"
+      }
+    ],
+    "PJ1489578": [
+      {
+        "product_name": "펠리체티 유기농 통밀 파스타",
+        "option_name": "리가티 500g",
+        "stock": 20,
+        "reg_date": "2026-07-03 15:29:43"
+      },
+      {
+        "product_name": "펠리체티 유기농 통밀 파스타",
+        "option_name": "먹물 스파게티 500g",
+        "stock": 0,
+        "reg_date": "2026-07-03 15:29:43"
+      },
+      {
+        "product_name": "펠리체티 유기농 통밀 파스타",
+        "option_name": "스파게티 500g",
+        "stock": 8,
+        "reg_date": "2026-07-03 15:29:43"
+      },
+      {
+        "product_name": "펠리체티 유기농 통밀 파스타",
+        "option_name": "펜네 500g",
+        "stock": 19,
+        "reg_date": "2026-07-03 15:29:43"
+      },
+      {
+        "product_name": "펠리체티 유기농 통밀 파스타",
+        "option_name": "푸질리 500g",
+        "stock": 17,
+        "reg_date": "2026-07-03 15:29:43"
+      }
+    ],
+    "PJ1489580": [
+      {
+        "product_name": "맹가졸리 발사믹식초 8년산",
+        "option_name": "250ml",
+        "stock": 7,
+        "reg_date": "2026-05-20 15:35:40"
+      }
+    ],
+    "PJ1489561": [
+      {
+        "product_name": "크리스탄 오르조 보리커피",
+        "option_name": "85g",
+        "stock": 0,
+        "reg_date": "2026-05-20 13:06:14"
+      },
+      {
+        "product_name": "크리스탄 오르조 보리커피",
+        "option_name": "스틱 35g",
+        "stock": 12,
+        "reg_date": "2026-05-20 13:08:45"
+      }
+    ],
+    "PJ1489562": [
+      {
+        "product_name": "위내추럴 피넛버터",
+        "option_name": "크런치 475g",
+        "stock": 2,
+        "reg_date": "2026-05-20 13:24:36"
+      }
+    ],
+    "PJ1489566": [
+      {
+        "product_name": "바이오 비니거 유기농 발사믹 식초",
+        "option_name": "750ml",
+        "stock": 12,
+        "reg_date": "2026-05-29 10:59:12"
+      }
+    ],
+    "PJ1489567": [
+      {
+        "product_name": "유로푸드 유기농 레몬쥬스",
+        "option_name": "500ml",
+        "stock": 0,
+        "reg_date": "2026-05-20 13:33:32"
+      },
+      {
+        "product_name": "유로푸드 유기농 레몬쥬스",
+        "option_name": "스틱 300g",
+        "stock": 15,
+        "reg_date": "2026-05-20 13:12:59"
+      }
+    ],
+    "PJ1489536": [
+      {
+        "product_name": "그로브 아보카도 오일",
+        "option_name": "250ml",
+        "stock": 3,
+        "reg_date": "2026-05-20 15:09:05"
+      },
+      {
+        "product_name": "그로브 아보카도 오일",
+        "option_name": "500ml",
+        "stock": 0,
+        "reg_date": "2026-05-20 15:04:20"
+      }
+    ],
+    "PJ1489537": [
+      {
+        "product_name": "알티보 엑스트라버진 올리브 오일",
+        "option_name": "1L",
+        "stock": 95,
+        "reg_date": "2026-05-20 15:20:58"
+      }
+    ],
+    "PJ1489539": [
+      {
+        "product_name": "안드레아 밀라노 유기농 발사믹 식초",
+        "option_name": "3년산 실버 500ml",
+        "stock": 72,
+        "reg_date": "2026-05-20 13:55:05"
+      }
+    ],
+    "PJ1489540": [
+      {
+        "product_name": "팜투마켓 현미 오일",
+        "option_name": "27.04.30",
+        "stock": 7,
+        "reg_date": "2026-07-30 11:03:27"
+      }
+    ],
+    "PJ1489544": [
+      {
+        "product_name": "드니그리스 유기농 사과식초",
+        "option_name": "석류식초 500ml",
+        "stock": 0,
+        "reg_date": "2026-05-20 13:23:09"
+      },
+      {
+        "product_name": "드니그리스 유기농 사과식초",
+        "option_name": "애사비 1L",
+        "stock": 0,
+        "reg_date": "2026-05-29 10:48:46"
+      },
+      {
+        "product_name": "드니그리스 유기농 사과식초",
+        "option_name": "펌킨 스파이스 500ml",
+        "stock": 5,
+        "reg_date": "2026-05-20 13:37:47"
+      },
+      {
+        "product_name": "드니그리스 유기농 사과식초",
+        "option_name": "허니 500ml",
+        "stock": 16,
+        "reg_date": "2026-05-20 15:08:06"
+      },
+      {
+        "product_name": "드니그리스 유기농 사과식초",
+        "option_name": "허니 크랜베리 500ml",
+        "stock": 1,
+        "reg_date": "2026-05-20 13:36:44"
+      }
+    ],
+    "PJ1489548": [
+      {
+        "product_name": "모데나 아이솔라이 유기농 화이트 발사믹 식초",
+        "option_name": "250ml",
+        "stock": 13,
+        "reg_date": "2026-05-20 13:28:37"
+      }
+    ],
+    "PJ1489503": [
+      {
+        "product_name": "엘레올로지 싱글버라이어티 엑스트라버진 올리브오일 500ml",
+        "option_name": "500ml",
+        "stock": 0,
+        "reg_date": "2026-02-25 11:24:56"
+      },
+      {
+        "product_name": "엘레올로지 싱글버라이어티 엑스트라버진 올리브오일 500ml",
+        "option_name": "500ml",
+        "stock": 1208,
+        "reg_date": "2026-09-15 16:31:50"
+      }
+    ],
+    "PJ1489508": [
+      {
+        "product_name": "피에몬테 유기농 사과식초 스틱형",
+        "option_name": "225ml",
+        "stock": 430,
+        "reg_date": "2026-05-20 13:14:27"
+      }
+    ],
+    "PJ1489511": [
+      {
+        "product_name": "피에몬테 유기농 사과식초",
+        "option_name": "1L",
+        "stock": 242,
+        "reg_date": "2026-05-20 13:53:30"
+      },
+      {
+        "product_name": "피에몬테 유기농 사과식초",
+        "option_name": "500ml",
+        "stock": 467,
+        "reg_date": "2026-02-25 11:39:27"
+      }
+    ],
+    "PJ1489512": [
+      {
+        "product_name": "시타 올리브 오일 500ml",
+        "option_name": "27.07.18",
+        "stock": 194,
+        "reg_date": "2026-02-25 12:26:07"
+      }
+    ],
+    "PJ1489514": [
+      {
+        "product_name": "브래그 애사비",
+        "option_name": "946ml",
+        "stock": 41,
+        "reg_date": "2026-05-29 10:50:58"
+      }
+    ],
+    "PJ1489516": [
+      {
+        "product_name": "데체코 올리브 오일 500ml",
+        "option_name": "27.03.28",
+        "stock": 19,
+        "reg_date": "2026-05-20 14:54:38"
+      }
+    ],
+    "PJ1489273": [
+      {
+        "product_name": "에코 유기농 카놀라유 비정제",
+        "option_name": "비정제 500",
+        "stock": 0,
+        "reg_date": "2026-10-20 04:13:25"
+      },
+      {
+        "product_name": "에코 유기농 카놀라유 비정제",
+        "option_name": "비정제 500-1",
+        "stock": 211,
+        "reg_date": "2026-10-23 16:37:12"
+      }
+    ],
+    "PJ1489272": [
+      {
+        "product_name": "테라찌노 유기농 엑스트라버진 올리브오일 라노첼라라",
+        "option_name": "라노 500ml",
+        "stock": 4,
+        "reg_date": "2026-10-08 16:25:00"
+      },
+      {
+        "product_name": "테라찌노 유기농 엑스트라버진 올리브오일 라노첼라라",
+        "option_name": "라노 500ml 3병 box",
+        "stock": 0,
+        "reg_date": "2026-05-20 15:40:36"
+      },
+      {
+        "product_name": "테라찌노 유기농 엑스트라버진 올리브오일 라노첼라라",
+        "option_name": "라노 500ml-2",
+        "stock": 0,
+        "reg_date": "2026-02-25 13:40:10"
+      }
+    ],
+    "PJ1489270": [
+      {
+        "product_name": "구욘 초코칩 쿠키",
+        "option_name": "구욘 초코칩 쿠키",
+        "stock": 395,
+        "reg_date": "2026-08-25 10:45:00"
+      }
+    ],
+    "PJ1489271": [
+      {
+        "product_name": "구욘 뮤즐리 쿠키",
+        "option_name": "구욘 뮤즐리 쿠키",
+        "stock": 90,
+        "reg_date": "2026-09-11 16:00:34"
+      }
+    ]
+  },
+  "coupang_inventory": {
+    "94765925693": {
+      "product_name": "프란츠 네이키드 선쉴드 이지에프 패치_7개입",
+      "option_name": "10.3ml 1개",
+      "stock": 1455,
+      "inbound": 0,
+      "sales_7d": 26,
+      "sales_30d": 249,
+      "doc": 69,
+      "updated_at": "11-05 20:33"
+    },
+    "94765777112": {
+      "product_name": "프란츠 네이키드 선쉴드 펩타이드 패치 L사이즈 5회분",
+      "option_name": "5ml 1개",
+      "stock": 587,
+      "inbound": 0,
+      "sales_7d": 46,
+      "sales_30d": 303,
+      "doc": 70,
+      "updated_at": "11-05 20:33"
+    },
+    "94765861310": {
+      "product_name": "프란츠 멜리시카 트러블 컨트롤 젤 클렌저",
+      "option_name": "120ml 1개",
+      "stock": 579,
+      "inbound": 0,
+      "sales_7d": 64,
+      "sales_30d": 268,
+      "doc": 59,
+      "updated_at": "11-05 20:33"
+    },
+    "94783275202": {
+      "product_name": "프란츠 줄기세포배양액 10% 앰플 1개입",
+      "option_name": "1ml 1개",
+      "stock": 579,
+      "inbound": 0,
+      "sales_7d": 61,
+      "sales_30d": 294,
+      "doc": 61,
+      "updated_at": "11-05 20:33"
+    },
+    "95844803290": {
+      "product_name": "[고항산화]엘레올로지 싱글버라이어티 올리브오일 500ml",
+      "option_name": "1개 500ml",
+      "stock": 468,
+      "inbound": 0,
+      "sales_7d": 0,
+      "sales_30d": 15,
+      "doc": 70,
+      "updated_at": "11-05 20:33"
+    },
+    "92329890610": {
+      "product_name": "(제트) 프란츠 EGF인텐시브 볼륨앰플 8ml",
+      "option_name": "8ml 2개",
+      "stock": 432,
+      "inbound": 0,
+      "sales_7d": 1,
+      "sales_30d": 107,
+      "doc": 70,
+      "updated_at": "11-05 20:33"
+    },
+    "93857927194": {
+      "product_name": "프란츠 멜리케어 스칼프 앰플",
+      "option_name": "1개 15ml",
+      "stock": 351,
+      "inbound": 0,
+      "sales_7d": 0,
+      "sales_30d": 2,
+      "doc": 70,
+      "updated_at": "11-05 20:33"
+    },
+    "95893433438": {
+      "product_name": "구욘 오트밀쿠키 귀리 뮤즐리",
+      "option_name": "1개 230g",
+      "stock": 276,
+      "inbound": 0,
+      "sales_7d": 17,
+      "sales_30d": 50,
+      "doc": 69,
+      "updated_at": "11-05 20:33"
+    },
+    "92241614780": {
+      "product_name": "(제트) 프란츠 EGF인텐시브 볼륨앰플",
+      "option_name": "50ml 1개",
+      "stock": 207,
+      "inbound": 120,
+      "sales_7d": 43,
+      "sales_30d": 101,
+      "doc": 32,
+      "updated_at": "11-05 20:33"
+    },
+    "95856286081": {
+      "product_name": "[우리아이 첫 오일] 에코 정제 카놀라유",
+      "option_name": "1개 500ml",
+      "stock": 202,
+      "inbound": 0,
+      "sales_7d": 2,
+      "sales_30d": 2,
+      "doc": 28,
+      "updated_at": "11-05 20:33"
+    },
+    "95856248619": {
+      "product_name": "[햇올리브]테라찌노 라노첼라라 올리브오일 500ml",
+      "option_name": "1개 500ml",
+      "stock": 199,
+      "inbound": 0,
+      "sales_7d": 47,
+      "sales_30d": 202,
+      "doc": 31,
+      "updated_at": "11-05 20:33"
+    },
+    "95893436821": {
+      "product_name": "구욘 초코칩 통밀쿠키",
+      "option_name": "1개 265g",
+      "stock": 169,
+      "inbound": 48,
+      "sales_7d": 35,
+      "sales_30d": 90,
+      "doc": 35,
+      "updated_at": "11-05 20:33"
+    },
+    "94765766504": {
+      "product_name": "프란츠 줄기세포배양액 앰플 마스크팩",
+      "option_name": "1개 5개입",
+      "stock": 150,
+      "inbound": 120,
+      "sales_7d": 23,
+      "sales_30d": 112,
+      "doc": 40,
+      "updated_at": "11-05 20:33"
+    },
+    "95893427561": {
+      "product_name": "구욘 오트밀쿠키 귀리 오렌지",
+      "option_name": "1개 265g",
+      "stock": 149,
+      "inbound": 0,
+      "sales_7d": 31,
+      "sales_30d": 89,
+      "doc": 23,
+      "updated_at": "11-05 20:33"
+    },
+    "94765734299": {
+      "product_name": "프란츠 제트플러스 미세전류 리프팅 시트 듀얼 마스크팩",
+      "option_name": "1개 2개입",
+      "stock": 139,
+      "inbound": 0,
+      "sales_7d": 12,
+      "sales_30d": 65,
+      "doc": 64,
+      "updated_at": "11-05 20:33"
+    },
+    "94765665192": {
+      "product_name": "프란츠 멜리시카 트러블 컨트롤 토너",
+      "option_name": "1개 150ml",
+      "stock": 121,
+      "inbound": 0,
+      "sales_7d": 16,
+      "sales_30d": 60,
+      "doc": 53,
+      "updated_at": "11-05 20:33"
+    },
+    "92213212306": {
+      "product_name": "프란츠 EGF인텐시브 볼륨앰플",
+      "option_name": "8ml 1개",
+      "stock": 109,
+      "inbound": 0,
+      "sales_7d": 4,
+      "sales_30d": 26,
+      "doc": 69,
+      "updated_at": "11-05 20:33"
+    },
+    "95856264111": {
+      "product_name": "[우리아이 첫 오일]유기농 비정제 카놀라유 500ml",
+      "option_name": "1개 500ml",
+      "stock": 107,
+      "inbound": 0,
+      "sales_7d": 1,
+      "sales_30d": 10,
+      "doc": 25,
+      "updated_at": "11-05 20:33"
+    },
+    "92329890600": {
+      "product_name": "(제트) 프란츠 EGF인텐시브 볼륨앰플 8ml",
+      "option_name": "8ml 4개",
+      "stock": 89,
+      "inbound": 0,
+      "sales_7d": 2,
+      "sales_30d": 17,
+      "doc": 70,
+      "updated_at": "11-05 20:33"
+    },
+    "95856286078": {
+      "product_name": "[우리아이 첫 오일] 에코 정제 카놀라유",
+      "option_name": "1개 1L",
+      "stock": 88,
+      "inbound": 0,
+      "sales_7d": 0,
+      "sales_30d": 83,
+      "doc": 12,
+      "updated_at": "11-05 20:33"
+    },
+    "92329784566": {
+      "product_name": "(제트) 프란츠 EGF인텐시브 볼륨앰플",
+      "option_name": "50ml 2개",
+      "stock": 81,
+      "inbound": 0,
+      "sales_7d": 18,
+      "sales_30d": 64,
+      "doc": 33,
+      "updated_at": "11-05 20:33"
+    },
+    "94765724999": {
+      "product_name": "프란츠 EGF 인텐시브 볼륨 크림",
+      "option_name": "30ml 1개",
+      "stock": 72,
+      "inbound": 0,
+      "sales_7d": 10,
+      "sales_30d": 26,
+      "doc": 53,
+      "updated_at": "11-05 20:33"
+    },
+    "95893642827": {
+      "product_name": "구욘 오트밀쿠키 귀리 뮤즐리",
+      "option_name": "2개 230g",
+      "stock": 72,
+      "inbound": 0,
+      "sales_7d": 14,
+      "sales_30d": 24,
+      "doc": 18,
+      "updated_at": "11-05 20:33"
+    },
+    "95856248618": {
+      "product_name": "[햇올리브]테라찌노 라노첼라라 올리브오일 500ml",
+      "option_name": "3개 500ml",
+      "stock": 66,
+      "inbound": 0,
+      "sales_7d": 1,
+      "sales_30d": 8,
+      "doc": 70,
+      "updated_at": "11-05 20:33"
+    },
+    "95893642826": {
+      "product_name": "구욘 오트밀쿠키 귀리 뮤즐리",
+      "option_name": "3개 230g",
+      "stock": 63,
+      "inbound": 0,
+      "sales_7d": 17,
+      "sales_30d": 35,
+      "doc": 42,
+      "updated_at": "11-05 20:33"
+    },
+    "95856228901": {
+      "product_name": "[햇올리브]테라찌노 라비앙콜릴라 올리브오일 250ml",
+      "option_name": "1개 250ml",
+      "stock": 61,
+      "inbound": 0,
+      "sales_7d": 2,
+      "sales_30d": 20,
+      "doc": 50,
+      "updated_at": "11-05 20:33"
+    },
+    "95849997062": {
+      "product_name": "[고항산화]엘레올로지 싱글버라이어티 올리브오일 500ml",
+      "option_name": "3개 500ml",
+      "stock": 52,
+      "inbound": 0,
+      "sales_7d": 0,
+      "sales_30d": 0,
+      "doc": 70,
+      "updated_at": "11-05 20:33"
+    },
+    "95856286079": {
+      "product_name": "[우리아이 첫 오일] 에코 정제 카놀라유",
+      "option_name": "2개 500ml",
+      "stock": 52,
+      "inbound": 0,
+      "sales_7d": 2,
+      "sales_30d": 4,
+      "doc": 59,
+      "updated_at": "11-05 20:33"
+    },
+    "95856264109": {
+      "product_name": "[우리아이 첫 오일]유기농 비정제 카놀라유 500ml",
+      "option_name": "2개 500ml",
+      "stock": 48,
+      "inbound": 0,
+      "sales_7d": 0,
+      "sales_30d": 4,
+      "doc": 70,
+      "updated_at": "11-05 20:33"
+    },
+    "95856264110": {
+      "product_name": "[우리아이 첫 오일]유기농 비정제 카놀라유 500ml",
+      "option_name": "3개 500ml",
+      "stock": 48,
+      "inbound": 0,
+      "sales_7d": 0,
+      "sales_30d": 0,
+      "doc": 69,
+      "updated_at": "11-05 20:33"
+    },
+    "95856286082": {
+      "product_name": "[우리아이 첫 오일] 에코 정제 카놀라유",
+      "option_name": "3개 500ml",
+      "stock": 48,
+      "inbound": 0,
+      "sales_7d": 0,
+      "sales_30d": 0,
+      "doc": 69,
+      "updated_at": "11-05 20:33"
+    },
+    "95849997061": {
+      "product_name": "[고항산화]엘레올로지 싱글버라이어티 올리브오일 500ml",
+      "option_name": "2개 500ml",
+      "stock": 33,
+      "inbound": 0,
+      "sales_7d": 1,
+      "sales_30d": 2,
+      "doc": 70,
+      "updated_at": "11-05 20:33"
+    },
+    "95893661912": {
+      "product_name": "구욘 초코칩 통밀쿠키",
+      "option_name": "3개 265g",
+      "stock": 18,
+      "inbound": 24,
+      "sales_7d": 22,
+      "sales_30d": 30,
+      "doc": 18,
+      "updated_at": "11-05 20:33"
+    },
+    "95856286080": {
+      "product_name": "[우리아이 첫 오일] 에코 정제 카놀라유",
+      "option_name": "2개 1L",
+      "stock": 17,
+      "inbound": 0,
+      "sales_7d": 7,
+      "sales_30d": 27,
+      "doc": 10,
+      "updated_at": "11-05 20:33"
+    },
+    "95856228900": {
+      "product_name": "[햇올리브]테라찌노 라비앙콜릴라 올리브오일 250ml",
+      "option_name": "2개 250ml",
+      "stock": 16,
+      "inbound": 0,
+      "sales_7d": 1,
+      "sales_30d": 21,
+      "doc": 16,
+      "updated_at": "11-05 20:33"
+    },
+    "95893640102": {
+      "product_name": "구욘 오트밀쿠키 귀리 오렌지",
+      "option_name": "3개 265g",
+      "stock": 16,
+      "inbound": 0,
+      "sales_7d": 36,
+      "sales_30d": 64,
+      "doc": 5,
+      "updated_at": "11-05 20:33"
+    },
+    "95856248617": {
+      "product_name": "[햇올리브]테라찌노 라노첼라라 올리브오일 500ml",
+      "option_name": "2개 500ml",
+      "stock": 15,
+      "inbound": 0,
+      "sales_7d": 10,
+      "sales_30d": 44,
+      "doc": 7,
+      "updated_at": "11-05 20:33"
+    },
+    "95893640100": {
+      "product_name": "구욘 오트밀쿠키 귀리 오렌지",
+      "option_name": "2개 265g",
+      "stock": 11,
+      "inbound": 0,
+      "sales_7d": 25,
+      "sales_30d": 63,
+      "doc": 2,
+      "updated_at": "11-05 20:33"
+    },
+    "95856228899": {
+      "product_name": "[햇올리브]테라찌노 라비앙콜릴라 올리브오일 250ml",
+      "option_name": "3개 250ml",
+      "stock": 1,
+      "inbound": 0,
+      "sales_7d": 1,
+      "sales_30d": 3,
+      "doc": 1,
+      "updated_at": "11-05 20:33"
+    },
+    "95893661910": {
+      "product_name": "구욘 초코칩 통밀쿠키",
+      "option_name": "2개 265g",
+      "stock": 0,
+      "inbound": 112,
+      "sales_7d": 56,
+      "sales_30d": 102,
+      "doc": 0,
+      "updated_at": "11-05 20:33"
+    }
+  },
+  "sales_inventory": {
+    "20EK03": {
+      "total_7d": 8,
+      "orders": [
+        {
+          "date": "2026-10-29 18:43:11",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 정제 500ml"
+        },
+        {
+          "date": "2026-10-29 17:36:47",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 정제 500ml"
+        },
+        {
+          "date": "2026-10-30 23:16:41",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 정제 500ml"
+        },
+        {
+          "date": "2026-11-01 11:33:07",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 정제 500ml"
+        },
+        {
+          "date": "2026-11-03 09:31:10",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 정제 500ml"
+        },
+        {
+          "date": "2026-11-03 15:02:18",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 정제 500ml"
+        },
+        {
+          "date": "2026-11-04 00:46:06",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 정제 500ml"
+        },
+        {
+          "date": "2026-11-04 11:11:10",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 정제 500ml"
+        }
+      ]
+    },
+    "20EK02": {
+      "total_7d": 4,
+      "orders": [
+        {
+          "date": "2026-10-30 13:41:40",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 정제 1L"
+        },
+        {
+          "date": "2026-11-01 10:03:53",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 정제 1L"
+        },
+        {
+          "date": "2026-11-02 21:49:14",
+          "qty": 2,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 정제 1L"
+        }
+      ]
+    },
+    "20EK01": {
+      "total_7d": 5,
+      "orders": [
+        {
+          "date": "2026-10-31 14:45:02",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 비정제 500ml"
+        },
+        {
+          "date": "2026-11-01 07:19:00",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 비정제 500ml"
+        },
+        {
+          "date": "2026-10-30 21:28:19",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 비정제 500ml"
+        },
+        {
+          "date": "2026-11-03 09:53:58",
+          "qty": 2,
+          "mall": "스마트스토어",
+          "name": "[오늘출발]유기농 NON GMO냉압착 에코ekko 카놀라유 발트해 청정농장 비정제 500ml"
+        }
+      ]
+    },
+    "30PM03": {
+      "total_7d": 2,
+      "orders": [
+        {
+          "date": "2026-11-01 14:21:46",
+          "qty": 2,
+          "mall": "스마트스토어",
+          "name": "피에몬테 유기농 사과식초 스틱 225ml (15g x 15ea) 애사비 이탈리아"
+        }
+      ]
+    },
+    "30DN07": {
+      "total_7d": 1,
+      "orders": [
+        {
+          "date": "2026-11-01 14:21:46",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "드니그리스 유기농 사과식초 허니 500ml 애플사이다비니거 애사비 이탈리아산"
+        }
+      ]
+    },
+    "20XO02": {
+      "total_7d": 4,
+      "orders": [
+        {
+          "date": "2026-10-31 05:14:51",
+          "qty": 3,
+          "mall": "스마트스토어",
+          "name": "팜투마켓 현미유 정제유 RICE BRAN OIL 500ml 오일풀링 몸에 좋은 기름 오일"
+        },
+        {
+          "date": "2026-11-02 22:50:39",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "팜투마켓 현미유 정제유 RICE BRAN OIL 500ml 오일풀링 몸에 좋은 기름 오일"
+        }
+      ]
+    },
+    "20XO01": {
+      "total_7d": 1,
+      "orders": [
+        {
+          "date": "2026-11-03 21:00:23",
+          "qty": 1,
+          "mall": "스마트스토어",
+          "name": "알티보 엑스트라 버진 올리브오일 1L 냉압착 저산도 스페인 산도 0.4 공복 샐러드"
+        }
+      ]
+    },
+    "80XP03": {
+      "total_7d": 2,
+      "orders": [
+        {
+          "date": "2026-11-04 19:11:14",
+          "qty": 2,
+          "mall": "스마트스토어",
+          "name": "위내추럴 피넛버터 475g 크런치 무설탕 무첨가 땅콩잼 땅콩소스 다이어트도움"
+        }
+      ]
+    },
+    "20EO02": {
+      "total_7d": 2,
+      "orders": [
+        {
+          "date": "2026-11-04 21:22:07",
+          "qty": 2,
+          "mall": "스마트스토어",
+          "name": "[고항산화]유기농 엑스트라버진 공복 올리브오일 엘레올로지 싱글버라이어티 500ml"
+        }
+      ]
+    }
+  },
+  "saved_at": "2026-11-05 20:33:55"
+}
