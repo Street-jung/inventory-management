@@ -714,6 +714,8 @@ def ensure_cloudflared_binary():
 
 def run_tunnel_thread(port=5000):
     global app_state
+    if sys.platform != 'win32' or os.environ.get("RENDER") or os.environ.get("RAILWAY_STATIC_URL"):
+        return
     exe = ensure_cloudflared_binary()
     if not exe or not os.path.exists(exe):
         return
@@ -1617,6 +1619,8 @@ HTML_TEMPLATE = """
 """
 
 def open_browser():
+    if os.environ.get("RENDER") or os.environ.get("RAILWAY_STATIC_URL") or os.environ.get("HEADLESS"):
+        return
     time.sleep(1.2)
     webbrowser.open("http://127.0.0.1:5000")
 
@@ -1633,4 +1637,5 @@ if __name__ == "__main__":
     threading.Thread(target=open_browser, daemon=True).start()
     
     # 플라스크 서버 구동
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
