@@ -120,8 +120,9 @@ def save_state():
 def allow_iframe_embedding(response):
     response.headers.pop("X-Frame-Options", None)
     response.headers["Content-Security-Policy"] = (
-        "frame-ancestors 'self' https://sites.google.com https://*.google.com http://localhost:* http://127.0.0.1:*"
+        "frame-ancestors * 'self' https://*.google.com https://*.googleusercontent.com https://*.usercontent.google.com https://sites.google.com"
     )
+    response.headers["Access-Control-Allow-Origin"] = "*"
     return response
 
 # -------------------------------------------------------------
