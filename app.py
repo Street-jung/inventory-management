@@ -764,17 +764,26 @@ HTML_TEMPLATE = """
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
-        body { font-family: 'Pretendard', sans-serif; }
+        html, body { 
+            font-family: 'Pretendard', sans-serif; 
+            overflow-x: hidden;
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f8fafc; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         .log-box::-webkit-scrollbar { width: 5px; }
         .log-box::-webkit-scrollbar-track { background: #0f172a; }
         .log-box::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
         .drag-col-over { border-left: 3px solid #059669 !important; background-color: #d1fae5 !important; }
         .drag-row-over { border-top: 3px solid #059669 !important; }
+        :fullscreen body { background-color: #f1f5f9; }
+        :-webkit-full-screen body { background-color: #f1f5f9; }
     </style>
 </head>
 <body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
 
-    <!-- 상단 헤더 (일쩜오도 BI 로고 적용) -->
+    <!-- 상단 헤더 (일쩜오도 BI 로고 적용 및 전체화면 컨트롤 추가) -->
     <header class="bg-slate-900 text-white shadow-md border-b border-slate-800 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
             <div class="flex items-center space-x-3">
@@ -792,6 +801,14 @@ HTML_TEMPLATE = """
             </div>
             
             <div class="flex items-center space-x-2">
+                <button onclick="toggleFullScreen()" id="fullscreenBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm" title="전체화면으로 시원하게 보기">
+                    <i class="fa-solid fa-expand" id="fullscreenIcon"></i>
+                    <span id="fullscreenText">전체화면</span>
+                </button>
+                <button onclick="openInNewTab()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm" title="새 탭에서 100% 꽉 차게 열기">
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                    <span>새 탭으로 열기</span>
+                </button>
                 <button onclick="loadSampleData()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm">
                     <i class="fa-solid fa-wand-magic-sparkles"></i>
                     <span>샘플 데이터 즉시 로드</span>
@@ -1608,6 +1625,59 @@ HTML_TEMPLATE = """
             return (text || '').replace(/[&<>"']/g, function(m) {
                 return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
             });
+        }
+
+        // 전체화면 토글 (HTML5 Fullscreen API + Fallback)
+        async function toggleFullScreen() {
+            try {
+                if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                    const elem = document.documentElement;
+                    if (elem.requestFullscreen) {
+                        await elem.requestFullscreen();
+                    } else if (elem.webkitRequestFullscreen) {
+                        await elem.webkitRequestFullscreen();
+                    } else if (elem.msRequestFullscreen) {
+                        await elem.msRequestFullscreen();
+                    }
+                } else {
+                    if (document.exitFullscreen) {
+                        await document.exitFullscreen();
+                    } else if (document.webkitExitFullscreen) {
+                        await document.webkitExitFullscreen();
+                    }
+                }
+            } catch (err) {
+                console.warn("구글 사이트 iframe sandbox 정책으로 전체화면이 차단되어 새 탭으로 엽니다:", err);
+                window.open(window.location.href, '_blank');
+            }
+        }
+
+        function updateFullscreenUI() {
+            const isFull = !!(document.fullscreenElement || document.webkitFullscreenElement);
+            const icon = document.getElementById('fullscreenIcon');
+            const text = document.getElementById('fullscreenText');
+            if (icon && text) {
+                if (isFull) {
+                    icon.className = 'fa-solid fa-compress';
+                    text.innerText = '화면 축소';
+                } else {
+                    icon.className = 'fa-solid fa-expand';
+                    text.innerText = '전체화면';
+                }
+            }
+        }
+
+        document.addEventListener('fullscreenchange', updateFullscreenUI);
+        document.addEventListener('webkitfullscreenchange', updateFullscreenUI);
+
+        function openInNewTab() {
+            window.open(window.location.href, '_blank');
+        }
+
+        // 구글 사이트 등 iframe 내부에 삽입된 경우 세로 공간 절약을 위해 상단 배너 자동 숨김
+        if (window.self !== window.top) {
+            const banner = document.getElementById('tunnelBanner');
+            if (banner) banner.classList.add('hidden');
         }
 
         // 초기화
