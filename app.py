@@ -46,7 +46,7 @@ def extract_expiry_date(text):
 
 # -------------------------------------------------------------
 # 세트/B2B 상품 실물 재고 연동 매핑 규칙
-# (기본 상품과 재고를 100% 공유하며, 판매 시 배수만큼 실물 소진)
+# (기본 단품과 재고를 공유하며, 주문 발생 시 배수만큼 단품 출고량에 합산)
 # -------------------------------------------------------------
 SHARED_STOCK_MAP = {
     "S100005": {"base_code": "10GL02", "multiplier": 12, "desc": "10GL02 12개 묶음 B2B"},
@@ -56,6 +56,25 @@ SHARED_STOCK_MAP = {
     "S200018": {"base_code": "20TZ01", "multiplier": 2, "desc": "20TZ01 2병 선물세트"},
     "S200019": {"base_code": "20EO02", "multiplier": 2, "desc": "20EO02 2병 선물세트"},
 }
+
+# 단품 기준 연동된 B2B/세트(S코드) 역방향 매핑 딕셔너리
+BASE_TO_SHARED_MAP = {}
+for s_code, info in SHARED_STOCK_MAP.items():
+    b_code = info["base_code"]
+    if b_code not in BASE_TO_SHARED_MAP:
+        BASE_TO_SHARED_MAP[b_code] = []
+    BASE_TO_SHARED_MAP[b_code].append({
+        "s_code": s_code,
+        "multiplier": info["multiplier"],
+        "desc": info["desc"]
+    })
+
+def is_s_product_code(code):
+    """관리코드에 S가 붙은 상품 또는 SHARED_STOCK_MAP에 등록된 세트/B2B 상품 판별"""
+    if not code:
+        return False
+    c = str(code).strip().upper()
+    return c.startswith("S") or c in SHARED_STOCK_MAP
 
 def get_initial_master_products():
     if os.path.exists(DATA_FILE):
@@ -529,7 +548,56 @@ def get_summary():
             "recent_orders": recent_orders
         }
 
-    # 2차 패스: 44개 전체 상품의 최종 지표 종합 (세트/B2B 상품은 기본 상품과 재고 100% 일치)
+    # 1-1. B2B/세트(S코드) 주문 데이터를 연동 단품(base_code) 출고량에 자동 가산 합산
+    # S코드 상품은 재고현황판 화면 노출에서는 제외되지만, 주문 데이터는 단품 출고량에 배수만큼 반영
+    for s_code, s_info in SHARED_STOCK_MAP.items():
+        base_code = s_info["base_code"]
+        mult = s_info["multiplier"]
+
+        # S코드의 타채널 주문 (sales_inventory)
+        s_sales = sales.get(s_code, {})
+        s_7d = s_sales.get("total_7d", 0)
+        s_30d = s_sales.get("total_30d", s_7d)
+        s_orders = s_sales.get("orders", [])
+
+        # S코드의 쿠팡 출고량이 혹시 등록되어 있다면 확인
+        s_c_calc = base_calc_map.get(s_code, {})
+        s_c_7d = s_c_calc.get("coupang_sales_7d", 0)
+        s_c_30d = s_c_calc.get("coupang_sales_30d", 0)
+
+        if base_code in base_calc_map:
+            target = base_calc_map[base_code]
+            if "b2b_shared_sales" not in target:
+                target["b2b_shared_sales"] = []
+
+            # 실물 수량으로 환산하여 단품 출고량에 가산
+            if s_7d > 0 or s_30d > 0 or s_orders or s_c_7d > 0 or s_c_30d > 0:
+                target["other_sales_7d"] += (s_7d * mult)
+                target["other_sales_30d"] += (s_30d * mult)
+                target["coupang_sales_7d"] += (s_c_7d * mult)
+                target["coupang_sales_30d"] += (s_c_30d * mult)
+
+                for ord_item in s_orders:
+                    target["recent_orders"].append({
+                        "date": ord_item.get("date", ""),
+                        "qty": ord_item.get("qty", 0) * mult,
+                        "mall": f"{ord_item.get('mall', '타채널')} ({s_code} x{mult})",
+                        "name": ord_item.get("name", "")
+                    })
+
+                target["b2b_shared_sales"].append({
+                    "s_code": s_code,
+                    "multiplier": mult,
+                    "desc": s_info["desc"],
+                    "orders_count": len(s_orders),
+                    "sales_7d": s_7d * mult,
+                    "sales_30d": s_30d * mult
+                })
+
+    # 2차 패스: 단품(Single Product) 기준 최종 지표 종합 (S가 붙은 세트/B2B 상품은 화면 표시 제외)
+    # S코드 상품들은 위에서 연동 단품의 출고량에 모두 반영 완료됨!
+    single_master_list = [m for m in master_list if not is_s_product_code(m.get("seller_code", m.get("id", "")))]
+
     master_summaries = []
     total_gaemi_stock = 0
     total_coupang_stock = 0
@@ -547,63 +615,34 @@ def get_summary():
     expiry_warning_count = 0     # ⏳ 소비기한 주의 (120일 미만 or 미소진 위험)
     safe_count = 0               # 🟢 정상 안전
 
-    for m in master_list:
+    for m in single_master_list:
         seller_code = m.get("seller_code", m.get("id", "")).strip()
         norm_code = seller_code.upper()
         product_type = m.get("product_type", "사입").strip() or "사입"
         note = m.get("note", "").strip()
 
         calc = base_calc_map.get(norm_code, {})
-        is_shared = norm_code in SHARED_STOCK_MAP
-        shared_info = SHARED_STOCK_MAP.get(norm_code)
 
-        if is_shared:
-            base_code = shared_info["base_code"]
-            mult = shared_info["multiplier"]
-            base_calc = base_calc_map.get(base_code, {})
+        g_total = calc.get("gaemi_total", 0)
+        g_details = calc.get("gaemi_details", "")
+        gaemi_lots = calc.get("gaemi_lots", [])
+        nearest_expiry_date = calc.get("nearest_expiry_date", "")
+        nearest_days_left = calc.get("nearest_days_left")
+        nearest_lot_stock = calc.get("nearest_lot_stock", 0)
+        is_mixed_lots = calc.get("is_mixed_lots", False)
+        lot_count = calc.get("lot_count", 0)
 
-            # 1. 재고 및 소비기한 로트는 기본 상품과 100% 동일하게 공유!
-            g_total = base_calc.get("gaemi_total", 0)
-            g_details = base_calc.get("gaemi_details", "")
-            gaemi_lots = base_calc.get("gaemi_lots", [])
-            nearest_expiry_date = base_calc.get("nearest_expiry_date", "")
-            nearest_days_left = base_calc.get("nearest_days_left")
-            nearest_lot_stock = base_calc.get("nearest_lot_stock", 0)
-            is_mixed_lots = base_calc.get("is_mixed_lots", False)
-            lot_count = base_calc.get("lot_count", 0)
-
-            c_package_total = base_calc.get("coupang_package_total", 0)
-            c_physical_total = base_calc.get("coupang_physical_total", 0)
-            master_physical_total = base_calc.get("master_physical_total", 0)
-            option_details = base_calc.get("options", [])
-
-            # 2. B2B/세트 판매량: 해당 세트 주문 1건당 mult(12개/2개) 실물 소진 반영
-            raw_orders_7d = calc.get("raw_other_orders_7d", 0)
-            raw_orders_30d = calc.get("raw_other_orders_30d", raw_orders_7d)
-            other_sales_7d = raw_orders_7d * mult
-            other_sales_30d = raw_orders_30d * mult
-            c_sales_7d = 0
-            c_sales_30d = 0
-            recent_orders = calc.get("recent_orders", [])
-        else:
-            g_total = calc.get("gaemi_total", 0)
-            g_details = calc.get("gaemi_details", "")
-            gaemi_lots = calc.get("gaemi_lots", [])
-            nearest_expiry_date = calc.get("nearest_expiry_date", "")
-            nearest_days_left = calc.get("nearest_days_left")
-            nearest_lot_stock = calc.get("nearest_lot_stock", 0)
-            is_mixed_lots = calc.get("is_mixed_lots", False)
-            lot_count = calc.get("lot_count", 0)
-
-            c_package_total = calc.get("coupang_package_total", 0)
-            c_physical_total = calc.get("coupang_physical_total", 0)
-            master_physical_total = calc.get("master_physical_total", 0)
-            option_details = calc.get("options", [])
-            c_sales_7d = calc.get("coupang_sales_7d", 0)
-            c_sales_30d = calc.get("coupang_sales_30d", 0)
-            other_sales_7d = calc.get("other_sales_7d", 0)
-            other_sales_30d = calc.get("other_sales_30d", 0)
-            recent_orders = calc.get("recent_orders", [])
+        c_package_total = calc.get("coupang_package_total", 0)
+        c_physical_total = calc.get("coupang_physical_total", 0)
+        master_physical_total = calc.get("master_physical_total", 0)
+        option_details = calc.get("options", [])
+        c_sales_7d = calc.get("coupang_sales_7d", 0)
+        c_sales_30d = calc.get("coupang_sales_30d", 0)
+        other_sales_7d = calc.get("other_sales_7d", 0)
+        other_sales_30d = calc.get("other_sales_30d", 0)
+        recent_orders = calc.get("recent_orders", [])
+        b2b_shared_sales = calc.get("b2b_shared_sales", [])
+        b2b_linked_codes = BASE_TO_SHARED_MAP.get(norm_code, [])
 
         # 3. 7일 및 30일 총 출고량 합산
         m_sales_7d = c_sales_7d + other_sales_7d
@@ -633,11 +672,10 @@ def get_summary():
         # 4-3. 전체 종합 일평균 출고량 (Daily Sales)
         daily_sales = round(coupang_daily + other_daily, 2)
 
-        # 전체 통계 합산 (공유 재고 중복 집계 방지: 고유 실물 재고만 합산)
-        if not is_shared:
-            total_gaemi_stock += g_total
-            total_coupang_stock += c_physical_total
-            total_physical_stock += master_physical_total
+        # 전체 통계 합산 (모두 단품이므로 실물 중복 없이 합산)
+        total_gaemi_stock += g_total
+        total_coupang_stock += c_physical_total
+        total_physical_stock += master_physical_total
 
         total_coupang_7d += c_sales_7d
         total_coupang_30d += c_sales_30d
@@ -779,9 +817,10 @@ def get_summary():
             "name": m.get("name", ""),
             "product_type": product_type,
             "note": note,
-            "is_shared": is_shared,
-            "shared_base": shared_info["base_code"] if is_shared else None,
-            "shared_mult": shared_info["multiplier"] if is_shared else None,
+            "is_shared": False,
+            "has_b2b_set": (norm_code in BASE_TO_SHARED_MAP),
+            "b2b_linked_codes": b2b_linked_codes,
+            "b2b_shared_sales": b2b_shared_sales,
             "category": m.get("category", "기타"),
             "gaemi_codes": m.get("gaemi_codes", []),
             "gaemi_total": g_total,
@@ -834,7 +873,7 @@ def get_summary():
     return jsonify({
         "masters": master_summaries,
         "stats": {
-            "total_masters": len(master_list),
+            "total_masters": len(master_summaries),
             "total_gaemi_stock": total_gaemi_stock,
             "total_coupang_stock": total_coupang_stock,
             "total_physical_stock": total_physical_stock,
@@ -1211,9 +1250,9 @@ HTML_TEMPLATE = """
         <div class="bg-white rounded-xl shadow-xs border border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
             <div class="flex flex-wrap items-center gap-4 text-slate-600">
                 <div class="flex items-center space-x-1.5">
-                    <span class="font-bold text-slate-900">관리 대상:</span>
-                    <span id="statTotalMasters" class="font-bold text-indigo-700">44개</span>
-                    <span class="text-slate-400 text-[11px]">(수입 17 / 사입 27)</span>
+                    <span class="font-bold text-slate-900">단품 품목:</span>
+                    <span id="statTotalMasters" class="font-bold text-indigo-700">38개</span>
+                    <span id="statMasterSubtext" class="text-slate-400 text-[11px]">(수입 11 / 사입 27)</span>
                 </div>
                 <span class="text-slate-300">|</span>
                 <div class="flex items-center space-x-1.5">
@@ -1247,8 +1286,8 @@ HTML_TEMPLATE = """
                 <div class="flex flex-wrap items-center justify-between gap-3">
                     <div class="flex items-center space-x-2">
                         <span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block animate-ping"></span>
-                        <h2 class="font-bold text-slate-900 text-sm">일쩜오도 마스터 상품 재고 & 발주 의사결정 보드</h2>
-                        <span id="filteredCountText" class="text-xs text-slate-400 font-normal">| 총 44개 상품</span>
+                        <h2 class="font-bold text-slate-900 text-sm">일쩜오도 단품 재고 & 발주 의사결정 보드</h2>
+                        <span id="filteredCountText" class="text-xs text-slate-400 font-normal">| 총 38개 단품</span>
                         <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono border border-slate-200">
                             <i class="fa-solid fa-grip mr-1 text-slate-400"></i>열 헤더 드래그로 순서 변경 가능
                         </span>
@@ -1278,9 +1317,9 @@ HTML_TEMPLATE = """
                 <!-- 카테고리 및 상태 필터 탭 -->
                 <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-slate-100 text-xs">
                     <div class="flex flex-wrap items-center gap-1.5" id="categoryPills">
-                        <button onclick="setCategoryFilter('all')" class="category-pill active px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-800 text-white">전체 (44)</button>
-                        <button onclick="setCategoryFilter('수입')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-purple-100 text-purple-900 border border-purple-200 hover:bg-purple-200">🚢 수입제품 (17)</button>
-                        <button onclick="setCategoryFilter('사입')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-blue-100 text-blue-900 border border-blue-200 hover:bg-blue-200">📦 사입제품 (27)</button>
+                        <button onclick="setCategoryFilter('all')" class="category-pill active px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-800 text-white">전체 (<span id="catCountAll">38</span>)</button>
+                        <button onclick="setCategoryFilter('수입')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-purple-100 text-purple-900 border border-purple-200 hover:bg-purple-200">🚢 수입제품 (<span id="catCountImport">11</span>)</button>
+                        <button onclick="setCategoryFilter('사입')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-blue-100 text-blue-900 border border-blue-200 hover:bg-blue-200">📦 사입제품 (<span id="catCountPurchase">27</span>)</button>
                         <button onclick="setCategoryFilter('오일/식용유')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">오일/식용유</button>
                         <button onclick="setCategoryFilter('파스타')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">파스타</button>
                         <button onclick="setCategoryFilter('식초/애사비')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">식초/애사비</button>
@@ -1700,8 +1739,19 @@ HTML_TEMPLATE = """
                 document.getElementById('statExpiryWarning').innerText = (data.stats.expiry_warning_count || 0);
                 document.getElementById('statSafeStock').innerText = (data.stats.safe_count || 0);
 
-                // 3. 재고 요약 바 갱신
-                document.getElementById('statTotalMasters').innerText = data.stats.total_masters + '개';
+                // 3. 재고 요약 바 및 카테고리별 단품 수 갱신
+                const totalMasters = data.stats.total_masters || allMasterData.length;
+                const importCount = allMasterData.filter(m => m.product_type === '수입').length;
+                const purchaseCount = allMasterData.filter(m => m.product_type === '사입').length;
+
+                document.getElementById('statTotalMasters').innerText = totalMasters + '개';
+                if (document.getElementById('statMasterSubtext')) {
+                    document.getElementById('statMasterSubtext').innerText = `(수입 ${importCount} / 사입 ${purchaseCount})`;
+                }
+                if (document.getElementById('catCountAll')) document.getElementById('catCountAll').innerText = totalMasters;
+                if (document.getElementById('catCountImport')) document.getElementById('catCountImport').innerText = importCount;
+                if (document.getElementById('catCountPurchase')) document.getElementById('catCountPurchase').innerText = purchaseCount;
+
                 document.getElementById('statGaemiStock').innerText = data.stats.total_gaemi_stock.toLocaleString() + '개';
                 document.getElementById('statCoupangStock').innerText = data.stats.total_coupang_stock.toLocaleString() + '개';
                 document.getElementById('statTotalStock').innerText = data.stats.total_physical_stock.toLocaleString() + '개';
@@ -1781,7 +1831,7 @@ HTML_TEMPLATE = """
                 return true;
             });
 
-            document.getElementById('filteredCountText').innerText = `| ${filtered.length}개 상품 표시 (총 ${allMasterData.length}개)`;
+            document.getElementById('filteredCountText').innerText = `| ${filtered.length}개 단품 표시 (총 ${allMasterData.length}개)`;
 
             if (filtered.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="${currentColumnOrder.length}" class="py-12 text-center text-slate-400">선택하신 조건에 일치하는 품목이 없습니다.</td></tr>`;
@@ -1789,7 +1839,7 @@ HTML_TEMPLATE = """
                 return;
             }
 
-            // 합계 계산 (실물 재고는 공유 재고 품목 제외 합산하여 실물 중복 방지)
+            // 합계 계산 (모두 단품이므로 실물 중복 없이 계산)
             let sumTotalStock = 0;
             let sumGaemiStock = 0;
             let sumCoupangStock = 0;
@@ -1803,11 +1853,9 @@ HTML_TEMPLATE = """
 
             let html = "";
             filtered.forEach((m, idx) => {
-                if (!m.is_shared) {
-                    sumTotalStock += m.master_physical_total;
-                    sumGaemiStock += m.gaemi_total;
-                    sumCoupangStock += m.coupang_physical_total;
-                }
+                sumTotalStock += m.master_physical_total;
+                sumGaemiStock += m.gaemi_total;
+                sumCoupangStock += m.coupang_physical_total;
                 sumCoupangSales += m.coupang_sales_7d;
                 sumCoupangSales30d += (m.coupang_sales_30d || 0);
                 sumOtherSales += m.other_sales_7d;
@@ -1827,8 +1875,8 @@ HTML_TEMPLATE = """
                     ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-200">수입</span>'
                     : '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">사입</span>';
 
-                let sharedBadge = m.is_shared 
-                    ? `<span class="px-1 py-0.2 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 ml-1" title="${m.shared_base} 실물재고와 연동됨 (${m.shared_mult}개 묶음)">${m.shared_base} 연동(x${m.shared_mult})</span>` 
+                let b2bBadge = (m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0)
+                    ? `<span class="px-1 py-0.2 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 ml-1" title="B2B/세트 출고 연동: ${m.b2b_linked_codes.map(b => b.s_code + ' (x' + b.multiplier + ')').join(', ')}">B2B연동</span>`
                     : '';
 
                 // 개미 소비기한 미니 태그
@@ -1876,7 +1924,7 @@ HTML_TEMPLATE = """
                     } else if (colId === 'type') {
                         html += `<td class="${col.tdClass}">${ptypeBadge}</td>`;
                     } else if (colId === 'code') {
-                        html += `<td class="${col.tdClass}">${escapeHtml(m.seller_code)}${sharedBadge}</td>`;
+                        html += `<td class="${col.tdClass}">${escapeHtml(m.seller_code)}${b2bBadge}</td>`;
                     } else if (colId === 'name') {
                         html += `
                             <td class="${col.tdClass}">
@@ -2016,19 +2064,25 @@ HTML_TEMPLATE = """
                                     </div>
                                 ` : ''}
 
-                                <!-- 2. 실물 재고 연동 안내 바 -->
-                                ${m.is_shared ? `
-                                    <div class="bg-indigo-50/70 rounded-lg border border-indigo-200 p-2 text-[11px] text-indigo-900 flex items-center justify-between">
+                                <!-- 2. B2B/세트(S코드) 출고 연동 안내 바 -->
+                                ${m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0 ? `
+                                    <div class="bg-indigo-50/70 rounded-lg border border-indigo-200 p-2.5 text-[11px] text-indigo-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                                         <div class="flex items-center space-x-1.5">
-                                            <i class="fa-solid fa-link text-indigo-600"></i>
-                                            <span class="font-bold">실물 재고 연동 상품:</span>
-                                            <span>이 상품은 <strong>${m.shared_base}</strong> 제품이 <strong>${m.shared_mult}개</strong> 묶인 상품으로, 창고 실물 재고 및 소비기한을 기본 상품과 100% 공유합니다.</span>
+                                            <i class="fa-solid fa-boxes-stacked text-indigo-600"></i>
+                                            <span class="font-bold">B2B/세트(S코드) 출고 연동:</span>
+                                            <span>이 단품은 <strong>${m.b2b_linked_codes.map(b => `${b.s_code} (${b.desc})`).join(', ')}</strong> 주문 시 개미창고 실물 재고에서 차감되며, 출고량(7일/30일) 및 런웨이에 자동 환산 합산되어 있습니다.</span>
                                         </div>
-                                        <span class="text-[10px] bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded font-bold">주문 1건 = 실물 ${m.shared_mult}개 차감</span>
+                                        ${m.b2b_shared_sales && m.b2b_shared_sales.length > 0 ? `
+                                            <span class="text-[10px] bg-indigo-100 text-indigo-800 font-semibold px-2 py-0.5 rounded border border-indigo-200 whitespace-nowrap">
+                                                B2B 출고량: 7일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_7d, 0)}개 / 30일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_30d, 0)}개
+                                            </span>
+                                        ` : `
+                                            <span class="text-[10px] text-slate-400 font-normal whitespace-nowrap">최근 S코드 주문 없음</span>
+                                        `}
                                     </div>
                                 ` : ''}
 
-                                ${m.note && !m.is_shared ? `
+                                ${m.note ? `
                                     <div class="bg-purple-50/50 rounded border border-purple-200 p-2 text-[11px] text-purple-900">
                                         <i class="fa-solid fa-circle-info mr-1 text-purple-600"></i>
                                         <span class="font-bold">제품 참고사항:</span> ${escapeHtml(m.note)}
@@ -2095,9 +2149,9 @@ HTML_TEMPLATE = """
                 } else if (colId === 'status') {
                     footHtml += `<td class="py-2.5 px-3 text-center text-[11px] font-bold text-slate-600">위험도 정렬</td>`;
                 } else if (colId === 'name') {
-                    footHtml += `<td class="py-2.5 px-3 text-left font-black text-slate-900">총 ${filtered.length}개 품목 (실물 합계)</td>`;
+                    footHtml += `<td class="py-2.5 px-3 text-left font-black text-slate-900">총 ${filtered.length}개 단품 (실물 합계)</td>`;
                 } else if (colId === 'total_stock') {
-                    footHtml += `<td class="py-2.5 px-3 text-right font-black text-emerald-800 text-xs bg-emerald-100/60" title="공유 세트 중복 제외 실물 기준 합계">${sumTotalStock.toLocaleString()}</td>`;
+                    footHtml += `<td class="py-2.5 px-3 text-right font-black text-emerald-800 text-xs bg-emerald-100/60" title="단품 실물 기준 합계">${sumTotalStock.toLocaleString()}</td>`;
                 } else if (colId === 'gaemi_stock') {
                     footHtml += `<td class="py-2.5 px-3 text-right font-black text-amber-800 text-xs bg-amber-100/60">${sumGaemiStock.toLocaleString()}</td>`;
                 } else if (colId === 'gaemi_runway') {

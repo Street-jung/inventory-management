@@ -23,14 +23,18 @@ class TestIljeomodoAppEndpoints(unittest.TestCase):
         print("OK: [Endpoint Test 1] 일쩜오도 재고현황 메인 HTML 정상 응답")
 
     def test_02_summary_api(self):
-        """통합 집계 API 검증 (44개 마스터 상품)"""
+        """통합 집계 API 검증 (38개 단품 마스터 상품, S-코드 세트 상품 제외 확인)"""
         res = self.client.get('/api/summary')
         self.assertEqual(res.status_code, 200)
         data = json.loads(res.data)
         self.assertIn("masters", data)
         self.assertIn("stats", data)
-        self.assertEqual(data["stats"]["total_masters"], 44)
-        print(f"OK: [Endpoint Test 2] 44대 마스터 상품 집계 API 검증 성공")
+        self.assertEqual(data["stats"]["total_masters"], 38)
+        self.assertEqual(len(data["masters"]), 38)
+        # S-코드 상품이 목록에서 제외되었는지 확인
+        s_codes = [m["seller_code"] for m in data["masters"] if m["seller_code"].startswith("S")]
+        self.assertEqual(len(s_codes), 0)
+        print(f"OK: [Endpoint Test 2] 38대 단품 마스터 상품 집계 API 검증 성공 (S-코드 제외 확인)")
 
     def test_03_load_sample_endpoint(self):
         """원클릭 샘플 데이터 로드 API 검증"""

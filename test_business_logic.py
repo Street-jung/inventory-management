@@ -10,7 +10,7 @@ if sys.platform == 'win32':
 import unittest
 import json
 import csv
-from app import app, parse_gaemi_rows, parse_coupang_rows, parse_sales_rows
+from app import app, parse_gaemi_rows, parse_coupang_rows, parse_sales_rows, data_lock, app_state
 
 class TestIljeomodoBusinessLogic(unittest.TestCase):
     def setUp(self):
@@ -89,8 +89,8 @@ class TestIljeomodoBusinessLogic(unittest.TestCase):
         self.assertEqual(sum_res.status_code, 200)
         data = json.loads(sum_res.data)
 
-        # 44개 마스터 상품 확인
-        self.assertEqual(data["stats"]["total_masters"], 44)
+        # 38개 단품 마스터 상품 확인
+        self.assertEqual(data["stats"]["total_masters"], 38)
         
         # 5대 Action KPI 카운터 검증
         self.assertIn("urgent_order_count", data["stats"])
@@ -107,35 +107,43 @@ class TestIljeomodoBusinessLogic(unittest.TestCase):
         self.assertEqual(p_choco["action_cta"], "🚨 수입 발주 기안")
         print(f"OK: [Test 6] 발주 의사결정 액션보드 지표 검증 성공: {p_choco['name']} -> {p_choco['status']} ({p_choco['action_cta']})")
 
-    def test_07_shared_stock_synchronization(self):
-        """B2B/세트 상품(S100005 등)과 기본 상품(10GL02 등) 실물 재고 100% 일치 및 독립 DOC 검증"""
+    def test_07_b2b_set_products_excluded_and_sales_aggregated(self):
+        """B2B/세트 상품(S코드)은 화면 표시 제외되고, 주문 수량이 단품(10GL02 등) 출고량에 배수만큼 정확히 합산되는지 검증"""
         self.client.post('/api/load-sample')
         sum_res = self.client.get('/api/summary')
         data = json.loads(sum_res.data)
-        m_map = {m["seller_code"]: m for m in data["masters"]}
+        masters = data["masters"]
+        seller_codes = [m["seller_code"] for m in masters]
 
-        # 1. 재고 일치 쌍 검증
-        shared_pairs = [
-            ("10GL02", "S100005", 12),
-            ("10GL04", "S100009", 12),
-            ("10GL05", "S100011", 12),
-            ("10GL06", "S100033", 12),
-            ("20TZ01", "S200018", 2),
-            ("20EO02", "S200019", 2),
-        ]
+        # 1. 재고현황판(masters)에 S코드 상품들이 완전히 제외되었는지 확인
+        s_codes = ["S100005", "S100009", "S100011", "S100033", "S200018", "S200019"]
+        for s_code in s_codes:
+            self.assertNotIn(s_code, seller_codes, f"S-코드 {s_code}가 재고현황판 목록에 노출되고 있습니다.")
 
-        for base_code, set_code, mult in shared_pairs:
-            base_item = m_map[base_code]
-            set_item = m_map[set_code]
-            # 실물 총 재고 완전 일치
-            self.assertEqual(base_item["master_physical_total"], set_item["master_physical_total"])
-            self.assertEqual(base_item["gaemi_total"], set_item["gaemi_total"])
-            self.assertEqual(base_item["coupang_physical_total"], set_item["coupang_physical_total"])
-            # 배수 정보 설정 확인
-            self.assertTrue(set_item["is_shared"])
-            self.assertEqual(set_item["shared_mult"], mult)
+        # 2. S100005(12개 묶음) 주문 발생 시 단품 10GL02 출고량에 배수(x12) 가산 검증
+        mock_sales = {
+            "S100005": {
+                "total_7d": 2,
+                "total_30d": 5,
+                "orders": [{"date": "2026-11-04 10:00:00", "qty": 2, "mall": "스마트스토어", "name": "B2B세트"}]
+            }
+        }
+        with data_lock:
+            app_state["sales_inventory"]["S100005"] = mock_sales["S100005"]
 
-        print("OK: [Test 7] B2B/세트 상품(6종) 기본 상품과 창고 실물 재고 100% 일치 검증 완료")
+        sum_res_after = self.client.get('/api/summary')
+        data_after = json.loads(sum_res_after.data)
+        item_10gl02 = next((m for m in data_after["masters"] if m["seller_code"] == "10GL02"), None)
+        self.assertIsNotNone(item_10gl02)
+        # S100005 7일 2건 * 12 = 24개, 30일 5건 * 12 = 60개 반영 확인
+        self.assertGreaterEqual(item_10gl02["other_sales_7d"], 24)
+        self.assertGreaterEqual(item_10gl02["total_sales_30d"], 60)
+        self.assertTrue(item_10gl02["has_b2b_set"])
+        self.assertEqual(len(item_10gl02["b2b_shared_sales"]), 1)
+        self.assertEqual(item_10gl02["b2b_shared_sales"][0]["s_code"], "S100005")
+        self.assertEqual(item_10gl02["b2b_shared_sales"][0]["sales_7d"], 24)
+
+        print("OK: [Test 7] B2B/세트(S코드) 화면 제외 및 단품(10GL02) 출고량 배수(x12) 합산 검증 완료")
 
     def test_08_export_master_csv(self):
         """액션 리포트 CSV 생성 검증 및 비고 컬럼 제외 확인"""
