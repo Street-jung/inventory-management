@@ -18,7 +18,7 @@ import io
 import re
 import threading
 import webbrowser
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from flask import Flask, render_template_string, request, jsonify, Response, send_file
 
 app = Flask(__name__)
@@ -285,12 +285,30 @@ def parse_coupang_rows(rows):
     return coupang_dict
 
 # -------------------------------------------------------------
-# 파서 3: 쿠팡외 통합 매출 데이터 CSV 파서
+# 파서 3: 쿠팡외 통합 매출 데이터 CSV 파서 (7일 & 30일 분리 집계)
 # -------------------------------------------------------------
+def parse_order_datetime(date_str):
+    if not date_str:
+        return None
+    s = str(date_str).strip()
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y.%m.%d %H:%M:%S', '%Y.%m.%d', '%Y/%m/%d %H:%M:%S', '%Y/%m/%d'):
+        try:
+            return datetime.strptime(s, fmt)
+        except Exception:
+            pass
+    m = re.search(r'(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})', s)
+    if m:
+        try:
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except Exception:
+            pass
+    return None
+
 def parse_sales_rows(rows):
     """
     매출정보 CSV:
     주문일, 묶음번호, 쇼핑몰, 온라인상품명, 주문수량, 금액, 할인금액, 배송비, 실결제금액, 수령자명, 배송완료일, 세트코드, 판매자관리코드
+    현재로부터 30일간의 주문 데이터에서 최신 주문일 기준 직전 7일 출고량과 30일 전체 출고량을 분리 산출
     """
     if not rows or len(rows) < 2:
         return {}
@@ -315,32 +333,63 @@ def parse_sales_rows(rows):
     if col_code == -1:
         col_code = len(headers) - 1
 
-    sales_dict = {}
+    parsed_entries = []
+    valid_dates = []
+
     for r in rows[header_idx + 1:]:
         if len(r) <= max(col_code, col_qty):
             continue
         code = str(r[col_code]).strip().upper()
+        if not code or code == "판매자관리코드":
+            continue
         name = str(r[col_name]).strip() if len(r) > col_name else ""
         mall = str(r[col_mall]).strip() if len(r) > col_mall else ""
         date_s = str(r[col_date]).strip() if len(r) > col_date else ""
         qty_s = str(r[col_qty]).replace(",", "").strip()
         qty = int(qty_s) if qty_s.isdigit() else 0
 
-        if not code:
-            continue
+        dt = parse_order_datetime(date_s)
+        if dt:
+            valid_dates.append(dt)
+
+        parsed_entries.append({
+            "code": code,
+            "name": name,
+            "mall": mall,
+            "date_s": date_s,
+            "dt": dt,
+            "qty": qty
+        })
+
+    # 최신 주문일 기준 최근 7일 컷오프 (기준 시점)
+    max_dt = max(valid_dates) if valid_dates else datetime.now()
+    cutoff_7d = max_dt - timedelta(days=7)
+
+    sales_dict = {}
+    for entry in parsed_entries:
+        code = entry["code"]
+        qty = entry["qty"]
+        dt = entry["dt"]
 
         if code not in sales_dict:
             sales_dict[code] = {
                 "total_7d": 0,
+                "total_30d": 0,
                 "orders": []
             }
 
-        sales_dict[code]["total_7d"] += qty
+        # 30일 전체 출고량 합산
+        sales_dict[code]["total_30d"] += qty
+
+        # 직전 7일 출고량 합산
+        if dt is None or dt >= cutoff_7d:
+            sales_dict[code]["total_7d"] += qty
+
         sales_dict[code]["orders"].append({
-            "date": date_s,
+            "date": entry["date_s"],
             "qty": qty,
-            "mall": mall,
-            "name": name
+            "mall": entry["mall"],
+            "name": entry["name"]
         })
 
     return sales_dict
@@ -453,8 +502,9 @@ def get_summary():
                 "doc": doc
             })
 
-        s_data = sales.get(norm_code, {"total_7d": 0, "orders": []})
-        raw_other_sales = s_data.get("total_7d", 0)
+        s_data = sales.get(norm_code, {"total_7d": 0, "total_30d": 0, "orders": []})
+        raw_other_sales_7d = s_data.get("total_7d", 0)
+        raw_other_sales_30d = s_data.get("total_30d", raw_other_sales_7d)
         recent_orders = s_data.get("orders", [])[:5]
 
         base_calc_map[norm_code] = {
@@ -470,8 +520,11 @@ def get_summary():
             "coupang_physical_total": c_physical_total,
             "master_physical_total": g_total + c_physical_total,
             "coupang_sales_7d": c_sales_7d_total,
-            "other_sales_7d": raw_other_sales,
-            "raw_other_orders": raw_other_sales,
+            "coupang_sales_30d": c_sales_30d_total,
+            "other_sales_7d": raw_other_sales_7d,
+            "other_sales_30d": raw_other_sales_30d,
+            "raw_other_orders_7d": raw_other_sales_7d,
+            "raw_other_orders_30d": raw_other_sales_30d,
             "options": option_details,
             "recent_orders": recent_orders
         }
@@ -482,8 +535,11 @@ def get_summary():
     total_coupang_stock = 0
     total_physical_stock = 0
     total_coupang_7d = 0
+    total_coupang_30d = 0
     total_other_7d = 0
+    total_other_30d = 0
     total_sales_7d = 0
+    total_sales_30d = 0
 
     urgent_order_count = 0       # 🔴 긴급 발주 (110일 미만 / 결품)
     order_prepare_count = 0      # 🟡 발주 준비 (110일~130일 안전재고 버퍼)
@@ -522,9 +578,12 @@ def get_summary():
             option_details = base_calc.get("options", [])
 
             # 2. B2B/세트 판매량: 해당 세트 주문 1건당 mult(12개/2개) 실물 소진 반영
-            raw_orders = calc.get("raw_other_orders", 0)
-            other_sales_7d = raw_orders * mult
+            raw_orders_7d = calc.get("raw_other_orders_7d", 0)
+            raw_orders_30d = calc.get("raw_other_orders_30d", raw_orders_7d)
+            other_sales_7d = raw_orders_7d * mult
+            other_sales_30d = raw_orders_30d * mult
             c_sales_7d = 0
+            c_sales_30d = 0
             recent_orders = calc.get("recent_orders", [])
         else:
             g_total = calc.get("gaemi_total", 0)
@@ -541,13 +600,38 @@ def get_summary():
             master_physical_total = calc.get("master_physical_total", 0)
             option_details = calc.get("options", [])
             c_sales_7d = calc.get("coupang_sales_7d", 0)
+            c_sales_30d = calc.get("coupang_sales_30d", 0)
             other_sales_7d = calc.get("other_sales_7d", 0)
+            other_sales_30d = calc.get("other_sales_30d", 0)
             recent_orders = calc.get("recent_orders", [])
 
-        # 3. 7일 총 출고량 및 창고별 일평균 출고량 산출
+        # 3. 7일 및 30일 총 출고량 합산
         m_sales_7d = c_sales_7d + other_sales_7d
-        daily_sales = round(m_sales_7d / 7.0, 2)
-        coupang_daily = round(c_sales_7d / 7.0, 2)
+        m_sales_30d = c_sales_30d + other_sales_30d
+
+        # 4. 채널별 가중 일평균 출고량 산출 (최근 7일 60% : 30일 40% 노이즈 보정)
+        # 4-1. 쿠팡 일평균 출고량
+        c_daily_7 = c_sales_7d / 7.0
+        c_daily_30 = c_sales_30d / 30.0 if c_sales_30d > 0 else c_daily_7
+        if c_sales_7d > 0 and c_sales_30d > 0:
+            coupang_daily = round((c_daily_7 * 0.6) + (c_daily_30 * 0.4), 2)
+        elif c_sales_7d > 0:
+            coupang_daily = round(c_daily_7, 2)
+        else:
+            coupang_daily = round(c_daily_30, 2)
+
+        # 4-2. 쿠팡외 타채널 일평균 출고량
+        o_daily_7 = other_sales_7d / 7.0
+        o_daily_30 = other_sales_30d / 30.0 if other_sales_30d > 0 else o_daily_7
+        if other_sales_7d > 0 and other_sales_30d > 0:
+            other_daily = round((o_daily_7 * 0.6) + (o_daily_30 * 0.4), 2)
+        elif other_sales_7d > 0:
+            other_daily = round(o_daily_7, 2)
+        else:
+            other_daily = round(o_daily_30, 2)
+
+        # 4-3. 전체 종합 일평균 출고량 (Daily Sales)
+        daily_sales = round(coupang_daily + other_daily, 2)
 
         # 전체 통계 합산 (공유 재고 중복 집계 방지: 고유 실물 재고만 합산)
         if not is_shared:
@@ -556,8 +640,11 @@ def get_summary():
             total_physical_stock += master_physical_total
 
         total_coupang_7d += c_sales_7d
+        total_coupang_30d += c_sales_30d
         total_other_7d += other_sales_7d
+        total_other_30d += other_sales_30d
         total_sales_7d += m_sales_7d
+        total_sales_30d += m_sales_30d
 
         # 4. 창고별 개별 런웨이 및 통합 런웨이 계산
         # 통합 런웨이
@@ -713,10 +800,14 @@ def get_summary():
             "coupang_physical_total": c_physical_total,
             "master_physical_total": master_physical_total,
             "coupang_sales_7d": c_sales_7d,
+            "coupang_sales_30d": c_sales_30d,
             "other_sales_7d": other_sales_7d,
+            "other_sales_30d": other_sales_30d,
             "total_sales_7d": m_sales_7d,
+            "total_sales_30d": m_sales_30d,
             "daily_sales": daily_sales,
             "coupang_daily": coupang_daily,
+            "other_daily": other_daily,
             "total_runway": total_runway,
             "total_runway_str": total_runway_str,
             "gaemi_runway": gaemi_runway,
@@ -748,8 +839,11 @@ def get_summary():
             "total_coupang_stock": total_coupang_stock,
             "total_physical_stock": total_physical_stock,
             "total_coupang_7d": total_coupang_7d,
+            "total_coupang_30d": total_coupang_30d,
             "total_other_7d": total_other_7d,
+            "total_other_30d": total_other_30d,
             "total_sales_7d": total_sales_7d,
+            "total_sales_30d": total_sales_30d,
             "urgent_order_count": urgent_order_count,
             "order_prepare_count": order_prepare_count,
             "coupang_transfer_count": coupang_transfer_count,
@@ -881,8 +975,9 @@ def export_master_csv():
     cw.writerow([
         "판매자관리코드", "구분", "마스터 상품명", "총 가용재고", "통합 런웨이(일)",
         "개미(3PL) 재고", "개미 런웨이(일)", "최단 소비기한",
-        "쿠팡(실물) 재고", "쿠팡 런웨이(일)", "7일 출고량", 
-        "일평균 출고량", "발주 권고 상태", "추천 조치"
+        "쿠팡(실물) 재고", "쿠팡 런웨이(일)", 
+        "7일 출고량", "30일 출고량", "일평균 출고량", 
+        "발주 권고 상태", "추천 조치"
     ])
 
     for m in masters:
@@ -891,7 +986,8 @@ def export_master_csv():
             m["master_physical_total"], m["total_runway_str"],
             m["gaemi_total"], m["gaemi_runway_str"], m.get("nearest_expiry_date") or "-",
             m["coupang_physical_total"], m["coupang_runway_str"],
-            m["total_sales_7d"], m["daily_sales"], m["status"], m["action_cta"]
+            m["total_sales_7d"], m.get("total_sales_30d", 0), m["daily_sales"],
+            m["status"], m["action_cta"]
         ])
 
     output = si.getvalue().encode('utf-8-sig')
@@ -1127,13 +1223,17 @@ HTML_TEMPLATE = """
                 </div>
                 <span class="text-slate-300">|</span>
                 <div class="flex items-center space-x-1.5">
-                    <span class="font-bold text-slate-900">7일 총 출고:</span>
-                    <span id="statTotalSales7d" class="font-bold text-indigo-700 text-sm">0개</span>
+                    <span class="font-bold text-slate-900">총 출고량:</span>
+                    <span id="statTotalSales7d" class="font-bold text-indigo-700 text-sm">7일 0개</span>
+                    <span class="text-slate-400 text-[11px]">/ 30일: <span id="statTotalSales30d" class="font-semibold text-slate-700">0</span>개</span>
                     <span id="statSalesSubtext" class="text-slate-400 text-[11px]">(쿠팡 0 + 외 0)</span>
                 </div>
             </div>
             <div class="text-[11px] text-slate-500 flex items-center space-x-2">
-                <span class="inline-flex items-center text-slate-600 bg-slate-100 px-2 py-0.5 rounded font-mono">
+                <span class="inline-flex items-center text-indigo-800 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-mono text-[10px]">
+                    <i class="fa-solid fa-scale-balanced mr-1 text-indigo-600"></i>7일(60%)+30일(40%) 가중 일평균 런웨이
+                </span>
+                <span class="inline-flex items-center text-slate-600 bg-slate-100 px-2 py-0.5 rounded font-mono border border-slate-200">
                     <i class="fa-solid fa-arrow-down-short-wide mr-1 text-slate-400"></i>위험도(Risk Score) 순 우선 정렬됨
                 </span>
             </div>
@@ -1316,7 +1416,7 @@ HTML_TEMPLATE = """
             'gaemi_runway': { id: 'gaemi_runway', label: '개미 런웨이', thClass: 'text-center w-20 text-amber-800 text-[11px] font-bold', tdClass: 'text-center font-mono font-semibold text-amber-800 text-[11px]' },
             'coupang_stock': { id: 'coupang_stock', label: '쿠팡창고(실물)', thClass: 'text-right w-24 font-bold bg-blue-50/60 text-blue-900', tdClass: 'text-right bg-blue-50/20 text-blue-900' },
             'coupang_runway': { id: 'coupang_runway', label: '쿠팡 런웨이', thClass: 'text-center w-20 text-blue-800 text-[11px] font-bold', tdClass: 'text-center font-mono font-semibold text-blue-800 text-[11px]' },
-            'total_sales': { id: 'total_sales', label: '7일 출고량', thClass: 'text-right w-24 font-black bg-indigo-50/60 text-indigo-950', tdClass: 'text-right font-mono font-bold text-indigo-900 bg-indigo-50/20' },
+            'total_sales': { id: 'total_sales', label: '출고량 (7일/30일)', thClass: 'text-right w-28 font-black bg-indigo-50/60 text-indigo-950', tdClass: 'text-right font-mono font-bold text-indigo-900 bg-indigo-50/20' },
             'total_runway': { id: 'total_runway', label: '통합 런웨이(D-Day)', thClass: 'text-center w-28 font-black text-slate-800', tdClass: 'text-center' },
             'action_cta': { id: 'action_cta', label: '추천 조치 (Action)', thClass: 'text-center w-32 font-bold', tdClass: 'text-center' }
         };
@@ -1605,8 +1705,15 @@ HTML_TEMPLATE = """
                 document.getElementById('statGaemiStock').innerText = data.stats.total_gaemi_stock.toLocaleString() + '개';
                 document.getElementById('statCoupangStock').innerText = data.stats.total_coupang_stock.toLocaleString() + '개';
                 document.getElementById('statTotalStock').innerText = data.stats.total_physical_stock.toLocaleString() + '개';
-                document.getElementById('statTotalSales7d').innerText = data.stats.total_sales_7d.toLocaleString() + '개';
-                document.getElementById('statSalesSubtext').innerText = `(쿠팡 ${data.stats.total_coupang_7d} + 외 ${data.stats.total_other_7d})`;
+                document.getElementById('statTotalSales7d').innerText = `7일 ${data.stats.total_sales_7d.toLocaleString()}개`;
+                if (document.getElementById('statTotalSales30d')) {
+                    document.getElementById('statTotalSales30d').innerText = (data.stats.total_sales_30d || 0).toLocaleString();
+                }
+                const c7 = data.stats.total_coupang_7d || 0;
+                const c30 = data.stats.total_coupang_30d || 0;
+                const o7 = data.stats.total_other_7d || 0;
+                const o30 = data.stats.total_other_30d || 0;
+                document.getElementById('statSalesSubtext').innerText = `(쿠팡 7일 ${c7} / 30일 ${c30} + 타채널 7일 ${o7} / 30일 ${o30})`;
 
                 // 4. 하단 소스 상태 배지
                 if (data.stats.has_gaemi_data) {
@@ -1687,8 +1794,11 @@ HTML_TEMPLATE = """
             let sumGaemiStock = 0;
             let sumCoupangStock = 0;
             let sumCoupangSales = 0;
+            let sumCoupangSales30d = 0;
             let sumOtherSales = 0;
+            let sumOtherSales30d = 0;
             let sumTotalSales = 0;
+            let sumTotalSales30d = 0;
             let sumDailySales = 0;
 
             let html = "";
@@ -1699,8 +1809,11 @@ HTML_TEMPLATE = """
                     sumCoupangStock += m.coupang_physical_total;
                 }
                 sumCoupangSales += m.coupang_sales_7d;
+                sumCoupangSales30d += (m.coupang_sales_30d || 0);
                 sumOtherSales += m.other_sales_7d;
+                sumOtherSales30d += (m.other_sales_30d || 0);
                 sumTotalSales += m.total_sales_7d;
+                sumTotalSales30d += (m.total_sales_30d || 0);
                 sumDailySales += m.daily_sales;
 
                 let badgeClass = "bg-slate-100 text-slate-700";
@@ -1797,10 +1910,12 @@ HTML_TEMPLATE = """
                     } else if (colId === 'coupang_runway') {
                         html += `<td class="${col.tdClass}">${coupangRunwayHtml}</td>`;
                     } else if (colId === 'total_sales') {
+                        const s7 = (m.total_sales_7d || 0).toLocaleString();
+                        const s30 = (m.total_sales_30d || 0).toLocaleString();
                         html += `
                             <td class="${col.tdClass}">
-                                <div>${m.total_sales_7d.toLocaleString()}</div>
-                                <div class="text-[9px] text-slate-500 font-normal">일평균 ${m.daily_sales}개</div>
+                                <div class="font-bold font-mono text-indigo-950">${s7}개 <span class="text-slate-400 font-normal text-[10px]">/ 30일 ${s30}개</span></div>
+                                <div class="text-[9px] text-slate-500 font-normal mt-0.5">가중 일평균 ${m.daily_sales}개</div>
                             </td>
                         `;
                     } else if (colId === 'total_runway') {
@@ -1882,7 +1997,7 @@ HTML_TEMPLATE = """
                                                     <i class="fa-solid fa-chart-pie text-amber-600 text-sm"></i>
                                                     <div>
                                                         <span class="font-bold">판매속도 대비 소진 시뮬레이션:</span>
-                                                        <span>현재 일평균 <strong>${m.daily_sales}개</strong> 판매 시, 최단 소비기한(<strong>${m.nearest_expiry_date}</strong>, D-${m.nearest_days_left}일)까지 <strong>${m.projected_sales_to_exp}개</strong> 소진 예상 (로트 재고 ${m.nearest_lot_stock}개)</span>
+                                                        <span>7일(60%)+30일(40%) 가중 일평균 <strong>${m.daily_sales}개</strong> 판매 기준, 최단 소비기한(<strong>${m.nearest_expiry_date}</strong>, D-${m.nearest_days_left}일)까지 <strong>${m.projected_sales_to_exp}개</strong> 소진 예상 (로트 재고 ${m.nearest_lot_stock}개)</span>
                                                     </div>
                                                 </div>
                                                 <div>
@@ -1947,14 +2062,17 @@ HTML_TEMPLATE = """
                                 <!-- 4. 타채널 주문 내역 -->
                                 ${m.recent_orders && m.recent_orders.length > 0 ? `
                                     <div class="bg-white rounded-lg border border-slate-200 p-2.5 shadow-sm">
-                                        <div class="text-[11px] font-bold text-indigo-700 mb-1 flex items-center space-x-1">
-                                            <i class="fa-solid fa-receipt"></i>
-                                            <span>쿠팡외 최근 주문 내역 (${m.other_sales_7d}개 출고)</span>
+                                        <div class="text-[11px] font-bold text-indigo-700 mb-1 flex items-center justify-between">
+                                            <div class="flex items-center space-x-1">
+                                                <i class="fa-solid fa-receipt"></i>
+                                                <span>쿠팡외 타채널 출고: 7일 <strong>${m.other_sales_7d}개</strong> / 30일 <strong>${m.other_sales_30d || m.other_sales_7d}개</strong></span>
+                                            </div>
+                                            <span class="text-[10px] text-slate-400 font-normal">최근 주문 5건 표시</span>
                                         </div>
                                         <div class="flex flex-wrap gap-1.5 text-[10px]">
                                             ${m.recent_orders.map(ord => `
                                                 <span class="bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded text-slate-700">
-                                                    <span class="font-semibold text-indigo-800">${ord.mall || '스마트스토어'}</span>: ${ord.qty}건 (${ord.date})
+                                                    <span class="font-semibold text-indigo-800">${escapeHtml(ord.mall || '스마트스토어')}</span>: ${ord.qty}개 (${escapeHtml(ord.date)})
                                                 </span>
                                             `).join('')}
                                         </div>
@@ -1991,7 +2109,12 @@ HTML_TEMPLATE = """
                     const avgCRunway = sumCoupangSales > 0 ? (sumCoupangStock / (sumCoupangSales / 7.0)).toFixed(1) + '일' : '-';
                     footHtml += `<td class="py-2.5 px-3 text-center font-bold text-blue-900 text-[11px]">${avgCRunway}</td>`;
                 } else if (colId === 'total_sales') {
-                    footHtml += `<td class="py-2.5 px-3 text-right font-black text-indigo-950 text-xs bg-indigo-100/60">${sumTotalSales.toLocaleString()}</td>`;
+                    footHtml += `
+                        <td class="py-2.5 px-3 text-right font-black text-indigo-950 text-xs bg-indigo-100/60">
+                            <div>7일 ${sumTotalSales.toLocaleString()}개</div>
+                            <div class="text-[10px] text-slate-500 font-normal">30일 ${sumTotalSales30d.toLocaleString()}개</div>
+                        </td>
+                    `;
                 } else if (colId === 'total_runway') {
                     const avgDoc = sumDailySales > 0 ? (sumTotalStock / sumDailySales).toFixed(1) + '일' : '안전';
                     footHtml += `<td class="py-2.5 px-3 text-center font-bold text-slate-800 text-[11px]">평균 ${avgDoc}</td>`;
