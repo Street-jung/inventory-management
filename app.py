@@ -15,11 +15,7 @@ import time
 import json
 import csv
 import io
-import re
-import urllib.parse
 import threading
-import subprocess
-import urllib.request
 import webbrowser
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, Response, send_file
@@ -29,8 +25,6 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, 'inventory_master_store.json')
 LOGO_FILE = os.path.join(BASE_DIR, 'logo.png')
-CLOUDFLARED_EXE = os.path.join(BASE_DIR, 'cloudflared.exe')
-CLOUDFLARED_DOWNLOAD_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
 
 # -------------------------------------------------------------
 # 세트/B2B 상품 실물 재고 연동 매핑 규칙
@@ -66,7 +60,7 @@ app_state = {
     "coupang_inventory": {},   # { option_id: { stock, inbound, sales_7d, sales_30d, doc, name, opt_name } }
     "sales_inventory": {},     # { seller_code: { total_7d, orders: [ { date, qty, mall, name } ] } }
     "logs": [f"[{datetime.now().strftime('%H:%M:%S')}] 일쩜오도 재고 관리 시스템이 준비되었습니다."],
-    "public_url": None
+    "public_url": os.environ.get("RENDER_EXTERNAL_URL", "https://inventory-management-q7bp.onrender.com")
 }
 
 def add_log(msg):
@@ -700,55 +694,6 @@ def export_master_csv():
     )
 
 # -------------------------------------------------------------
-# Cloudflare Tunnel
-# -------------------------------------------------------------
-def ensure_cloudflared_binary():
-    if not os.path.exists(CLOUDFLARED_EXE):
-        add_log("📥 Cloudflare 터널 도구를 준비하는 중입니다...")
-        try:
-            urllib.request.urlretrieve(CLOUDFLARED_DOWNLOAD_URL, CLOUDFLARED_EXE)
-            add_log("✅ cloudflared 다운로드 완료!")
-        except Exception as e:
-            add_log(f"⚠️ 터널 다운로드 건너뜀: {e}")
-            return None
-    return CLOUDFLARED_EXE
-
-def run_tunnel_thread(port=5000):
-    global app_state
-    if sys.platform != 'win32' or os.environ.get("RENDER") or os.environ.get("RAILWAY_STATIC_URL"):
-        return
-    exe = ensure_cloudflared_binary()
-    if not exe or not os.path.exists(exe):
-        return
-
-    add_log("🌐 구글 사이트 연동용 HTTPS 보안 주소를 생성하는 중입니다...")
-    try:
-        proc = subprocess.Popen(
-            [exe, "tunnel", "--url", f"http://127.0.0.1:{port}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace"
-        )
-        for line in iter(proc.stdout.readline, ''):
-            if not line:
-                break
-            match = re.search(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com', line)
-            if match and not app_state["public_url"]:
-                url = match.group(0)
-                with data_lock:
-                    app_state["public_url"] = url
-                add_log(f"🔗 [구글 사이트 연동 주소 발급] 👉 {url}")
-                print("\n" + "=" * 70)
-                print("🎉 [구글 사이트 연동 HTTPS 주소]")
-                print(f"👉 {url}")
-                print("=" * 70 + "\n")
-                break
-    except Exception as e:
-        add_log(f"⚠️ 터널 실행 오류: {e}")
-
-# -------------------------------------------------------------
 # 모던 일쩜오도 재고현황 통합 대시보드 HTML
 # -------------------------------------------------------------
 HTML_TEMPLATE = """
@@ -825,9 +770,9 @@ HTML_TEMPLATE = """
     <div id="tunnelBanner" class="bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 text-white shadow-inner px-4 py-2">
         <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
             <div class="flex items-center space-x-2">
-                <span class="bg-white/20 px-2 py-0.5 rounded font-bold uppercase tracking-wider text-[10px]">Google Sites 연동 URL</span>
+                <span class="bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider text-[10px]">Google Sites 24시간 연동 URL</span>
                 <span id="publicUrlText" class="font-mono bg-black/40 px-2.5 py-0.5 rounded select-all font-semibold text-emerald-300">
-                    HTTPS 보안 주소 발급 중...
+                    https://inventory-management-q7bp.onrender.com
                 </span>
             </div>
             <button onclick="copyPublicUrl()" class="px-2.5 py-0.5 bg-white text-emerald-800 rounded font-semibold hover:bg-emerald-50 transition flex items-center space-x-1 shadow-sm">
@@ -1700,9 +1645,6 @@ if __name__ == "__main__":
     print("🌱 [일쩜오도 재고현황 | 통합 재고 & 출고 관리 대시보드 실행]")
     print("👉 로컬 접속: http://127.0.0.1:5000")
     print("=" * 70)
-    
-    # 구글 사이트 임베드 터널 스레드
-    threading.Thread(target=run_tunnel_thread, daemon=True).start()
     
     # 브라우저 자동 오픈
     threading.Thread(target=open_browser, daemon=True).start()
