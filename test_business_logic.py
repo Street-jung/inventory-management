@@ -81,7 +81,7 @@ class TestIljeomodoBusinessLogic(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
 
     def test_06_one_click_load_sample_and_leadtime(self):
-        """원클릭 샘플 데이터 로드 및 수입 100일 발주주의 산출 검증"""
+        """원클릭 샘플 데이터 로드 및 발주 의사결정 액션보드 지표 산출 검증"""
         res = self.client.post('/api/load-sample')
         self.assertEqual(res.status_code, 200)
 
@@ -92,14 +92,20 @@ class TestIljeomodoBusinessLogic(unittest.TestCase):
         # 44개 마스터 상품 확인
         self.assertEqual(data["stats"]["total_masters"], 44)
         
-        # 수입 100일 발주주의 품목 수 검증 (10GL04, 10GL05, 20TZ01, 20TZ03 등)
-        self.assertGreaterEqual(data["stats"]["leadtime_count"], 1)
+        # 5대 Action KPI 카운터 검증
+        self.assertIn("urgent_order_count", data["stats"])
+        self.assertIn("order_prepare_count", data["stats"])
+        self.assertIn("coupang_transfer_count", data["stats"])
+        self.assertIn("expiry_warning_count", data["stats"])
+        self.assertIn("safe_count", data["stats"])
+        self.assertIn("last_updated", data["stats"])
 
-        # 구욘 초코칩(10GL04, 수입, 소진일 약 20일) -> 100일 주의 판정 확인
+        # 구욘 초코칩(10GL04, 수입, 소진일 약 20일 < 110일) -> 긴급 발주 판정 확인
         p_choco = next(m for m in data["masters"] if m["seller_code"] == "10GL04")
         self.assertEqual(p_choco["product_type"], "수입")
-        self.assertIn("100일 주의", p_choco["status"])
-        print(f"OK: [Test 6] 수입 100일 리드타임 주의 검증 성공: {p_choco['name']} -> {p_choco['status']}")
+        self.assertIn("긴급 발주", p_choco["status"])
+        self.assertEqual(p_choco["action_cta"], "🚨 수입 발주 기안")
+        print(f"OK: [Test 6] 발주 의사결정 액션보드 지표 검증 성공: {p_choco['name']} -> {p_choco['status']} ({p_choco['action_cta']})")
 
     def test_07_shared_stock_synchronization(self):
         """B2B/세트 상품(S100005 등)과 기본 상품(10GL02 등) 실물 재고 100% 일치 및 독립 DOC 검증"""
@@ -132,15 +138,31 @@ class TestIljeomodoBusinessLogic(unittest.TestCase):
         print("OK: [Test 7] B2B/세트 상품(6종) 기본 상품과 창고 실물 재고 100% 일치 검증 완료")
 
     def test_08_export_master_csv(self):
-        """통합 리포트 CSV 생성 검증 및 비고 컬럼 제거 확인"""
+        """액션 리포트 CSV 생성 검증 및 비고 컬럼 제외 확인"""
         res = self.client.get('/api/export-master-csv')
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.mimetype, 'text/csv')
         self.assertIn("판매자관리코드".encode('utf-8-sig'), res.data)
         self.assertIn("7일 출고량".encode('utf-8'), res.data)
+        self.assertIn("개미 런웨이(일)".encode('utf-8'), res.data)
+        self.assertIn("쿠팡 런웨이(일)".encode('utf-8'), res.data)
+        self.assertIn("추천 조치".encode('utf-8'), res.data)
         # 비고 컬럼이 헤더에 없어야 함
         self.assertNotIn("비고".encode('utf-8'), res.data)
-        print("OK: [Test 8] 일쩜오도 통합 재고 리포트 CSV 내보내기 및 비고 컬럼 제외 검증 완료")
+        print("OK: [Test 8] 일쩜오도 액션 리포트 CSV 내보내기 검증 완료")
+
+    def test_09_expiry_date_tracking(self):
+        """개미창고 소비기한 추출 및 선입선출 추적 검증"""
+        self.client.post('/api/load-sample')
+        sum_res = self.client.get('/api/summary')
+        data = json.loads(sum_res.data)
+
+        # 20DC02 (데체코 엑스트라버진 올리브오일 500ml -> 옵션명 27.03.28)
+        p_dececco = next(m for m in data["masters"] if m["seller_code"] == "20DC02")
+        self.assertTrue(bool(p_dececco["nearest_expiry_date"]))
+        self.assertIn("2027-03-28", p_dececco["nearest_expiry_date"])
+        self.assertIsNotNone(p_dececco["nearest_days_left"])
+        print(f"OK: [Test 9] 소비기한 자동 추출 검증 완료: {p_dececco['name']} -> 최단 소비기한 {p_dececco['nearest_expiry_date']} (D-{p_dececco['nearest_days_left']}일)")
 
 if __name__ == '__main__':
     unittest.main()
