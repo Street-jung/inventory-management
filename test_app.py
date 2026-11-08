@@ -62,6 +62,14 @@ class TestIljeomodoAppEndpoints(unittest.TestCase):
         self.assertIn("'gaemi_stock'", html)
         self.assertIn("'coupang_stock'", html)
         self.assertNotIn("'biko'", html)
+
+    def test_06_health_check(self):
+        """24시간 클라우드 헬스체크 엔드포인트 검증"""
+        res = self.client.get('/health')
+        self.assertEqual(res.status_code, 200)
+        data = json.loads(res.data)
+        self.assertEqual(data["status"], "healthy")
+        print("OK: [Endpoint Test 6] /health 무중단 헬스체크 엔드포인트 정상 작동")
         print("OK: [Endpoint Test 5] 메인 HTML 컬럼 정의에서 비고 컬럼 제외 검증 완료")
 
 if __name__ == '__main__':

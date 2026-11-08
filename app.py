@@ -167,6 +167,18 @@ def serve_logo():
     return "", 404
 
 # -------------------------------------------------------------
+# 24시간 헬스체크 및 무중단 핑 엔드포인트 (Render / UptimeRobot)
+# -------------------------------------------------------------
+@app.route("/health")
+@app.route("/ping")
+def health_check():
+    return jsonify({
+        "status": "healthy",
+        "service": "iljeomodo-inventory",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }), 200
+
+# -------------------------------------------------------------
 # 파서 1: 개미창고 CSV/엑셀 파서 (소비기한 및 잔여 D-Day 자동 분석)
 # -------------------------------------------------------------
 def parse_gaemi_rows(rows):
