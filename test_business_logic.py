@@ -10,11 +10,43 @@ if sys.platform == 'win32':
 import unittest
 import json
 import csv
+import shutil
+import tempfile
+import copy
+import app as app_module
 from app import app, parse_gaemi_rows, parse_coupang_rows, parse_sales_rows, data_lock, app_state
 
 class TestIljeomodoBusinessLogic(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._orig_data_file = app_module.DATA_FILE
+        cls._orig_state = copy.deepcopy(app_module.app_state)
+        cls._orig_env_pin = os.environ.pop("ADMIN_PIN", None)
+        cls._tmpdir = tempfile.mkdtemp(prefix="iljeomodo_test_logic_")
+        cls._tmp_data_file = os.path.join(cls._tmpdir, "inventory_master_store.json")
+        if os.path.exists(cls._orig_data_file):
+            shutil.copy2(cls._orig_data_file, cls._tmp_data_file)
+        app_module.DATA_FILE = cls._tmp_data_file
+        with app_module.data_lock:
+            app_module.app_state["settings"]["admin_pin_custom"] = ""
+
+    @classmethod
+    def tearDownClass(cls):
+        app_module.DATA_FILE = cls._orig_data_file
+        with app_module.data_lock:
+            app_module.app_state.clear()
+            app_module.app_state.update(cls._orig_state)
+        if cls._orig_env_pin is not None:
+            os.environ["ADMIN_PIN"] = cls._orig_env_pin
+        shutil.rmtree(cls._tmpdir, ignore_errors=True)
+
     def setUp(self):
         self.client = app.test_client()
+
+    def _get_admin_headers(self):
+        res = self.client.post('/api/admin/verify-pin', json={"pin": "1500"})
+        self.assertEqual(res.status_code, 200)
+        return {"X-Admin-Token": json.loads(res.data)["token"]}
 
     def test_01_index_html(self):
         """메인 대시보드 렌더링 확인 (일쩜오도 재고현황 타이틀 및 BI 로고)"""
@@ -27,8 +59,11 @@ class TestIljeomodoBusinessLogic(unittest.TestCase):
     def test_02_logo_endpoint(self):
         """BI 로고 이미지 서빙 검증"""
         res = self.client.get('/logo.png')
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.mimetype, 'image/png')
+        try:
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.mimetype, 'image/png')
+        finally:
+            res.close()
         print("OK: [Test 2] /logo.png BI 이미지 정상 반환")
 
     def test_03_parse_real_gaemi_csv(self):
@@ -82,7 +117,7 @@ class TestIljeomodoBusinessLogic(unittest.TestCase):
 
     def test_06_one_click_load_sample_and_leadtime(self):
         """원클릭 샘플 데이터 로드 및 발주 의사결정 액션보드 지표 산출 검증"""
-        res = self.client.post('/api/load-sample')
+        res = self.client.post('/api/load-sample', headers=self._get_admin_headers())
         self.assertEqual(res.status_code, 200)
 
         sum_res = self.client.get('/api/summary')
@@ -109,7 +144,7 @@ class TestIljeomodoBusinessLogic(unittest.TestCase):
 
     def test_07_b2b_set_products_excluded_and_sales_aggregated(self):
         """B2B/세트 상품(S코드)은 화면 표시 제외되고, 주문 수량이 단품(10GL02 등) 출고량에 배수만큼 정확히 합산되는지 검증"""
-        self.client.post('/api/load-sample')
+        self.client.post('/api/load-sample', headers=self._get_admin_headers())
         sum_res = self.client.get('/api/summary')
         data = json.loads(sum_res.data)
         masters = data["masters"]
@@ -161,7 +196,7 @@ class TestIljeomodoBusinessLogic(unittest.TestCase):
 
     def test_09_expiry_date_tracking(self):
         """개미창고 소비기한 추출 및 선입선출 추적 검증"""
-        self.client.post('/api/load-sample')
+        self.client.post('/api/load-sample', headers=self._get_admin_headers())
         sum_res = self.client.get('/api/summary')
         data = json.loads(sum_res.data)
 

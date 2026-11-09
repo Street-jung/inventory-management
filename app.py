@@ -16,8 +16,16 @@ import json
 import csv
 import io
 import re
+import copy
+import hmac
+import uuid
+import hashlib
 import threading
 import webbrowser
+import urllib.request
+import urllib.error
+import http.cookiejar
+from functools import wraps
 from datetime import datetime, date, timedelta
 from flask import Flask, render_template_string, request, jsonify, Response, send_file
 
@@ -26,6 +34,7 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, 'inventory_master_store.json')
 LOGO_FILE = os.path.join(BASE_DIR, 'logo.png')
+GAS_SCRIPT_FILE = os.path.join(BASE_DIR, 'google_apps_script_bridge.gs')
 
 EXP_DATE_PATTERN = re.compile(r'(\d{2,4})[.\-/](\d{1,2})[.\-/](\d{1,2})')
 
@@ -44,11 +53,20 @@ def extract_expiry_date(text):
             return None
     return None
 
+def normalize_date_str(val):
+    """YYYY-MM-DD 형식으로 날짜 문자열 정규화 (유효하지 않으면 빈 문자열)"""
+    if not val:
+        return ""
+    s = str(val).strip()
+    if not s or s == "__CLEAR__":
+        return s
+    d = extract_expiry_date(s)
+    return d.strftime("%Y-%m-%d") if d else ""
+
 # -------------------------------------------------------------
-# 세트/B2B 상품 실물 재고 연동 매핑 규칙
-# (기본 단품과 재고를 공유하며, 주문 발생 시 배수만큼 단품 출고량에 합산)
+# 세트/B2B 상품 실물 재고 연동 기본 매핑 규칙 (관리자 모드에서 수정 가능)
 # -------------------------------------------------------------
-SHARED_STOCK_MAP = {
+DEFAULT_SHARED_STOCK_MAP = {
     "S100005": {"base_code": "10GL02", "multiplier": 12, "desc": "10GL02 12개 묶음 B2B"},
     "S100009": {"base_code": "10GL04", "multiplier": 12, "desc": "10GL04 12개 묶음 B2B"},
     "S100011": {"base_code": "10GL05", "multiplier": 12, "desc": "10GL05 12개 묶음 B2B"},
@@ -57,24 +75,27 @@ SHARED_STOCK_MAP = {
     "S200019": {"base_code": "20EO02", "multiplier": 2, "desc": "20EO02 2병 선물세트"},
 }
 
-# 단품 기준 연동된 B2B/세트(S코드) 역방향 매핑 딕셔너리
+SHARED_STOCK_MAP = copy.deepcopy(DEFAULT_SHARED_STOCK_MAP)
+
 BASE_TO_SHARED_MAP = {}
-for s_code, info in SHARED_STOCK_MAP.items():
-    b_code = info["base_code"]
-    if b_code not in BASE_TO_SHARED_MAP:
-        BASE_TO_SHARED_MAP[b_code] = []
-    BASE_TO_SHARED_MAP[b_code].append({
-        "s_code": s_code,
-        "multiplier": info["multiplier"],
-        "desc": info["desc"]
+for _s_code, _info in SHARED_STOCK_MAP.items():
+    _b_code = _info["base_code"]
+    if _b_code not in BASE_TO_SHARED_MAP:
+        BASE_TO_SHARED_MAP[_b_code] = []
+    BASE_TO_SHARED_MAP[_b_code].append({
+        "s_code": _s_code,
+        "multiplier": _info["multiplier"],
+        "desc": _info["desc"]
     })
 
-def is_s_product_code(code):
-    """관리코드에 S가 붙은 상품 또는 SHARED_STOCK_MAP에 등록된 세트/B2B 상품 판별"""
-    if not code:
-        return False
-    c = str(code).strip().upper()
-    return c.startswith("S") or c in SHARED_STOCK_MAP
+DEFAULT_SETTINGS = {
+    "default_import_lead_time": 110,
+    "default_import_buffer": 20,
+    "default_purchase_lead_time": 7,
+    "default_purchase_buffer": 7,
+    "default_expiry_warn_days": 120,
+    "admin_pin_custom": ""
+}
 
 def get_initial_master_products():
     if os.path.exists(DATA_FILE):
@@ -91,8 +112,13 @@ def get_initial_master_products():
 
 # 전역 재고 상태 데이터 관리
 data_lock = threading.Lock()
+drive_sync_lock = threading.Lock()
+
 app_state = {
     "master_products": get_initial_master_products(),
+    "b2b_mappings": copy.deepcopy(DEFAULT_SHARED_STOCK_MAP),
+    "lot_expiry_overrides": {},  # { "gaemi_code||option_name[||reg_date]": "YYYY-MM-DD" | "__CLEAR__" }
+    "settings": copy.deepcopy(DEFAULT_SETTINGS),
     "gaemi_inventory": {},     # { code: [ { option_name, stock, reg_date, status, expiry_date, days_left }, ... ] }
     "coupang_inventory": {},   # { option_id: { stock, inbound, sales_7d, sales_30d, doc, name, opt_name } }
     "sales_inventory": {},     # { seller_code: { total_7d, orders: [ { date, qty, mall, name } ] } }
@@ -100,6 +126,60 @@ app_state = {
     "logs": [f"[{datetime.now().strftime('%H:%M:%S')}] 일쩜오도 재고 관리 시스템이 준비되었습니다."],
     "public_url": os.environ.get("RENDER_EXTERNAL_URL", "https://inventory-management-q7bp.onrender.com")
 }
+
+drive_sync_state = {
+    "configured": False,
+    "status": "disabled",      # disabled | idle | syncing | synced | error
+    "last_synced_at": "",
+    "last_loaded_at": "",
+    "last_error": "",
+    "file_id": ""
+}
+
+def get_active_b2b_mappings():
+    m = app_state.get("b2b_mappings")
+    return m if isinstance(m, dict) else DEFAULT_SHARED_STOCK_MAP
+
+def get_base_to_shared_map(mappings=None):
+    src = mappings if mappings is not None else get_active_b2b_mappings()
+    res = {}
+    for s_code, info in src.items():
+        b_code = str(info.get("base_code", "")).strip().upper()
+        if not b_code:
+            continue
+        if b_code not in res:
+            res[b_code] = []
+        res[b_code].append({
+            "s_code": str(s_code).strip().upper(),
+            "multiplier": int(info.get("multiplier", 1)),
+            "desc": info.get("desc", "")
+        })
+    return res
+
+def is_s_product_code(code):
+    """관리코드에 S가 붙은 상품 또는 b2b_mappings에 등록된 세트/B2B 상품 판별"""
+    if not code:
+        return False
+    c = str(code).strip().upper()
+    return c.startswith("S") or c in get_active_b2b_mappings()
+
+def get_matching_gaemi_items(m, gaemi_inv):
+    """마스터 상품과 매칭되는 개미창고 (gaemi_code, item) 튜플 목록 반환"""
+    items = []
+    opt_filter = (m.get("gaemi_filter") or "").strip()
+    for g_code in m.get("gaemi_codes", []):
+        for item in gaemi_inv.get(g_code, []):
+            if opt_filter and opt_filter not in item.get("option_name", ""):
+                continue
+            items.append((g_code, item))
+    return items
+
+def make_gaemi_lot_keys(g_code, item):
+    opt = str(item.get("option_name", "")).strip()
+    reg = str(item.get("reg_date", "")).strip()
+    exact_key = f"{g_code}||{opt}||{reg}" if reg else f"{g_code}||{opt}"
+    opt_key = f"{g_code}||{opt}"
+    return exact_key, opt_key
 
 def add_log(msg):
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -113,6 +193,223 @@ def add_log(msg):
     except Exception:
         pass
 
+# -------------------------------------------------------------
+# 관리자 PIN 인증 (토큰 서명 기반)
+# -------------------------------------------------------------
+_admin_revoked_before = 0
+_admin_last_iat_ms = 0
+
+def get_effective_admin_pin():
+    """우선순위: 환경변수 ADMIN_PIN -> 관리자 저장 커스텀 PIN -> 기본값 '1500'"""
+    env_pin = os.environ.get("ADMIN_PIN", "").strip()
+    if env_pin:
+        return env_pin, "env"
+    with data_lock:
+        custom_pin = str(app_state.get("settings", {}).get("admin_pin_custom", "")).strip()
+    if custom_pin:
+        return custom_pin, "custom"
+    return "1500", "default"
+
+def issue_admin_token(ttl_seconds=43200):
+    global _admin_last_iat_ms
+    now_s = int(time.time())
+    iat_ms = max(int(time.time() * 1000), _admin_revoked_before + 1)
+    _admin_last_iat_ms = iat_ms
+    exp = now_s + ttl_seconds
+    pin, _ = get_effective_admin_pin()
+    secret = hashlib.sha256(f"{pin}:iljeomodo_admin_v1".encode("utf-8")).digest()
+    msg = f"{iat_ms}.{exp}"
+    sig = hmac.new(secret, msg.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{iat_ms}.{exp}.{sig}", ttl_seconds
+
+def verify_admin_token(token):
+    if not token or str(token).count(".") != 2:
+        return False
+    try:
+        iat_s, exp_s, sig = str(token).strip().split(".", 2)
+        iat_ms = int(iat_s)
+        exp = int(exp_s)
+        now = int(time.time())
+        if exp < now or iat_ms <= _admin_revoked_before:
+            return False
+        pin, _ = get_effective_admin_pin()
+        secret = hashlib.sha256(f"{pin}:iljeomodo_admin_v1".encode("utf-8")).digest()
+        expected = hmac.new(secret, f"{iat_s}.{exp_s}".encode("utf-8"), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, sig)
+    except Exception:
+        return False
+
+def require_admin(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        token = request.headers.get("X-Admin-Token", "").strip()
+        if not verify_admin_token(token):
+            return jsonify({
+                "success": False,
+                "code": "ADMIN_AUTH_REQUIRED",
+                "message": "관리자 PIN 인증이 필요하거나 세션이 만료되었습니다."
+            }), 401
+        return fn(*args, **kwargs)
+    return wrapper
+
+# -------------------------------------------------------------
+# Google Drive (Google Apps Script 웹앱) 영구 저장/복원 브리지
+# -------------------------------------------------------------
+def get_gas_config():
+    url = os.environ.get("GOOGLE_APPS_SCRIPT_URL", "").strip()
+    token = os.environ.get("GOOGLE_APPS_SCRIPT_TOKEN", "").strip()
+    configured = bool(url and token)
+    return {"configured": configured, "url": url, "token": token}
+
+def _call_gas_bridge(action, payload=None, timeout=15):
+    cfg = get_gas_config()
+    if not cfg["configured"]:
+        return {"success": False, "error": "Google Apps Script 환경변수(GOOGLE_APPS_SCRIPT_URL, GOOGLE_APPS_SCRIPT_TOKEN)가 설정되지 않았습니다."}
+
+    body = {
+        "token": cfg["token"],
+        "action": action
+    }
+    if payload is not None:
+        body["payload"] = payload
+
+    data_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        cfg["url"],
+        data=data_bytes,
+        headers={
+            "Content-Type": "application/json; charset=utf-8",
+            "User-Agent": "Iljeomodo-Inventory/2.0"
+        },
+        method="POST"
+    )
+    cj = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    with opener.open(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+        return json.loads(raw)
+
+def build_state_snapshot():
+    with data_lock:
+        return {
+            "title": "일쩜오도 재고현황",
+            "schema_version": 2,
+            "master_products": copy.deepcopy(app_state["master_products"]),
+            "b2b_mappings": copy.deepcopy(app_state["b2b_mappings"]),
+            "lot_expiry_overrides": copy.deepcopy(app_state["lot_expiry_overrides"]),
+            "settings": copy.deepcopy(app_state["settings"]),
+            "gaemi_inventory": copy.deepcopy(app_state["gaemi_inventory"]),
+            "coupang_inventory": copy.deepcopy(app_state["coupang_inventory"]),
+            "sales_inventory": copy.deepcopy(app_state["sales_inventory"]),
+            "last_updated": app_state.get("last_updated", ""),
+            "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+def _write_local_snapshot(snapshot):
+    tmp_path = DATA_FILE + ".tmp"
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(snapshot, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, DATA_FILE)
+
+def _apply_loaded_state(saved):
+    if not isinstance(saved, dict):
+        return False
+    with data_lock:
+        if "master_products" in saved and isinstance(saved["master_products"], list):
+            app_state["master_products"] = saved["master_products"]
+        if "b2b_mappings" in saved and isinstance(saved["b2b_mappings"], dict):
+            app_state["b2b_mappings"] = saved["b2b_mappings"]
+        if "lot_expiry_overrides" in saved and isinstance(saved["lot_expiry_overrides"], dict):
+            app_state["lot_expiry_overrides"] = saved["lot_expiry_overrides"]
+        if "settings" in saved and isinstance(saved["settings"], dict):
+            merged_settings = copy.deepcopy(DEFAULT_SETTINGS)
+            merged_settings.update(saved["settings"])
+            app_state["settings"] = merged_settings
+        if "gaemi_inventory" in saved and isinstance(saved["gaemi_inventory"], dict):
+            app_state["gaemi_inventory"] = saved["gaemi_inventory"]
+        if "coupang_inventory" in saved and isinstance(saved["coupang_inventory"], dict):
+            app_state["coupang_inventory"] = saved["coupang_inventory"]
+        if "sales_inventory" in saved and isinstance(saved["sales_inventory"], dict):
+            app_state["sales_inventory"] = saved["sales_inventory"]
+        if saved.get("last_updated"):
+            app_state["last_updated"] = saved["last_updated"]
+        elif saved.get("saved_at"):
+            app_state["last_updated"] = str(saved["saved_at"])[:16]
+    return True
+
+def sync_to_drive(wait=False):
+    cfg = get_gas_config()
+    if not cfg["configured"]:
+        drive_sync_state["configured"] = False
+        drive_sync_state["status"] = "disabled"
+        return copy.deepcopy(drive_sync_state)
+
+    drive_sync_state["configured"] = True
+
+    def _do_sync():
+        with drive_sync_lock:
+            drive_sync_state["status"] = "syncing"
+            try:
+                snap = build_state_snapshot()
+                res = _call_gas_bridge("save", payload=snap, timeout=15)
+                if res.get("success"):
+                    drive_sync_state["status"] = "synced"
+                    drive_sync_state["last_synced_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    drive_sync_state["last_error"] = ""
+                    if res.get("fileId"):
+                        drive_sync_state["file_id"] = res["fileId"]
+                else:
+                    drive_sync_state["status"] = "error"
+                    drive_sync_state["last_error"] = res.get("error", "알 수 없는 Drive 응답 오류")
+                    add_log(f"⚠️ Google Drive 동기화 실패: {drive_sync_state['last_error']}")
+            except Exception as e:
+                drive_sync_state["status"] = "error"
+                drive_sync_state["last_error"] = str(e)
+                add_log(f"⚠️ Google Drive 동기화 예외: {e}")
+
+    if wait:
+        _do_sync()
+    else:
+        drive_sync_state["status"] = "syncing"
+        threading.Thread(target=_do_sync, daemon=True).start()
+    return copy.deepcopy(drive_sync_state)
+
+def pull_from_drive():
+    cfg = get_gas_config()
+    if not cfg["configured"]:
+        drive_sync_state["configured"] = False
+        drive_sync_state["status"] = "disabled"
+        return {"success": False, "exists": False, "error": "Google Apps Script 미설정"}
+
+    drive_sync_state["configured"] = True
+    try:
+        with drive_sync_lock:
+            res = _call_gas_bridge("load", timeout=15)
+        if not res.get("success"):
+            err = res.get("error", "Drive 조회 실패")
+            drive_sync_state["status"] = "error"
+            drive_sync_state["last_error"] = err
+            return {"success": False, "exists": False, "error": err}
+
+        if res.get("exists") and isinstance(res.get("data"), dict):
+            _apply_loaded_state(res["data"])
+            _write_local_snapshot(build_state_snapshot())
+            now_s = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            drive_sync_state["status"] = "synced"
+            drive_sync_state["last_loaded_at"] = now_s
+            drive_sync_state["last_synced_at"] = now_s
+            drive_sync_state["last_error"] = ""
+            if res.get("fileId"):
+                drive_sync_state["file_id"] = res["fileId"]
+            return {"success": True, "exists": True, "fileId": res.get("fileId", "")}
+        else:
+            drive_sync_state["status"] = "idle"
+            return {"success": True, "exists": False}
+    except Exception as e:
+        drive_sync_state["status"] = "error"
+        drive_sync_state["last_error"] = str(e)
+        return {"success": False, "exists": False, "error": str(e)}
+
 # 영구 데이터 로드/저장
 def load_state():
     global app_state
@@ -120,30 +417,37 @@ def load_state():
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 saved = json.load(f)
-                if isinstance(saved, dict):
-                    app_state["master_products"] = saved.get("master_products", app_state["master_products"])
-                    app_state["gaemi_inventory"] = saved.get("gaemi_inventory", {})
-                    app_state["coupang_inventory"] = saved.get("coupang_inventory", {})
-                    app_state["sales_inventory"] = saved.get("sales_inventory", {})
-                add_log("💾 저장된 일쩜오도 재고 및 매핑 데이터를 불러왔습니다.")
+                if _apply_loaded_state(saved):
+                    add_log("💾 저장된 일쩜오도 재고 및 매핑 데이터를 불러왔습니다.")
         except Exception as e:
-            add_log(f"⚠️ 데이터 로드 실패: {e}")
+            add_log(f"⚠️ 로컬 데이터 로드 실패: {e}")
+
+    cfg = get_gas_config()
+    drive_sync_state["configured"] = cfg["configured"]
+    if cfg["configured"] and os.environ.get("ILJEOMODO_SKIP_BOOT_DRIVE") != "1":
+        res = pull_from_drive()
+        if res.get("success") and res.get("exists"):
+            add_log("☁️ Google Drive 영구 저장소에서 최신 관리자/재고 데이터를 자동 복원했습니다.")
+        elif res.get("success") and not res.get("exists"):
+            add_log("☁️ Google Drive 최초 연결 완료: 초기 기준 데이터를 Drive에 업로드합니다.")
+            sync_to_drive(wait=False)
+        else:
+            add_log(f"⚠️ Google Drive 초기 복원 실패 (로컬 데이터로 계속 구동): {res.get('error')}")
+    elif not cfg["configured"]:
+        drive_sync_state["status"] = "disabled"
 
 load_state()
 
-def save_state():
+def save_state(sync_drive=True, wait_drive=False):
     try:
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump({
-                "title": "일쩜오도 재고현황",
-                "master_products": app_state["master_products"],
-                "gaemi_inventory": app_state["gaemi_inventory"],
-                "coupang_inventory": app_state["coupang_inventory"],
-                "sales_inventory": app_state["sales_inventory"],
-                "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }, f, ensure_ascii=False, indent=2)
+        snapshot = build_state_snapshot()
+        _write_local_snapshot(snapshot)
     except Exception as e:
-        add_log(f"⚠️ 데이터 저장 오류: {e}")
+        add_log(f"⚠️ 로컬 데이터 저장 오류: {e}")
+
+    if sync_drive:
+        return sync_to_drive(wait=wait_drive)
+    return copy.deepcopy(drive_sync_state)
 
 # -------------------------------------------------------------
 # 구글 사이트(Google Sites) iframe 임베드 보안 헤더 허용
@@ -175,6 +479,8 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "service": "iljeomodo-inventory",
+        "drive_configured": get_gas_config()["configured"],
+        "drive_status": drive_sync_state.get("status", "disabled"),
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }), 200
 
@@ -436,17 +742,27 @@ def index():
 @app.route("/api/summary")
 def get_summary():
     """
-    마스터 상품 단위 집계, B2B/세트 상품 실물 재고 연동, 수입 110일 발주 경보,
+    마스터 상품 단위 집계, B2B/세트 상품 실물 재고 연동, 관리자 기준 정보(상품명/구분/유통기한/입고예정) 최우선 병합,
     개미/쿠팡 창고별 개별 런웨이, 소비기한(FIFO) 추적 및 소진 시뮬레이션
     """
     with data_lock:
-        master_list = app_state["master_products"]
-        gaemi = app_state["gaemi_inventory"]
-        coupang = app_state["coupang_inventory"]
-        sales = app_state["sales_inventory"]
-        logs = app_state["logs"]
+        master_list = copy.deepcopy(app_state["master_products"])
+        gaemi = copy.deepcopy(app_state["gaemi_inventory"])
+        coupang = copy.deepcopy(app_state["coupang_inventory"])
+        sales = copy.deepcopy(app_state["sales_inventory"])
+        b2b_mappings = copy.deepcopy(get_active_b2b_mappings())
+        lot_expiry_overrides = copy.deepcopy(app_state.get("lot_expiry_overrides", {}))
+        settings = copy.deepcopy(app_state.get("settings", DEFAULT_SETTINGS))
+        logs = list(app_state["logs"])
         public_url = app_state["public_url"]
         last_updated = app_state.get("last_updated", datetime.now().strftime("%Y-%m-%d %H:%M"))
+
+    base_to_shared_map = get_base_to_shared_map(b2b_mappings)
+    default_import_lt = int(settings.get("default_import_lead_time", 110) or 110)
+    default_import_buf = int(settings.get("default_import_buffer", 20) or 20)
+    default_purchase_lt = int(settings.get("default_purchase_lead_time", 7) or 7)
+    default_purchase_buf = int(settings.get("default_purchase_buffer", 7) or 7)
+    default_exp_warn = int(settings.get("default_expiry_warn_days", 120) or 120)
 
     # 1차 패스: 기본 품목들의 실물 재고, 소비기한 로트 및 쿠팡/타채널 직접 판매량 계산
     base_calc_map = {}
@@ -455,27 +771,96 @@ def get_summary():
     for m in master_list:
         seller_code = m.get("seller_code", m.get("id", "")).strip()
         norm_code = seller_code.upper()
-        
-        # 기본 개미창고 재고 및 로트별 소비기한 수집
-        g_total = 0
-        g_details = []
-        gaemi_lots = []
-        for g_code in m.get("gaemi_codes", []):
-            if g_code in gaemi:
-                for item in gaemi[g_code]:
-                    opt_filter = m.get("gaemi_filter", "").strip()
-                    if opt_filter and opt_filter not in item["option_name"]:
-                        continue
-                    st = item["stock"]
-                    g_total += st
-                    g_details.append(f"{item['option_name']}: {st}개")
-                    gaemi_lots.append({
-                        "option_name": item["option_name"],
-                        "stock": st,
-                        "reg_date": item.get("reg_date", ""),
-                        "expiry_date": item.get("expiry_date", ""),
-                        "days_left": item.get("days_left")
-                    })
+
+        # 1) 개미창고 CSV 로트 수집 및 관리자 소비기한 오버라이드 병합
+        raw_gaemi_items = get_matching_gaemi_items(m, gaemi)
+        csv_g_total = 0
+        csv_g_details = []
+        csv_lots = []
+
+        for g_code, item in raw_gaemi_items:
+            st = int(item.get("stock", 0))
+            csv_g_total += st
+            opt_name = item.get("option_name", "")
+            reg_date = item.get("reg_date", "")
+            exact_key, opt_key = make_gaemi_lot_keys(g_code, item)
+            raw_exp = normalize_date_str(item.get("expiry_date", ""))
+
+            override_val = lot_expiry_overrides.get(exact_key)
+            if override_val is None:
+                override_val = lot_expiry_overrides.get(opt_key)
+
+            if override_val == "__CLEAR__":
+                eff_exp = ""
+                is_admin_expiry = True
+            elif override_val:
+                eff_exp = normalize_date_str(override_val)
+                is_admin_expiry = True
+            else:
+                eff_exp = raw_exp
+                is_admin_expiry = False
+
+            exp_d = extract_expiry_date(eff_exp)
+            days_left = (exp_d - today).days if exp_d else None
+
+            csv_g_details.append(f"{opt_name}: {st}개")
+            csv_lots.append({
+                "gaemi_code": g_code,
+                "lot_key": exact_key,
+                "opt_key": opt_key,
+                "option_name": opt_name,
+                "stock": st,
+                "reg_date": reg_date,
+                "expiry_date": eff_exp,
+                "raw_expiry_date": raw_exp,
+                "days_left": days_left,
+                "is_admin_expiry": is_admin_expiry,
+                "source": "csv"
+            })
+
+        # 2) 관리자 수동 분할 로트(manual_lots)가 있는 경우 최우선 로트 구성 + CSV 총량 병합
+        manual_lots = m.get("manual_lots") or []
+        has_manual_lots = len(manual_lots) > 0
+        has_unassigned_stock = False
+
+        if has_manual_lots:
+            g_total = csv_g_total if len(raw_gaemi_items) > 0 else sum(max(0, int(l.get("qty", 0))) for l in manual_lots)
+            gaemi_lots = []
+            manual_sum = 0
+            for lot in manual_lots:
+                q = max(0, int(lot.get("qty", 0)))
+                manual_sum += q
+                eff_exp = normalize_date_str(lot.get("expiry_date", ""))
+                exp_d = extract_expiry_date(eff_exp)
+                days_left = (exp_d - today).days if exp_d else None
+                gaemi_lots.append({
+                    "lot_id": lot.get("lot_id", ""),
+                    "option_name": (lot.get("label") or "수동 등록 로트").strip(),
+                    "stock": q,
+                    "reg_date": "",
+                    "expiry_date": eff_exp,
+                    "days_left": days_left,
+                    "is_admin_expiry": True,
+                    "source": "manual"
+                })
+            unassigned_qty = max(0, g_total - manual_sum)
+            if unassigned_qty > 0:
+                has_unassigned_stock = True
+                gaemi_lots.append({
+                    "lot_id": "__unassigned__",
+                    "option_name": "미지정 재고 (소비기한 입력 필요)",
+                    "stock": unassigned_qty,
+                    "reg_date": "",
+                    "expiry_date": "",
+                    "days_left": None,
+                    "is_admin_expiry": False,
+                    "source": "unassigned"
+                })
+            g_details = [f"{l['option_name']}: {l['stock']}개" for l in gaemi_lots if l["stock"] > 0]
+        else:
+            g_total = csv_g_total
+            gaemi_lots = csv_lots
+            g_details = csv_g_details
 
         # 유효 재고(stock > 0)가 있는 로트들 우선 분석
         active_lots = [l for l in gaemi_lots if l["stock"] > 0]
@@ -487,18 +872,27 @@ def get_summary():
         if not exp_lots:
             exp_lots = [l for l in gaemi_lots if l.get("days_left") is not None]
 
+        default_exp = normalize_date_str(m.get("default_expiry_date", ""))
+        has_admin_expiry = any(l.get("is_admin_expiry") and l.get("expiry_date") for l in gaemi_lots)
+
         if exp_lots:
             exp_lots.sort(key=lambda x: x["days_left"])
             nearest_lot = exp_lots[0]
             nearest_expiry_date = nearest_lot["expiry_date"]
             nearest_days_left = nearest_lot["days_left"]
             nearest_lot_stock = nearest_lot["stock"]
+        elif default_exp:
+            exp_d = extract_expiry_date(default_exp)
+            nearest_expiry_date = default_exp
+            nearest_days_left = (exp_d - today).days if exp_d else None
+            nearest_lot_stock = g_total
+            has_admin_expiry = True
         else:
             nearest_expiry_date = ""
             nearest_days_left = None
             nearest_lot_stock = 0
 
-        # 쿠팡 옵션 재고 및 7일 출고량 계산
+        # 쿠팡 옵션 재고 및 출고량 계산
         c_package_total = 0
         c_physical_total = 0
         c_sales_7d_total = 0
@@ -506,14 +900,14 @@ def get_summary():
         option_details = []
 
         for opt in m.get("options", []):
-            oid = opt["id"]
-            bundle = opt.get("bundle", 1)
+            oid = str(opt.get("id", "")).strip()
+            bundle = int(opt.get("bundle", 1) or 1)
             c_data = coupang.get(oid, {})
-            c_stock = c_data.get("stock", 0)
-            c_inbound = c_data.get("inbound", 0)
-            c_sales7 = c_data.get("sales_7d", 0)
-            c_sales30 = c_data.get("sales_30d", 0)
-            doc = c_data.get("doc", 0)
+            c_stock = int(c_data.get("stock", 0) or 0)
+            c_inbound = int(c_data.get("inbound", 0) or 0)
+            c_sales7 = int(c_data.get("sales_7d", 0) or 0)
+            c_sales30 = int(c_data.get("sales_30d", 0) or 0)
+            doc = int(c_data.get("doc", 0) or 0)
 
             c_package_total += c_stock
             c_physical_total += (c_stock * bundle)
@@ -536,12 +930,16 @@ def get_summary():
         s_data = sales.get(norm_code, {"total_7d": 0, "total_30d": 0, "orders": []})
         raw_other_sales_7d = s_data.get("total_7d", 0)
         raw_other_sales_30d = s_data.get("total_30d", raw_other_sales_7d)
-        recent_orders = s_data.get("orders", [])[:5]
+        recent_orders = list(s_data.get("orders", [])[:5])
 
         base_calc_map[norm_code] = {
             "gaemi_total": g_total,
             "gaemi_details": ", ".join(g_details) if g_details else "등록 정보 없음",
             "gaemi_lots": gaemi_lots,
+            "csv_gaemi_lots": csv_lots,
+            "has_manual_lots": has_manual_lots,
+            "has_unassigned_stock": has_unassigned_stock,
+            "has_admin_expiry": has_admin_expiry,
             "nearest_expiry_date": nearest_expiry_date,
             "nearest_days_left": nearest_days_left,
             "nearest_lot_stock": nearest_lot_stock,
@@ -562,17 +960,16 @@ def get_summary():
 
     # 1-1. B2B/세트(S코드) 주문 데이터를 연동 단품(base_code) 출고량에 자동 가산 합산
     # S코드 상품은 재고현황판 화면 노출에서는 제외되지만, 주문 데이터는 단품 출고량에 배수만큼 반영
-    for s_code, s_info in SHARED_STOCK_MAP.items():
-        base_code = s_info["base_code"]
-        mult = s_info["multiplier"]
+    for s_code_raw, s_info in b2b_mappings.items():
+        s_code = str(s_code_raw).strip().upper()
+        base_code = str(s_info.get("base_code", "")).strip().upper()
+        mult = int(s_info.get("multiplier", 1) or 1)
 
-        # S코드의 타채널 주문 (sales_inventory)
         s_sales = sales.get(s_code, {})
         s_7d = s_sales.get("total_7d", 0)
         s_30d = s_sales.get("total_30d", s_7d)
         s_orders = s_sales.get("orders", [])
 
-        # S코드의 쿠팡 출고량이 혹시 등록되어 있다면 확인
         s_c_calc = base_calc_map.get(s_code, {})
         s_c_7d = s_c_calc.get("coupang_sales_7d", 0)
         s_c_30d = s_c_calc.get("coupang_sales_30d", 0)
@@ -582,7 +979,6 @@ def get_summary():
             if "b2b_shared_sales" not in target:
                 target["b2b_shared_sales"] = []
 
-            # 실물 수량으로 환산하여 단품 출고량에 가산
             if s_7d > 0 or s_30d > 0 or s_orders or s_c_7d > 0 or s_c_30d > 0:
                 target["other_sales_7d"] += (s_7d * mult)
                 target["other_sales_30d"] += (s_30d * mult)
@@ -600,15 +996,25 @@ def get_summary():
                 target["b2b_shared_sales"].append({
                     "s_code": s_code,
                     "multiplier": mult,
-                    "desc": s_info["desc"],
+                    "desc": s_info.get("desc", ""),
                     "orders_count": len(s_orders),
                     "sales_7d": s_7d * mult,
                     "sales_30d": s_30d * mult
                 })
 
-    # 2차 패스: 단품(Single Product) 기준 최종 지표 종합 (S가 붙은 세트/B2B 상품은 화면 표시 제외)
-    # S코드 상품들은 위에서 연동 단품의 출고량에 모두 반영 완료됨!
-    single_master_list = [m for m in master_list if not is_s_product_code(m.get("seller_code", m.get("id", "")))]
+    # 2차 패스: 활성 단품(Single Product) 기준 최종 지표 종합 (S코드 및 숨김 처리된 품목 제외)
+    single_master_list = [
+        m for m in master_list
+        if m.get("is_active", True) is not False
+        and not (str(m.get("seller_code", m.get("id", ""))).strip().upper().startswith("S")
+                 or str(m.get("seller_code", m.get("id", ""))).strip().upper() in b2b_mappings)
+    ]
+    inactive_count = sum(
+        1 for m in master_list
+        if m.get("is_active", True) is False
+        and not (str(m.get("seller_code", m.get("id", ""))).strip().upper().startswith("S")
+                 or str(m.get("seller_code", m.get("id", ""))).strip().upper() in b2b_mappings)
+    )
 
     master_summaries = []
     total_gaemi_stock = 0
@@ -621,23 +1027,41 @@ def get_summary():
     total_sales_7d = 0
     total_sales_30d = 0
 
-    urgent_order_count = 0       # 🔴 긴급 발주 (110일 미만 / 결품)
-    order_prepare_count = 0      # 🟡 발주 준비 (110일~130일 안전재고 버퍼)
+    urgent_order_count = 0       # 🔴 긴급 발주 (리드타임 미만 / 결품)
+    order_prepare_count = 0      # 🟡 발주 준비 (안전재고 버퍼 구간)
     coupang_transfer_count = 0   # 🔵 쿠팡 채우기 필요 (창고 간 불균형)
-    expiry_warning_count = 0     # ⏳ 소비기한 주의 (120일 미만 or 미소진 위험)
+    expiry_warning_count = 0     # ⏳ 소비기한 주의
     safe_count = 0               # 🟢 정상 안전
 
     for m in single_master_list:
         seller_code = m.get("seller_code", m.get("id", "")).strip()
         norm_code = seller_code.upper()
-        product_type = m.get("product_type", "사입").strip() or "사입"
-        note = m.get("note", "").strip()
+        product_type = (m.get("product_type") or "사입").strip() or "사입"
+        note = (m.get("note") or "").strip()
+
+        # 품목별 맞춤 리드타임/버퍼/소비기한 주의일 (미입력 시 전역 설정 사용)
+        custom_lt = m.get("lead_time_days")
+        custom_buf = m.get("safety_buffer_days")
+        custom_exp_warn = m.get("expiry_warn_days")
+
+        eff_lead_time = int(custom_lt) if custom_lt not in (None, "") else (default_import_lt if product_type == "수입" else default_purchase_lt)
+        eff_buffer = int(custom_buf) if custom_buf not in (None, "") else (default_import_buf if product_type == "수입" else default_purchase_buf)
+        eff_prepare_limit = eff_lead_time + eff_buffer
+        eff_exp_warn = int(custom_exp_warn) if custom_exp_warn not in (None, "") else default_exp_warn
+
+        in_transit_qty = max(0, int(m.get("in_transit_qty") or 0))
+        expected_arrival_date = (m.get("expected_arrival_date") or "").strip()
+        lot_sync_note = (m.get("lot_sync_note") or "").strip()
 
         calc = base_calc_map.get(norm_code, {})
 
         g_total = calc.get("gaemi_total", 0)
         g_details = calc.get("gaemi_details", "")
         gaemi_lots = calc.get("gaemi_lots", [])
+        csv_gaemi_lots = calc.get("csv_gaemi_lots", [])
+        has_manual_lots = calc.get("has_manual_lots", False)
+        has_unassigned_stock = calc.get("has_unassigned_stock", False)
+        has_admin_expiry = calc.get("has_admin_expiry", False)
         nearest_expiry_date = calc.get("nearest_expiry_date", "")
         nearest_days_left = calc.get("nearest_days_left")
         nearest_lot_stock = calc.get("nearest_lot_stock", 0)
@@ -654,14 +1078,13 @@ def get_summary():
         other_sales_30d = calc.get("other_sales_30d", 0)
         recent_orders = calc.get("recent_orders", [])
         b2b_shared_sales = calc.get("b2b_shared_sales", [])
-        b2b_linked_codes = BASE_TO_SHARED_MAP.get(norm_code, [])
+        b2b_linked_codes = base_to_shared_map.get(norm_code, [])
 
         # 3. 7일 및 30일 총 출고량 합산
         m_sales_7d = c_sales_7d + other_sales_7d
         m_sales_30d = c_sales_30d + other_sales_30d
 
         # 4. 채널별 가중 일평균 출고량 산출 (최근 7일 60% : 30일 40% 노이즈 보정)
-        # 4-1. 쿠팡 일평균 출고량
         c_daily_7 = c_sales_7d / 7.0
         c_daily_30 = c_sales_30d / 30.0 if c_sales_30d > 0 else c_daily_7
         if c_sales_7d > 0 and c_sales_30d > 0:
@@ -671,7 +1094,6 @@ def get_summary():
         else:
             coupang_daily = round(c_daily_30, 2)
 
-        # 4-2. 쿠팡외 타채널 일평균 출고량
         o_daily_7 = other_sales_7d / 7.0
         o_daily_30 = other_sales_30d / 30.0 if other_sales_30d > 0 else o_daily_7
         if other_sales_7d > 0 and other_sales_30d > 0:
@@ -681,10 +1103,8 @@ def get_summary():
         else:
             other_daily = round(o_daily_30, 2)
 
-        # 4-3. 전체 종합 일평균 출고량 (Daily Sales)
         daily_sales = round(coupang_daily + other_daily, 2)
 
-        # 전체 통계 합산 (모두 단품이므로 실물 중복 없이 합산)
         total_gaemi_stock += g_total
         total_coupang_stock += c_physical_total
         total_physical_stock += master_physical_total
@@ -696,8 +1116,6 @@ def get_summary():
         total_sales_7d += m_sales_7d
         total_sales_30d += m_sales_30d
 
-        # 4. 창고별 개별 런웨이 및 통합 런웨이 계산
-        # 통합 런웨이
         if daily_sales > 0:
             total_runway = round(master_physical_total / daily_sales, 1)
             total_runway_str = f"{total_runway}일"
@@ -709,7 +1127,6 @@ def get_summary():
             gaemi_runway = 999
             gaemi_runway_str = "소진무" if g_total > 0 else "재고없음"
 
-        # 쿠팡 독자 런웨이
         if coupang_daily > 0:
             coupang_runway = round(c_physical_total / coupang_daily, 1)
             coupang_runway_str = f"{coupang_runway}일"
@@ -730,16 +1147,16 @@ def get_summary():
                     expiry_risk = True
                     expiry_risk_qty = nearest_lot_stock - projected_sales_to_exp
                     expiry_note = f"기한내 {expiry_risk_qty}개 미소진 위험"
-                elif nearest_days_left <= 120:
+                elif nearest_days_left <= eff_exp_warn:
                     expiry_risk = True
                     expiry_note = f"기한 잔여 {nearest_days_left}일 주의"
             else:
-                if nearest_days_left <= 120 and nearest_lot_stock > 0:
+                if nearest_days_left <= eff_exp_warn and nearest_lot_stock > 0:
                     expiry_risk = True
                     expiry_risk_qty = nearest_lot_stock
                     expiry_note = f"잔여 {nearest_days_left}일 (판매 정체)"
 
-        # 6. 결품 방지 및 발주 의사결정 액션(Action) 판정 트리
+        # 6. 결품 방지 및 발주 의사결정 액션(Action) 판정 트리 (품목별/관리자 설정 리드타임 반영)
         is_urgent = False
         is_order_prepare = False
         is_coupang_transfer = False
@@ -747,55 +1164,34 @@ def get_summary():
         is_safe = False
 
         if master_physical_total == 0:
-            # 🔴 결품 (0개)
             status = "🔴 결품 (0개)"
             status_color = "red"
             action_cta = "🚨 결품 즉시 발주"
             action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
             risk_score = 1000
             is_urgent = True
-        elif product_type == "수입" and total_runway < 110:
-            # 🔴 수입 리드타임 110일 미만 긴급 발주
+        elif total_runway < eff_lead_time:
             status = f"🔴 긴급 발주 (D-{int(total_runway)}일)"
             status_color = "red"
-            action_cta = "🚨 수입 발주 기안"
+            action_cta = "🚨 수입 발주 기안" if product_type == "수입" else "🚨 사입 긴급 발주"
             action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
-            risk_score = 900 - total_runway
-            is_urgent = True
-        elif product_type == "사입" and total_runway < 7:
-            # 🔴 사입 국내 배송 리드타임 미만 긴급 발주
-            status = f"🔴 긴급 발주 (D-{int(total_runway)}일)"
-            status_color = "red"
-            action_cta = "🚨 사입 긴급 발주"
-            action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
-            risk_score = 850 - total_runway
+            risk_score = (900 if product_type == "수입" else 850) - total_runway
             is_urgent = True
         elif g_total >= 10 and (coupang_runway <= 14 or (c_physical_total == 0 and c_sales_7d > 0)):
-            # 🔵 창고 간 불균형: 개미창고 실물은 있으나 쿠팡 재고 바닥 (14일 이하)
             status = f"🔵 쿠팡 채우기 (쿠팡 D-{int(coupang_runway)}일)"
             status_color = "blue"
             action_cta = "📦 쿠팡 입고 요청"
             action_cta_class = "bg-blue-600 hover:bg-blue-700 text-white"
             risk_score = 700 - coupang_runway
             is_coupang_transfer = True
-        elif product_type == "수입" and total_runway <= 130:
-            # 🟡 수입 안전재고 20일 구간 (110~130일) 발주 준비
-            status = f"🟡 발주 준비 (D-{int(total_runway)}일)"
+        elif total_runway <= eff_prepare_limit:
+            status = f"🟡 발주 준비 (D-{int(total_runway)}일)" if product_type == "수입" else f"🟡 사입 주의 (D-{int(total_runway)}일)"
             status_color = "amber"
-            action_cta = "📝 발주서 작성"
+            action_cta = "📝 발주서 작성" if product_type == "수입" else "📝 사입 발주 검토"
             action_cta_class = "bg-amber-500 hover:bg-amber-600 text-white"
-            risk_score = 500 - total_runway
-            is_order_prepare = True
-        elif product_type == "사입" and total_runway <= 14:
-            # 🟡 사입 7~14일 안전재고 구간
-            status = f"🟡 사입 주의 (D-{int(total_runway)}일)"
-            status_color = "amber"
-            action_cta = "📝 사입 발주 검토"
-            action_cta_class = "bg-amber-500 hover:bg-amber-600 text-white"
-            risk_score = 450 - total_runway
+            risk_score = (500 if product_type == "수입" else 450) - total_runway
             is_order_prepare = True
         elif expiry_risk:
-            # ⏳ 소비기한 경보
             status = f"⏳ 기한 주의 ({expiry_note})"
             status_color = "purple"
             action_cta = "🏷️ 임박 특가/프로모션"
@@ -803,7 +1199,6 @@ def get_summary():
             risk_score = 350
             is_exp_warn = True
         else:
-            # 🟢 정상 안전
             safe_d = f"D-{int(total_runway)}일" if total_runway < 900 else "안전(소진무)"
             status = f"✅ 정상 안전 ({safe_d})"
             status_color = "green"
@@ -829,15 +1224,32 @@ def get_summary():
             "name": m.get("name", ""),
             "product_type": product_type,
             "note": note,
+            "is_active": m.get("is_active", True),
+            "lead_time_days": custom_lt,
+            "safety_buffer_days": custom_buf,
+            "expiry_warn_days": custom_exp_warn,
+            "effective_lead_time": eff_lead_time,
+            "effective_prepare_limit": eff_prepare_limit,
+            "effective_expiry_warn": eff_exp_warn,
+            "in_transit_qty": in_transit_qty,
+            "expected_arrival_date": expected_arrival_date,
+            "lot_sync_note": lot_sync_note,
             "is_shared": False,
-            "has_b2b_set": (norm_code in BASE_TO_SHARED_MAP),
+            "has_b2b_set": (norm_code in base_to_shared_map),
             "b2b_linked_codes": b2b_linked_codes,
             "b2b_shared_sales": b2b_shared_sales,
             "category": m.get("category", "기타"),
             "gaemi_codes": m.get("gaemi_codes", []),
+            "gaemi_filter": m.get("gaemi_filter", ""),
             "gaemi_total": g_total,
             "gaemi_details": g_details,
             "gaemi_lots": gaemi_lots,
+            "csv_gaemi_lots": csv_gaemi_lots,
+            "manual_lots": copy.deepcopy(m.get("manual_lots") or []),
+            "has_manual_lots": has_manual_lots,
+            "has_unassigned_stock": has_unassigned_stock,
+            "has_admin_expiry": has_admin_expiry,
+            "default_expiry_date": normalize_date_str(m.get("default_expiry_date", "")),
             "nearest_expiry_date": nearest_expiry_date,
             "nearest_days_left": nearest_days_left,
             "nearest_lot_stock": nearest_lot_stock,
@@ -880,12 +1292,13 @@ def get_summary():
     master_summaries.sort(key=lambda x: x["risk_score"], reverse=True)
 
     # 하위 호환성 유지 카운터 (테스트 코드 호환)
-    legacy_leadtime_count = sum(1 for m in master_summaries if m["product_type"] == "수입" and m["total_runway"] <= 130)
+    legacy_leadtime_count = sum(1 for m in master_summaries if m["product_type"] == "수입" and m["total_runway"] <= m["effective_prepare_limit"])
 
     return jsonify({
         "masters": master_summaries,
         "stats": {
             "total_masters": len(master_summaries),
+            "inactive_count": inactive_count,
             "total_gaemi_stock": total_gaemi_stock,
             "total_coupang_stock": total_coupang_stock,
             "total_physical_stock": total_physical_stock,
@@ -909,32 +1322,94 @@ def get_summary():
             "has_coupang_data": len(app_state["coupang_inventory"]) > 0,
             "has_sales_data": len(app_state["sales_inventory"]) > 0
         },
+        "settings": {
+            "default_import_lead_time": default_import_lt,
+            "default_import_buffer": default_import_buf,
+            "default_purchase_lead_time": default_purchase_lt,
+            "default_purchase_buffer": default_purchase_buf,
+            "default_expiry_warn_days": default_exp_warn
+        },
+        "drive_sync": copy.deepcopy(drive_sync_state),
         "logs": logs,
         "public_url": public_url
     })
 
+def apply_fifo_deduction_on_gaemi_upload(old_gaemi, new_gaemi):
+    """
+    개미창고 CSV 재업로드 시, 관리자가 수동 분할한 소비기한 로트(manual_lots)가 있는 품목에 대해
+    이전 CSV 재고 대비 감소한 출고 수량만큼 가장 빠른 소비기한 로트부터 선입선출(FIFO) 자동 차감
+    """
+    now_label = datetime.now().strftime("%m-%d %H:%M")
+    deducted_products = []
+    for m in app_state.get("master_products", []):
+        manual_lots = m.get("manual_lots")
+        if not manual_lots:
+            continue
+        old_items = get_matching_gaemi_items(m, old_gaemi)
+        new_items = get_matching_gaemi_items(m, new_gaemi)
+        old_total = sum(int(item.get("stock", 0)) for _, item in old_items)
+        new_total = sum(int(item.get("stock", 0)) for _, item in new_items)
+
+        if not new_items and new_total == 0:
+            continue
+
+        shipped = max(0, old_total - new_total) if old_items else 0
+        current_manual_sum = sum(max(0, int(l.get("qty", 0))) for l in manual_lots)
+        excess = max(0, current_manual_sum - new_total)
+        to_deduct = max(shipped, excess)
+
+        if to_deduct > 0:
+            indexed = list(enumerate(manual_lots))
+            indexed.sort(key=lambda pair: (normalize_date_str(pair[1].get("expiry_date", "")) or "9999-12-31", pair[0]))
+            remaining_deduct = to_deduct
+            actually_deducted = 0
+            for _, lot in indexed:
+                if remaining_deduct <= 0:
+                    break
+                q = max(0, int(lot.get("qty", 0)))
+                if q <= 0:
+                    continue
+                take = min(q, remaining_deduct)
+                lot["qty"] = q - take
+                remaining_deduct -= take
+                actually_deducted += take
+            if actually_deducted > 0:
+                m["lot_sync_note"] = f"새 CSV 출고분 {actually_deducted}개 선입선출(FIFO) 자동 차감 ({now_label})"
+                deducted_products.append(f"{m.get('seller_code')}(-{actually_deducted})")
+        elif new_total > current_manual_sum:
+            diff = new_total - current_manual_sum
+            m["lot_sync_note"] = f"신규 입고 +{diff}개 감지됨 (소비기한 확인 권장 · {now_label})"
+    return deducted_products
+
 @app.route("/api/upload-file-data", methods=["POST"])
 def upload_file_data():
     """
-    파싱된 2차원 배열 데이터(개미창고, 쿠팡, 쿠팡외 매출) 반영
+    파싱된 2차원 배열 데이터(개미창고, 쿠팡, 쿠팡외 매출) 반영.
+    관리자 마스터 정보(상품명/구분/유통기한/리드타임/메모)는 보존되고 재고·출고 숫자만 최신 CSV로 병합됨.
     """
     body = request.get_json() or {}
     source = body.get("source") # 'gaemi', 'coupang', 'sales'
     rows = body.get("rows", [])
-
-    with data_lock:
-        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     if source == "gaemi":
         parsed = parse_gaemi_rows(rows)
         if not parsed:
             return jsonify({"success": False, "message": "개미창고 파일 형식(헤더: 상품코드, 재고량 등)을 인식하지 못했습니다."}), 400
         with data_lock:
+            old_gaemi = copy.deepcopy(app_state["gaemi_inventory"])
+            deducted = apply_fifo_deduction_on_gaemi_upload(old_gaemi, parsed)
             app_state["gaemi_inventory"] = parsed
-        save_state()
+            app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        sync_res = save_state(sync_drive=True, wait_drive=False)
         total_items = sum(len(v) for v in parsed.values())
-        add_log(f"📦 [개미창고(3PL)] {len(parsed)}개 상품코드(세부 {total_items}건) 재고 및 소비기한 데이터가 업데이트되었습니다!")
-        return jsonify({"success": True, "message": f"개미창고 {total_items}개 품목 재고가 반영되었습니다."})
+        fifo_msg = f" · FIFO 차감: {', '.join(deducted)}" if deducted else ""
+        add_log(f"📦 [개미창고(3PL)] {len(parsed)}개 상품코드(세부 {total_items}건) 수량 갱신 완료 (관리자 소비기한/기준 유지{fifo_msg})")
+        return jsonify({
+            "success": True,
+            "message": f"개미창고 {total_items}개 품목 재고가 반영되었습니다. (관리자 설정 보존)",
+            "fifo_deducted": deducted,
+            "drive_sync": sync_res
+        })
 
     elif source == "coupang":
         parsed = parse_coupang_rows(rows)
@@ -942,9 +1417,10 @@ def upload_file_data():
             return jsonify({"success": False, "message": "쿠팡 윙 파일 형식(헤더: 옵션 ID, 판매가능재고 등)을 인식하지 못했습니다."}), 400
         with data_lock:
             app_state["coupang_inventory"].update(parsed)
-        save_state()
-        add_log(f"🚀 [쿠팡 윙] {len(parsed)}개 옵션 ID의 실시간 재고 및 7일 판매량 데이터가 업데이트되었습니다!")
-        return jsonify({"success": True, "message": f"쿠팡 윙 {len(parsed)}개 옵션 데이터가 반영되었습니다."})
+            app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        sync_res = save_state(sync_drive=True, wait_drive=False)
+        add_log(f"🚀 [쿠팡 윙] {len(parsed)}개 옵션 ID의 실시간 재고 및 판매량 데이터가 업데이트되었습니다!")
+        return jsonify({"success": True, "message": f"쿠팡 윙 {len(parsed)}개 옵션 데이터가 반영되었습니다.", "drive_sync": sync_res})
 
     elif source == "sales":
         parsed = parse_sales_rows(rows)
@@ -952,16 +1428,18 @@ def upload_file_data():
             return jsonify({"success": False, "message": "매출정보 파일 형식(헤더: 판매자관리코드, 주문수량 등)을 인식하지 못했습니다."}), 400
         with data_lock:
             app_state["sales_inventory"] = parsed
-        save_state()
+            app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        sync_res = save_state(sync_drive=True, wait_drive=False)
         total_qty = sum(v["total_7d"] for v in parsed.values())
         add_log(f"📈 [쿠팡외 통합 매출] {len(parsed)}개 상품코드(총 {total_qty}개 주문 출고) 데이터가 반영되었습니다!")
-        return jsonify({"success": True, "message": f"쿠팡외 매출 {len(parsed)}개 품목({total_qty}개 출고)이 반영되었습니다."})
+        return jsonify({"success": True, "message": f"쿠팡외 매출 {len(parsed)}개 품목({total_qty}개 출고)이 반영되었습니다.", "drive_sync": sync_res})
 
     return jsonify({"success": False, "message": "유효하지 않은 데이터 소스입니다."}), 400
 
 @app.route("/api/load-sample", methods=["POST"])
+@require_admin
 def load_sample():
-    """원클릭 샘플 데이터 로드"""
+    """원클릭 샘플 데이터 로드 (관리자 PIN 인증 필요)"""
     loaded = []
     with data_lock:
         app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -974,6 +1452,8 @@ def load_sample():
                 parsed = parse_gaemi_rows(rows)
                 if parsed:
                     with data_lock:
+                        old_gaemi = copy.deepcopy(app_state["gaemi_inventory"])
+                        apply_fifo_deduction_on_gaemi_upload(old_gaemi, parsed)
                         app_state["gaemi_inventory"] = parsed
                     loaded.append("개미창고")
         except Exception as e:
@@ -1005,9 +1485,9 @@ def load_sample():
         except Exception as e:
             add_log(f"매출정보 샘플 로드 오류: {e}")
 
-    save_state()
-    add_log(f"✨ [원클릭 샘플 로드 완료] {' / '.join(loaded)} 데이터가 액션보드에 즉시 반영되었습니다!")
-    return jsonify({"success": True, "message": f"{', '.join(loaded)} 샘플 데이터 로드 완료"})
+    sync_res = save_state(sync_drive=True, wait_drive=False)
+    add_log(f"✨ [샘플 데이터 로드 완료] {' / '.join(loaded)} 데이터가 반영되었습니다!")
+    return jsonify({"success": True, "message": f"{', '.join(loaded)} 샘플 데이터 로드 완료", "drive_sync": sync_res})
 
 @app.route("/api/clear-logs", methods=["POST"])
 def clear_logs():
@@ -1049,6 +1529,560 @@ def export_master_csv():
     )
 
 # -------------------------------------------------------------
+# 관리자 모드 인증 & 데이터 편집 REST API
+# -------------------------------------------------------------
+@app.route("/api/admin/verify-pin", methods=["POST"])
+def admin_verify_pin():
+    body = request.get_json() or {}
+    pin_input = str(body.get("pin", "")).strip()
+    effective_pin, pin_source = get_effective_admin_pin()
+
+    if not pin_input or not hmac.compare_digest(pin_input, effective_pin):
+        return jsonify({"success": False, "message": "PIN 번호가 일치하지 않습니다."}), 401
+
+    token, ttl = issue_admin_token()
+    add_log("🔓 [관리자 모드] PIN 인증 성공 — 관리자 편집 모드가 활성화되었습니다.")
+    return jsonify({
+        "success": True,
+        "token": token,
+        "expires_in": ttl,
+        "pin_source": pin_source,
+        "drive_sync": copy.deepcopy(drive_sync_state)
+    })
+
+@app.route("/api/admin/logout", methods=["POST"])
+def admin_logout():
+    global _admin_revoked_before
+    _admin_revoked_before = max(_admin_revoked_before, _admin_last_iat_ms, int(time.time() * 1000))
+    add_log("🔒 [관리자 모드] 관리자 편집 모드가 잠금 처리되었습니다.")
+    return jsonify({"success": True})
+
+@app.route("/api/admin/session", methods=["GET"])
+def admin_session_status():
+    token = request.headers.get("X-Admin-Token", "").strip()
+    is_auth = verify_admin_token(token)
+    _, pin_source = get_effective_admin_pin()
+    return jsonify({
+        "authenticated": is_auth,
+        "pin_source": pin_source if is_auth else "",
+        "drive_sync": copy.deepcopy(drive_sync_state)
+    })
+
+@app.route("/api/admin/config", methods=["GET"])
+@require_admin
+def admin_get_config():
+    _, pin_source = get_effective_admin_pin()
+    gas_code = ""
+    if os.path.exists(GAS_SCRIPT_FILE):
+        try:
+            with open(GAS_SCRIPT_FILE, 'r', encoding='utf-8') as f:
+                gas_code = f.read()
+        except Exception:
+            pass
+
+    with data_lock:
+        masters = copy.deepcopy(app_state["master_products"])
+        b2b = copy.deepcopy(get_active_b2b_mappings())
+        lot_overrides = copy.deepcopy(app_state.get("lot_expiry_overrides", {}))
+        settings = copy.deepcopy(app_state.get("settings", DEFAULT_SETTINGS))
+        settings_public = {
+            "default_import_lead_time": settings.get("default_import_lead_time", 110),
+            "default_import_buffer": settings.get("default_import_buffer", 20),
+            "default_purchase_lead_time": settings.get("default_purchase_lead_time", 7),
+            "default_purchase_buffer": settings.get("default_purchase_buffer", 7),
+            "default_expiry_warn_days": settings.get("default_expiry_warn_days", 120)
+        }
+        gaemi = copy.deepcopy(app_state.get("gaemi_inventory", {}))
+        coupang = copy.deepcopy(app_state.get("coupang_inventory", {}))
+
+    return jsonify({
+        "success": True,
+        "master_products": masters,
+        "b2b_mappings": b2b,
+        "lot_expiry_overrides": lot_overrides,
+        "settings": settings_public,
+        "gaemi_inventory": gaemi,
+        "coupang_inventory": coupang,
+        "pin_source": pin_source,
+        "drive_sync": copy.deepcopy(drive_sync_state),
+        "gas_script": gas_code
+    })
+
+def _parse_optional_positive_int(val):
+    if val in (None, "", "null"):
+        return None
+    try:
+        n = int(float(val))
+        return n if n >= 0 else None
+    except Exception:
+        return None
+
+@app.route("/api/admin/product/save", methods=["POST"])
+@require_admin
+def admin_save_product():
+    """단일 마스터 상품 생성/수정 + 소비기한 오버라이드/분할 로트 + (선택) 임시 수량 보정"""
+    body = request.get_json() or {}
+    seller_code = str(body.get("seller_code", "")).strip()
+    orig_id = str(body.get("id", "")).strip()
+    orig_seller_code = str(body.get("original_seller_code", seller_code)).strip()
+    name = str(body.get("name", "")).strip()
+
+    if not seller_code or not name:
+        return jsonify({"success": False, "message": "판매자관리코드와 상품명은 필수 입력 항목입니다."}), 400
+
+    product_type = str(body.get("product_type", "사입")).strip()
+    if product_type not in ("수입", "사입"):
+        product_type = "사입"
+    category = str(body.get("category", "기타")).strip() or "기타"
+    note = str(body.get("note", "")).strip()
+    is_active = bool(body.get("is_active", True))
+
+    lead_time_days = _parse_optional_positive_int(body.get("lead_time_days"))
+    safety_buffer_days = _parse_optional_positive_int(body.get("safety_buffer_days"))
+    expiry_warn_days = _parse_optional_positive_int(body.get("expiry_warn_days"))
+    in_transit_qty = max(0, _parse_optional_positive_int(body.get("in_transit_qty")) or 0)
+    expected_arrival_date = normalize_date_str(body.get("expected_arrival_date", ""))
+    default_expiry_date = normalize_date_str(body.get("default_expiry_date", ""))
+
+    # 개미창고 코드 파싱 (배열 또는 쉼표 문자열 지원)
+    raw_g_codes = body.get("gaemi_codes", [])
+    if isinstance(raw_g_codes, str):
+        gaemi_codes = [c.strip() for c in raw_g_codes.split(",") if c.strip()]
+    elif isinstance(raw_g_codes, list):
+        gaemi_codes = [str(c).strip() for c in raw_g_codes if str(c).strip()]
+    else:
+        gaemi_codes = []
+    gaemi_filter = str(body.get("gaemi_filter", "")).strip()
+
+    # 쿠팡 옵션 파싱
+    clean_options = []
+    for opt in (body.get("options") or []):
+        oid = str(opt.get("id", "")).strip()
+        if not oid:
+            continue
+        bundle = max(1, _parse_optional_positive_int(opt.get("bundle")) or 1)
+        oname = str(opt.get("name", f"{bundle}개")).strip() or f"{bundle}개"
+        clean_options.append({"id": oid, "bundle": bundle, "name": oname})
+
+    # 수동 분할 소비기한 로트 파싱
+    clean_manual_lots = []
+    for lot in (body.get("manual_lots") or []):
+        exp = normalize_date_str(lot.get("expiry_date", ""))
+        label = str(lot.get("label", "")).strip() or "로트"
+        qty = max(0, _parse_optional_positive_int(lot.get("qty")) or 0)
+        lot_id = str(lot.get("lot_id") or f"L_{uuid.uuid4().hex[:8]}").strip()
+        if not exp and qty == 0 and not label:
+            continue
+        clean_manual_lots.append({
+            "lot_id": lot_id,
+            "label": label,
+            "expiry_date": exp,
+            "qty": qty
+        })
+
+    is_new = bool(body.get("is_new", False))
+    norm_new_code = seller_code.upper()
+    norm_orig_code = orig_seller_code.upper()
+
+    with data_lock:
+        masters = app_state["master_products"]
+        target_idx = -1
+
+        if not is_new:
+            for idx, item in enumerate(masters):
+                item_id = str(item.get("id", "")).strip()
+                item_code = str(item.get("seller_code", "")).strip().upper()
+                if (orig_id and item_id == orig_id) or (norm_orig_code and item_code == norm_orig_code):
+                    target_idx = idx
+                    break
+
+        # 코드 중복 체크
+        for idx, item in enumerate(masters):
+            if idx == target_idx:
+                continue
+            if str(item.get("seller_code", "")).strip().upper() == norm_new_code:
+                return jsonify({"success": False, "message": f"관리코드 '{seller_code}'는 이미 다른 품목에 등록되어 있습니다."}), 400
+
+        if target_idx == -1:
+            # 신규 단품 추가
+            new_id = orig_id or f"P_{seller_code}"
+            existing_ids = {str(x.get("id", "")) for x in masters}
+            if new_id in existing_ids:
+                new_id = f"P_{seller_code}_{uuid.uuid4().hex[:4]}"
+            record = {
+                "id": new_id,
+                "seller_code": seller_code,
+                "name": name,
+                "product_type": product_type,
+                "note": note,
+                "category": category,
+                "is_active": is_active,
+                "lead_time_days": lead_time_days,
+                "safety_buffer_days": safety_buffer_days,
+                "expiry_warn_days": expiry_warn_days,
+                "in_transit_qty": in_transit_qty,
+                "expected_arrival_date": expected_arrival_date,
+                "default_expiry_date": default_expiry_date,
+                "gaemi_codes": gaemi_codes,
+                "gaemi_filter": gaemi_filter,
+                "options": clean_options,
+                "manual_lots": clean_manual_lots,
+                "lot_sync_note": ""
+            }
+            masters.append(record)
+            action_label = "신규 등록"
+        else:
+            record = masters[target_idx]
+            old_code_upper = str(record.get("seller_code", "")).strip().upper()
+            record["seller_code"] = seller_code
+            record["name"] = name
+            if "product_type" in body:
+                record["product_type"] = product_type
+            if "category" in body:
+                record["category"] = category
+            if "note" in body:
+                record["note"] = note
+            if "is_active" in body:
+                record["is_active"] = is_active
+            if "lead_time_days" in body:
+                record["lead_time_days"] = lead_time_days
+            if "safety_buffer_days" in body:
+                record["safety_buffer_days"] = safety_buffer_days
+            if "expiry_warn_days" in body:
+                record["expiry_warn_days"] = expiry_warn_days
+            if "in_transit_qty" in body:
+                record["in_transit_qty"] = in_transit_qty
+            if "expected_arrival_date" in body:
+                record["expected_arrival_date"] = expected_arrival_date
+            if "default_expiry_date" in body:
+                record["default_expiry_date"] = default_expiry_date
+            if "gaemi_codes" in body:
+                record["gaemi_codes"] = gaemi_codes
+            if "gaemi_filter" in body:
+                record["gaemi_filter"] = gaemi_filter
+            if "options" in body:
+                record["options"] = clean_options
+            if "manual_lots" in body:
+                record["manual_lots"] = clean_manual_lots
+                if len(clean_manual_lots) == 0:
+                    record["lot_sync_note"] = ""
+
+            # 관리코드 변경 시 b2b_mappings 역참조 자동 갱신
+            if old_code_upper and old_code_upper != norm_new_code:
+                for _, binfo in get_active_b2b_mappings().items():
+                    if str(binfo.get("base_code", "")).strip().upper() == old_code_upper:
+                        binfo["base_code"] = norm_new_code
+            action_label = "수정"
+
+        # CSV 개미 로트별 소비기한 오버라이드 저장
+        csv_lot_expiries = body.get("csv_lot_expiries") or {}
+        if isinstance(csv_lot_expiries, dict):
+            overrides = app_state.setdefault("lot_expiry_overrides", {})
+            for lot_key, exp_val in csv_lot_expiries.items():
+                k = str(lot_key).strip()
+                if not k:
+                    continue
+                v = str(exp_val or "").strip()
+                if v == "__RESTORE__":
+                    overrides.pop(k, None)
+                elif v == "__CLEAR__":
+                    overrides[k] = "__CLEAR__"
+                elif v == "":
+                    overrides.pop(k, None)
+                else:
+                    norm_d = normalize_date_str(v)
+                    if norm_d:
+                        overrides[k] = norm_d
+
+        # (선택) 임시 수동 재고 보정 — 다음 CSV 업로드 전까지 반영됨
+        temp_gaemi_stock_map = body.get("temp_gaemi_stocks")
+        if isinstance(temp_gaemi_stock_map, dict) and temp_gaemi_stock_map:
+            gaemi_inv = app_state["gaemi_inventory"]
+            for g_code, item in get_matching_gaemi_items(record, gaemi_inv):
+                ek, _ = make_gaemi_lot_keys(g_code, item)
+                if ek in temp_gaemi_stock_map and temp_gaemi_stock_map[ek] not in (None, ""):
+                    item["stock"] = max(0, int(temp_gaemi_stock_map[ek]))
+
+        temp_coupang_stock_map = body.get("temp_coupang_stocks")
+        if isinstance(temp_coupang_stock_map, dict) and temp_coupang_stock_map:
+            coupang_inv = app_state["coupang_inventory"]
+            for oid, st_val in temp_coupang_stock_map.items():
+                if st_val in (None, ""):
+                    continue
+                oid_s = str(oid).strip()
+                if oid_s in coupang_inv:
+                    coupang_inv[oid_s]["stock"] = max(0, int(st_val))
+                    coupang_inv[oid_s]["updated_at"] = datetime.now().strftime("%m-%d %H:%M")
+                else:
+                    coupang_inv[oid_s] = {
+                        "product_name": name,
+                        "option_name": "수동 등록",
+                        "stock": max(0, int(st_val)),
+                        "inbound": 0,
+                        "sales_7d": 0,
+                        "sales_30d": 0,
+                        "doc": 0,
+                        "updated_at": datetime.now().strftime("%m-%d %H:%M")
+                    }
+
+        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    sync_res = save_state(sync_drive=True, wait_drive=True)
+    add_log(f"✏️ [관리자 {action_label}] {seller_code} ({name}) 기준 정보가 업데이트되었습니다.")
+    return jsonify({
+        "success": True,
+        "message": f"[{seller_code}] {name} {action_label} 완료!",
+        "product": record,
+        "drive_sync": sync_res
+    })
+
+@app.route("/api/admin/product/delete", methods=["POST"])
+@require_admin
+def admin_delete_product():
+    """마스터 상품 숨김(비활성화) 토글 또는 완전 삭제"""
+    body = request.get_json() or {}
+    seller_code = str(body.get("seller_code", "")).strip().upper()
+    prod_id = str(body.get("id", "")).strip()
+    mode = str(body.get("mode", "hide")).strip() # 'hide' | 'restore' | 'hard'
+
+    with data_lock:
+        masters = app_state["master_products"]
+        idx_found = -1
+        for i, m in enumerate(masters):
+            if (prod_id and m.get("id") == prod_id) or (seller_code and str(m.get("seller_code", "")).strip().upper() == seller_code):
+                idx_found = i
+                break
+        if idx_found == -1:
+            return jsonify({"success": False, "message": "대상 상품을 찾을 수 없습니다."}), 404
+
+        target = masters[idx_found]
+        t_name = target.get("name", seller_code)
+        if mode == "hard":
+            masters.pop(idx_found)
+            msg = f"[{target.get('seller_code')}] {t_name} 영구 삭제 완료"
+        elif mode == "restore":
+            target["is_active"] = True
+            msg = f"[{target.get('seller_code')}] {t_name} 대시보드 노출 복원 완료"
+        else:
+            target["is_active"] = False
+            msg = f"[{target.get('seller_code')}] {t_name} 대시보드 숨김 처리 완료"
+        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    sync_res = save_state(sync_drive=True, wait_drive=True)
+    add_log(f"🗂️ [관리자] {msg}")
+    return jsonify({"success": True, "message": msg, "drive_sync": sync_res})
+
+@app.route("/api/admin/products/bulk-save", methods=["POST"])
+@require_admin
+def admin_bulk_save_products():
+    """관리자 센터 일괄 편집(상품명/구분/리드타임/입고예정/메모/소비기한) 저장"""
+    body = request.get_json() or {}
+    items = body.get("products") or []
+    lot_updates = body.get("lot_expiry_overrides") or {}
+
+    updated_count = 0
+    with data_lock:
+        masters = app_state["master_products"]
+        by_id = {str(m.get("id", "")): m for m in masters}
+        by_code = {str(m.get("seller_code", "")).strip().upper(): m for m in masters}
+
+        for row in items:
+            m = by_id.get(str(row.get("id", ""))) or by_code.get(str(row.get("seller_code", "")).strip().upper())
+            if not m:
+                continue
+            if "name" in row and str(row["name"]).strip():
+                m["name"] = str(row["name"]).strip()
+            if "product_type" in row and row["product_type"] in ("수입", "사입"):
+                m["product_type"] = row["product_type"]
+            if "category" in row and str(row["category"]).strip():
+                m["category"] = str(row["category"]).strip()
+            if "lead_time_days" in row:
+                m["lead_time_days"] = _parse_optional_positive_int(row["lead_time_days"])
+            if "safety_buffer_days" in row:
+                m["safety_buffer_days"] = _parse_optional_positive_int(row["safety_buffer_days"])
+            if "in_transit_qty" in row:
+                m["in_transit_qty"] = max(0, _parse_optional_positive_int(row["in_transit_qty"]) or 0)
+            if "expected_arrival_date" in row:
+                m["expected_arrival_date"] = normalize_date_str(row["expected_arrival_date"])
+            if "default_expiry_date" in row:
+                m["default_expiry_date"] = normalize_date_str(row["default_expiry_date"])
+            if "note" in row:
+                m["note"] = str(row["note"] or "").strip()
+            if "is_active" in row:
+                m["is_active"] = bool(row["is_active"])
+            updated_count += 1
+
+        if isinstance(lot_updates, dict):
+            overrides = app_state.setdefault("lot_expiry_overrides", {})
+            for k, v in lot_updates.items():
+                key = str(k).strip()
+                val = str(v or "").strip()
+                if not key:
+                    continue
+                if val == "__RESTORE__" or val == "":
+                    overrides.pop(key, None)
+                elif val == "__CLEAR__":
+                    overrides[key] = "__CLEAR__"
+                else:
+                    nd = normalize_date_str(val)
+                    if nd:
+                        overrides[key] = nd
+
+        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    sync_res = save_state(sync_drive=True, wait_drive=True)
+    add_log(f"📊 [관리자 일괄 저장] {updated_count}개 품목 및 소비기한 기준이 저장되었습니다.")
+    return jsonify({
+        "success": True,
+        "message": f"{updated_count}개 품목 일괄 저장 완료!",
+        "drive_sync": sync_res
+    })
+
+@app.route("/api/admin/b2b-mappings/save", methods=["POST"])
+@require_admin
+def admin_save_b2b_mappings():
+    """B2B/세트(S코드) 연동 매핑 저장"""
+    body = request.get_json() or {}
+    mappings_list = body.get("mappings")
+    if not isinstance(mappings_list, list):
+        return jsonify({"success": False, "message": "매핑 목록 형식이 올바르지 않습니다."}), 400
+
+    new_map = {}
+    for row in mappings_list:
+        s_code = str(row.get("s_code", "")).strip().upper()
+        base_code = str(row.get("base_code", "")).strip().upper()
+        mult = max(1, _parse_optional_positive_int(row.get("multiplier")) or 1)
+        desc = str(row.get("desc", "")).strip()
+        if not s_code or not base_code:
+            continue
+        new_map[s_code] = {
+            "base_code": base_code,
+            "multiplier": mult,
+            "desc": desc or f"{base_code} {mult}개 세트"
+        }
+
+    with data_lock:
+        app_state["b2b_mappings"] = new_map
+        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    sync_res = save_state(sync_drive=True, wait_drive=True)
+    add_log(f"🔗 [관리자 B2B 매핑] {len(new_map)}개 세트(S코드) 연동 규칙이 업데이트되었습니다.")
+    return jsonify({
+        "success": True,
+        "message": f"{len(new_map)}개 B2B/세트 매핑 저장 완료!",
+        "b2b_mappings": new_map,
+        "drive_sync": sync_res
+    })
+
+@app.route("/api/admin/settings/save", methods=["POST"])
+@require_admin
+def admin_save_settings():
+    """전역 발주/소비기한 기본 기준 및 커스텀 PIN 저장"""
+    body = request.get_json() or {}
+    new_pin = str(body.get("new_pin", "")).strip()
+
+    with data_lock:
+        s = app_state.setdefault("settings", copy.deepcopy(DEFAULT_SETTINGS))
+        for key, default_val in [
+            ("default_import_lead_time", 110),
+            ("default_import_buffer", 20),
+            ("default_purchase_lead_time", 7),
+            ("default_purchase_buffer", 7),
+            ("default_expiry_warn_days", 120),
+        ]:
+            if key in body:
+                v = _parse_optional_positive_int(body[key])
+                if v is not None:
+                    s[key] = max(1, v)
+
+        pin_msg = ""
+        if new_pin:
+            if os.environ.get("ADMIN_PIN", "").strip():
+                pin_msg = " (단, Render 환경변수 ADMIN_PIN이 설정되어 있어 환경변수 PIN이 우선 적용됩니다)"
+            elif len(new_pin) < 4:
+                return jsonify({"success": False, "message": "PIN 번호는 4자리 이상으로 설정해주세요."}), 400
+            else:
+                s["admin_pin_custom"] = new_pin
+                pin_msg = " 및 관리자 PIN 변경 완료"
+
+    new_token = ""
+    if new_pin and not os.environ.get("ADMIN_PIN", "").strip():
+        new_token, _ = issue_admin_token()
+
+    sync_res = save_state(sync_drive=True, wait_drive=True)
+    add_log(f"⚙️ [관리자 설정] 전역 발주/소비기한 기준{pin_msg} 저장 완료")
+    return jsonify({
+        "success": True,
+        "message": f"전역 설정이 저장되었습니다.{pin_msg}",
+        "new_token": new_token,
+        "drive_sync": sync_res
+    })
+
+@app.route("/api/admin/drive/sync-now", methods=["POST"])
+@require_admin
+def admin_drive_sync_now():
+    cfg = get_gas_config()
+    if not cfg["configured"]:
+        return jsonify({
+            "success": False,
+            "message": "Render 환경변수(GOOGLE_APPS_SCRIPT_URL, GOOGLE_APPS_SCRIPT_TOKEN)가 아직 등록되지 않았습니다.",
+            "drive_sync": copy.deepcopy(drive_sync_state)
+        }), 400
+    res = sync_to_drive(wait=True)
+    if res.get("status") == "synced":
+        add_log("☁️ [Google Drive 수동 백업] 현재 전체 데이터가 Google Drive에 즉시 저장되었습니다.")
+        return jsonify({"success": True, "message": "Google Drive 즉시 백업 완료!", "drive_sync": res})
+    return jsonify({"success": False, "message": f"동기화 실패: {res.get('last_error')}", "drive_sync": res}), 500
+
+@app.route("/api/admin/drive/pull-now", methods=["POST"])
+@require_admin
+def admin_drive_pull_now():
+    cfg = get_gas_config()
+    if not cfg["configured"]:
+        return jsonify({
+            "success": False,
+            "message": "Render 환경변수(GOOGLE_APPS_SCRIPT_URL, GOOGLE_APPS_SCRIPT_TOKEN)가 아직 등록되지 않았습니다.",
+            "drive_sync": copy.deepcopy(drive_sync_state)
+        }), 400
+    res = pull_from_drive()
+    if res.get("success") and res.get("exists"):
+        add_log("⬇️ [Google Drive 복원] Google Drive의 최신 데이터로 서버 상태를 복원했습니다.")
+        return jsonify({"success": True, "message": "Google Drive 최신 데이터 불러오기 완료!", "drive_sync": copy.deepcopy(drive_sync_state)})
+    elif res.get("success") and not res.get("exists"):
+        return jsonify({"success": False, "message": "Google Drive에 아직 저장된 백업 파일이 없습니다. 먼저 [Drive에 즉시 저장]을 실행하세요.", "drive_sync": copy.deepcopy(drive_sync_state)}), 404
+    return jsonify({"success": False, "message": f"불러오기 실패: {res.get('error')}", "drive_sync": copy.deepcopy(drive_sync_state)}), 500
+
+@app.route("/api/admin/backup/export", methods=["GET"])
+@require_admin
+def admin_backup_export():
+    snap = build_state_snapshot()
+    # 보안상 custom PIN 해시/원문은 제외하고 싶다면 settings에서 제외할지 여부 -> 백업 복원 호환성을 위해 포함하거나 그대로 백업
+    payload = json.dumps(snap, ensure_ascii=False, indent=2).encode("utf-8")
+    fname = f"iljeomodo_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    return Response(
+        payload,
+        mimetype="application/json",
+        headers={"Content-Disposition": f"attachment; filename={fname}"}
+    )
+
+@app.route("/api/admin/backup/import", methods=["POST"])
+@require_admin
+def admin_backup_import():
+    body = request.get_json() or {}
+    backup_data = body.get("data", body)
+    if not isinstance(backup_data, dict) or "master_products" not in backup_data:
+        return jsonify({"success": False, "message": "올바른 일쩜오도 백업 JSON 형식이 아닙니다. ('master_products' 키 누락)"}), 400
+
+    _apply_loaded_state(backup_data)
+    sync_res = save_state(sync_drive=True, wait_drive=True)
+    add_log("📥 [관리자 백업 복원] JSON 백업 파일로부터 전체 데이터를 성공적으로 복원했습니다.")
+    return jsonify({
+        "success": True,
+        "message": f"{len(app_state['master_products'])}개 마스터 상품 포함 전체 백업이 복원되었습니다.",
+        "drive_sync": sync_res
+    })
+
+# -------------------------------------------------------------
 # 모던 일쩜오도 발주 의사결정 액션보드 HTML
 # -------------------------------------------------------------
 HTML_TEMPLATE = """
@@ -1083,7 +2117,7 @@ HTML_TEMPLATE = """
 </head>
 <body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
 
-    <!-- 상단 헤더 (일쩜오도 BI 로고, 실시간 재고 업데이트 일시, 액션 버튼) -->
+    <!-- 상단 헤더 (일쩜오도 BI 로고, 실시간 재고 업데이트 일시, 관리자 & 액션 버튼) -->
     <header class="bg-slate-900 text-white shadow-md border-b border-slate-800 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
             <div class="flex items-center space-x-3">
@@ -1095,39 +2129,79 @@ HTML_TEMPLATE = """
                         <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">일쩜오도 재고현황 | 발주 의사결정 액션보드</h1>
                         <span class="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 font-semibold px-2 py-0.5 rounded-full">결품 제로(Zero) 경보</span>
                     </div>
-                    <div class="flex items-center space-x-2 mt-0.5">
-                        <p class="text-[11px] text-slate-400">수입 리드타임 110일 발주 경보 · 창고 간 불균형 해소 · 소비기한 선입선출(FIFO) 관리</p>
-                        <span class="text-slate-600">|</span>
-                        <!-- 1. 재고 업데이트 일자 실시간 표기 -->
+                    <div class="flex flex-wrap items-center gap-2 mt-0.5">
+                        <p id="headerSubtitleText" class="text-[11px] text-slate-400">수입 리드타임 110일 발주 경보 · 창고 간 불균형 해소 · 소비기한 선입선출(FIFO) 관리</p>
+                        <span class="text-slate-600 hidden sm:inline">|</span>
                         <span class="inline-flex items-center text-[11px] text-emerald-400 font-semibold bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-md">
                             <i class="fa-regular fa-clock mr-1 text-emerald-400"></i>
                             <span>재고 업데이트: </span>
                             <span id="headerLastUpdated" class="ml-1 font-mono text-white">확인 중...</span>
                         </span>
+                        <span id="driveSyncBadge" class="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-slate-800 text-slate-300 border-slate-700" title="Google Drive 영구 저장소 연동 상태">
+                            <i class="fa-solid fa-cloud mr-1"></i>
+                            <span id="driveSyncBadgeText">로컬 저장 모드</span>
+                        </span>
                     </div>
                 </div>
             </div>
             
-            <div class="flex items-center space-x-2">
-                <button onclick="toggleFullScreen()" id="fullscreenBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm" title="전체화면으로 시원하게 보기">
+            <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <button onclick="toggleFullScreen()" id="fullscreenBtn" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm" title="전체화면으로 시원하게 보기">
                     <i class="fa-solid fa-expand" id="fullscreenIcon"></i>
                     <span id="fullscreenText">전체화면</span>
                 </button>
                 <button onclick="openInNewTab()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm" title="새 탭에서 100% 꽉 차게 열기">
                     <i class="fa-solid fa-arrow-up-right-from-square"></i>
-                    <span>새 탭으로 열기</span>
+                    <span class="hidden sm:inline">새 탭으로 열기</span>
                 </button>
-                <button onclick="loadSampleData()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm">
-                    <i class="fa-solid fa-wand-magic-sparkles"></i>
-                    <span>샘플 데이터 즉시 로드</span>
+
+                <!-- 관리자 잠금 상태 버튼 -->
+                <button id="btnAdminUnlock" onclick="openPinModal()" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg text-xs font-extrabold transition flex items-center space-x-1.5 shadow-sm" title="PIN 인증 후 상품명, 유통기한, 리드타임, B2B 매핑을 수정합니다">
+                    <i class="fa-solid fa-lock"></i>
+                    <span>관리자 모드</span>
                 </button>
-                <a href="/api/export-master-csv" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm">
+
+                <!-- 관리자 인증 완료 시 표시되는 툴바 -->
+                <div id="adminToolbarBtns" class="hidden flex items-center gap-1.5">
+                    <button onclick="openCreateProductModal()" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1 shadow-sm">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>단품 추가</span>
+                    </button>
+                    <button onclick="openAdminCenter('bulk')" class="px-2.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-lg text-xs font-extrabold transition flex items-center space-x-1 shadow-sm">
+                        <i class="fa-solid fa-sliders"></i>
+                        <span>관리자 센터</span>
+                    </button>
+                    <button onclick="lockAdminMode()" class="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1 shadow-sm" title="관리자 편집 권한 잠금">
+                        <i class="fa-solid fa-lock-open"></i>
+                        <span>잠금</span>
+                    </button>
+                </div>
+
+                <a href="/api/export-master-csv" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm">
                     <i class="fa-solid fa-file-excel"></i>
                     <span>액션 리포트 다운로드</span>
                 </a>
             </div>
         </div>
     </header>
+
+    <!-- 관리자 모드 활성 배너 -->
+    <div id="adminModeBanner" class="hidden bg-amber-50 border-b border-amber-300 text-amber-950 px-4 py-2 text-xs">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center space-x-2">
+                <span class="px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-extrabold text-[10px]">관리자 편집 모드 ON</span>
+                <span class="font-medium">목록 각 행의 <strong>[수정]</strong> 버튼으로 상품명·소비기한·리드타임·입고예정을 편집할 수 있으며, CSV 재업로드 시에도 관리자 기준값이 최우선 보존됩니다.</span>
+            </div>
+            <div class="flex items-center space-x-2">
+                <button onclick="openAdminCenter('expiry')" class="px-2 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded font-bold text-[11px] text-amber-900 transition">
+                    ⏳ 소비기한 일괄입력
+                </button>
+                <button onclick="openAdminCenter('drive')" class="px-2 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded font-bold text-[11px] text-amber-900 transition">
+                    ☁️ Drive/백업 관리
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- 구글 사이트 연동 안내 배너 -->
     <div id="tunnelBanner" class="bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 text-white shadow-inner px-4 py-2">
@@ -1151,13 +2225,13 @@ HTML_TEMPLATE = """
         <!-- 1. 핵심 5대 신호등 Action KPI 위젯 (상단 배치) -->
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             
-            <!-- 🔴 긴급 발주 요망 (통합 D-Day < 110일) -->
+            <!-- 🔴 긴급 발주 요망 (통합 D-Day < 리드타임) -->
             <div onclick="setStatusFilter('urgent')" class="bg-rose-50/70 rounded-xl shadow-sm border-2 border-rose-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-rose-100/80 transition relative overflow-hidden group">
                 <div class="flex items-center justify-between">
                     <span class="text-[11px] font-bold text-rose-900 flex items-center">
                         <i class="fa-solid fa-triangle-exclamation text-rose-600 mr-1.5 animate-bounce"></i>긴급 발주 요망
                     </span>
-                    <span class="text-[9px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded font-bold">110일 미만/결품</span>
+                    <span id="kpiBadgeUrgent" class="text-[9px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded font-bold">110일 미만/결품</span>
                 </div>
                 <div class="flex items-baseline justify-between mt-2">
                     <div>
@@ -1172,13 +2246,13 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- 🟡 발주 준비 (110일 ~ 130일) -->
+            <!-- 🟡 발주 준비 (리드타임 ~ 리드타임+버퍼) -->
             <div onclick="setStatusFilter('prepare')" class="bg-amber-50/70 rounded-xl shadow-sm border-2 border-amber-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-amber-100/80 transition relative overflow-hidden group">
                 <div class="flex items-center justify-between">
                     <span class="text-[11px] font-bold text-amber-900 flex items-center">
                         <i class="fa-solid fa-clipboard-list text-amber-600 mr-1.5"></i>발주 준비
                     </span>
-                    <span class="text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">110~130일</span>
+                    <span id="kpiBadgePrepare" class="text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">110~130일</span>
                 </div>
                 <div class="flex items-baseline justify-between mt-2">
                     <div>
@@ -1188,7 +2262,7 @@ HTML_TEMPLATE = """
                     <i class="fa-solid fa-cart-flatbed text-amber-400 text-2xl group-hover:scale-110 transition"></i>
                 </div>
                 <div class="mt-1 flex items-center justify-between text-[10px] text-amber-700 font-semibold border-t border-amber-200/60 pt-1">
-                    <span>안전재고 20일 구간 (기안 준비)</span>
+                    <span>안전재고 구간 (기안 준비)</span>
                     <span class="text-amber-900 group-hover:underline">클릭 시 필터</span>
                 </div>
             </div>
@@ -1214,7 +2288,7 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- ⏳ 소비기한 주의 (120일 미만 or 미소진 위험) -->
+            <!-- ⏳ 소비기한 주의 (기준일 미만 or 미소진 위험) -->
             <div onclick="setStatusFilter('expiry')" class="bg-purple-50/70 rounded-xl shadow-sm border-2 border-purple-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-purple-100/80 transition relative overflow-hidden group">
                 <div class="flex items-center justify-between">
                     <span class="text-[11px] font-bold text-purple-900 flex items-center">
@@ -1230,18 +2304,18 @@ HTML_TEMPLATE = """
                     <i class="fa-solid fa-calendar-xmark text-purple-400 text-2xl group-hover:scale-110 transition"></i>
                 </div>
                 <div class="mt-1 flex items-center justify-between text-[10px] text-purple-700 font-semibold border-t border-purple-200/60 pt-1">
-                    <span>잔여 120일 미만 or 미소진 위험</span>
+                    <span id="kpiSubExpiry">잔여 120일 미만 or 미소진 위험</span>
                     <span class="text-purple-900 group-hover:underline">클릭 시 필터</span>
                 </div>
             </div>
 
-            <!-- 🟢 정상 안전 (130일 이상) -->
+            <!-- 🟢 정상 안전 -->
             <div onclick="setStatusFilter('safe')" class="bg-emerald-50/70 rounded-xl shadow-sm border-2 border-emerald-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-emerald-100/80 transition relative overflow-hidden group col-span-2 sm:col-span-1">
                 <div class="flex items-center justify-between">
                     <span class="text-[11px] font-bold text-emerald-900 flex items-center">
                         <i class="fa-solid fa-circle-check text-emerald-600 mr-1.5"></i>정상 안전
                     </span>
-                    <span class="text-[9px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">130일 이상</span>
+                    <span id="kpiBadgeSafe" class="text-[9px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">130일 이상</span>
                 </div>
                 <div class="flex items-baseline justify-between mt-2">
                     <div>
@@ -1453,6 +2527,486 @@ HTML_TEMPLATE = """
 
     </main>
 
+    <!-- 카테고리 자동완성 -->
+    <datalist id="categorySuggestions">
+        <option value="오일/식용유"></option>
+        <option value="파스타"></option>
+        <option value="식초/애사비"></option>
+        <option value="발사믹"></option>
+        <option value="쿠키/스낵"></option>
+        <option value="소스/드레싱"></option>
+        <option value="잼/스프레드"></option>
+        <option value="기타"></option>
+    </datalist>
+
+    <!-- 1. 관리자 PIN 인증 모달 -->
+    <div id="pinModal" class="hidden fixed inset-0 z-[100] bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden">
+            <div class="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-shield-halved text-amber-400"></i>
+                    <h3 class="font-bold text-sm">관리자 모드 PIN 인증</h3>
+                </div>
+                <button onclick="closePinModal()" class="text-slate-400 hover:text-white text-sm">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <form onsubmit="submitPinVerification(event)" class="p-5 space-y-4">
+                <p class="text-xs text-slate-600 leading-relaxed">
+                    대시보드 조회 및 CSV 업로드는 누구나 사용할 수 있습니다.<br>
+                    <strong>상품 정보 · 소비기한 · 리드타임 · B2B 매핑</strong>을 수정하려면 관리자 PIN 번호를 입력하세요.
+                </p>
+                <div>
+                    <label for="pinInput" class="block text-xs font-bold text-slate-700 mb-1.5">관리자 PIN 번호</label>
+                    <input type="password" id="pinInput" inputmode="numeric" autocomplete="current-password" placeholder="PIN 입력 후 Enter" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-amber-500">
+                </div>
+                <div id="pinErrorMsg" class="hidden text-xs text-rose-600 font-semibold bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"></div>
+                <div class="flex items-center justify-end space-x-2 pt-1">
+                    <button type="button" onclick="closePinModal()" class="px-3.5 py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition">취소</button>
+                    <button type="submit" id="pinSubmitBtn" class="px-4 py-2 rounded-lg text-xs font-extrabold bg-amber-500 hover:bg-amber-600 text-slate-950 transition shadow-sm flex items-center space-x-1.5">
+                        <i class="fa-solid fa-unlock-keyhole"></i>
+                        <span>잠금 해제</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 2. 단품 마스터 생성 / 수정 모달 -->
+    <div id="editProductModal" class="hidden fixed inset-0 z-[100] bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl flex flex-col max-h-[92vh] overflow-hidden">
+            <div class="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between shrink-0">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-pen-to-square text-amber-400"></i>
+                    <h3 id="ep_modal_title" class="font-bold text-sm sm:text-base">단품 마스터 정보 수정</h3>
+                </div>
+                <button onclick="closeEditProductModal()" class="text-slate-400 hover:text-white text-base">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="p-4 sm:p-5 overflow-y-auto space-y-5 text-xs">
+                <input type="hidden" id="ep_is_new" value="0">
+                <input type="hidden" id="ep_id" value="">
+                <input type="hidden" id="ep_orig_seller_code" value="">
+
+                <!-- 섹션 1: 기본 마스터 정보 -->
+                <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
+                    <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+                        <span class="font-extrabold text-slate-800 text-xs flex items-center space-x-1.5">
+                            <i class="fa-solid fa-tag text-indigo-600"></i>
+                            <span>1. 기본 마스터 기준 (CSV 재업로드 시에도 고정 유지됨)</span>
+                        </span>
+                        <label class="inline-flex items-center space-x-1.5 cursor-pointer select-none">
+                            <input type="checkbox" id="ep_is_active" checked class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500">
+                            <span class="font-bold text-slate-700 text-[11px]">대시보드 노출</span>
+                        </label>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">판매자관리코드 <span class="text-rose-500">*</span></label>
+                            <input type="text" id="ep_seller_code" placeholder="예: 20DC02" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="block font-bold text-slate-700 mb-1">마스터 상품명 <span class="text-rose-500">*</span></label>
+                            <input type="text" id="ep_name" placeholder="예: 데체코 엑스트라버진 올리브오일 500ml" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">구분</label>
+                            <select id="ep_product_type" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                <option value="수입">🚢 수입 (장기 리드타임)</option>
+                                <option value="사입">📦 사입 (국내/단기)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">카테고리</label>
+                            <input type="text" id="ep_category" list="categorySuggestions" placeholder="예: 오일/식용유" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">참고사항 / 운영 메모</label>
+                            <input type="text" id="ep_note" placeholder="발주·입고·선입선출 특이사항 메모" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 섹션 2: 발주 기준 & 입고 예정 -->
+                <div class="bg-blue-50/40 rounded-xl border border-blue-200 p-4 space-y-3">
+                    <div class="font-extrabold text-blue-950 text-xs flex items-center space-x-1.5 border-b border-blue-200 pb-2">
+                        <i class="fa-solid fa-ship text-blue-600"></i>
+                        <span>2. 품목별 발주 기준 & 입고 예정 (비워두면 전역 기본값 자동 적용)</span>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">개별 리드타임(일)</label>
+                            <input type="number" min="0" id="ep_lead_time_days" placeholder="기본값" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">안전재고 버퍼(일)</label>
+                            <input type="number" min="0" id="ep_safety_buffer_days" placeholder="기본값" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">소비기한 주의(일)</label>
+                            <input type="number" min="0" id="ep_expiry_warn_days" placeholder="기본값" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">입고 예정 수량(개)</label>
+                            <input type="number" min="0" id="ep_in_transit_qty" value="0" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono font-bold text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div class="col-span-2 sm:col-span-1">
+                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">입고 예정일</label>
+                            <input type="date" id="ep_expected_arrival_date" class="w-full px-2 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 섹션 3: 개미창고 소비기한 & 수동 다중 로트(FIFO) 관리 -->
+                <div class="bg-amber-50/40 rounded-xl border border-amber-200 p-4 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 pb-2">
+                        <span class="font-extrabold text-amber-950 text-xs flex items-center space-x-1.5">
+                            <i class="fa-regular fa-calendar-check text-amber-600"></i>
+                            <span>3. 상품별 소비기한 관리 & 선입선출(FIFO) 로트 분할</span>
+                        </span>
+                        <span id="ep_gaemi_summary_bar" class="text-[11px] font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded"></span>
+                    </div>
+
+                    <div id="ep_lot_sync_note" class="hidden text-[11px] bg-indigo-50 text-indigo-900 border border-indigo-200 px-3 py-2 rounded-lg font-semibold"></div>
+
+                    <!-- 3-A. CSV 개미창고 로트별 소비기한 오버라이드 -->
+                    <div class="space-y-1.5">
+                        <div class="text-[11px] font-bold text-slate-700">개미창고 CSV 로트별 소비기한 지정/수정 (새 CSV 업로드 후에도 유지됨)</div>
+                        <div id="ep_csv_lots_container" class="space-y-1.5">
+                            <!-- JS 동적 렌더링 -->
+                        </div>
+                    </div>
+
+                    <!-- 3-B. 수동 다중 소비기한 로트 분할 (FIFO 자동 차감) -->
+                    <div class="pt-2 border-t border-amber-200/70 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <div class="text-[11px] font-bold text-slate-800">수동 소비기한 로트 분할 (FIFO 선입선출 자동 차감)</div>
+                                <div class="text-[10px] text-slate-500">예: 개미창고 CSV는 1줄(1,000개)인데 실제 소비기한이 2개로 나뉜 경우 직접 분할 등록하면, 이후 CSV 재업로드 시 감소 수량을 가장 빠른 기한부터 자동 차감합니다.</div>
+                            </div>
+                            <button type="button" onclick="addManualLotRow()" class="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold transition shrink-0">
+                                + 로트 분할 추가
+                            </button>
+                        </div>
+                        <div id="ep_manual_lots_container" class="space-y-1.5">
+                            <!-- JS 동적 렌더링 -->
+                        </div>
+                        <div id="ep_manual_lots_sum_bar" class="hidden text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border"></div>
+                    </div>
+
+                    <!-- 3-C. 대표/기본 소비기한 -->
+                    <div class="pt-2 border-t border-amber-200/70 flex flex-wrap items-center gap-3">
+                        <div class="flex-1 min-w-[200px]">
+                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">기본 소비기한 (개미 CSV 기한이 미기재일 때 대체 사용)</label>
+                            <input type="date" id="ep_default_expiry_date" class="px-3 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-amber-500">
+                            <button type="button" onclick="document.getElementById('ep_default_expiry_date').value=''" class="ml-1.5 px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[10px] font-semibold">지우기</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 섹션 4: 창고 코드 & 쿠팡 옵션 매핑 -->
+                <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
+                    <div class="font-extrabold text-slate-800 text-xs flex items-center space-x-1.5 border-b border-slate-200 pb-2">
+                        <i class="fa-solid fa-cubes text-slate-600"></i>
+                        <span>4. 개미창고 코드 & 쿠팡 옵션 ID 매핑</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">개미창고 상품코드 (여러 개면 쉼표 구분)</label>
+                            <input type="text" id="ep_gaemi_codes" placeholder="예: PJ1489503" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">개미 옵션 필터 키워드 (선택)</label>
+                            <input type="text" id="ep_gaemi_filter" placeholder="특정 옵션명 포함 시만 매칭할 경우 입력" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        </div>
+                    </div>
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between">
+                            <span class="font-bold text-slate-700 text-[11px]">쿠팡 윙 옵션 ID & 번들(개입수) 연결</span>
+                            <button type="button" onclick="addCoupangOptionRow()" class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold">
+                                + 쿠팡 옵션 추가
+                            </button>
+                        </div>
+                        <div id="ep_options_container" class="space-y-1.5">
+                            <!-- JS 동적 렌더링 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 섹션 5: (접이식) 임시 재고 수동 보정 -->
+                <details id="ep_temp_stocks_details" class="bg-rose-50/40 rounded-xl border border-rose-200 p-3">
+                    <summary class="cursor-pointer font-bold text-rose-900 text-xs select-none flex items-center space-x-1.5">
+                        <i class="fa-solid fa-wrench text-rose-600"></i>
+                        <span>5. (선택) 긴급 실사 재고 수동 임시 보정 — 다음 CSV 업로드 전까지만 유지</span>
+                    </summary>
+                    <div class="mt-3 space-y-2">
+                        <p class="text-[11px] text-rose-700">재고 수량은 원칙적으로 CSV 업로드를 기준으로 갱신됩니다. 값을 비워두면 수량은 변경되지 않습니다.</p>
+                        <div id="ep_temp_stocks_container" class="space-y-2"></div>
+                    </div>
+                </details>
+            </div>
+
+            <div class="bg-slate-50 border-t border-slate-200 px-5 py-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <div class="flex items-center space-x-2">
+                    <button type="button" id="ep_btn_toggle_hide" onclick="toggleHideCurrentProduct()" class="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 transition">
+                        대시보드 숨김
+                    </button>
+                    <button type="button" id="ep_btn_hard_delete" onclick="deleteCurrentProductHard()" class="px-3 py-1.5 rounded-lg text-xs font-bold border border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-700 transition">
+                        영구 삭제
+                    </button>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button type="button" onclick="closeEditProductModal()" class="px-4 py-1.5 rounded-lg text-xs font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 transition">취소</button>
+                    <button type="button" onclick="saveProductModal()" class="px-5 py-1.5 rounded-lg text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white transition shadow-sm flex items-center space-x-1.5">
+                        <i class="fa-solid fa-floppy-disk"></i>
+                        <span>저장 및 영구 반영</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. 관리자 통합 관리 센터 모달 -->
+    <div id="adminCenterModal" class="hidden fixed inset-0 z-[100] bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-6xl flex flex-col max-h-[92vh] overflow-hidden">
+            <div class="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between shrink-0">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-sliders text-amber-400"></i>
+                    <h3 class="font-bold text-sm sm:text-base">일쩜오도 관리자 통합 센터 (Admin Control Center)</h3>
+                </div>
+                <button onclick="closeAdminCenter()" class="text-slate-400 hover:text-white text-base">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- 탭 네비게이션 -->
+            <div class="bg-slate-100 border-b border-slate-200 px-4 pt-2 flex flex-wrap gap-1.5 shrink-0 text-xs">
+                <button data-tab="bulk" onclick="switchAdminTab('bulk')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-white text-slate-900">📋 전체 품목 일괄 편집</button>
+                <button data-tab="expiry" onclick="switchAdminTab('expiry')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">⏳ 소비기한 일괄 입력</button>
+                <button data-tab="b2b" onclick="switchAdminTab('b2b')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">🔗 B2B/세트(S코드) 매핑</button>
+                <button data-tab="settings" onclick="switchAdminTab('settings')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">⚙️ 전역 기준 & PIN 변경</button>
+                <button data-tab="drive" onclick="switchAdminTab('drive')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">☁️ Google Drive 연동 · 백업</button>
+            </div>
+
+            <!-- 탭 컨텐츠 -->
+            <div class="p-4 sm:p-5 overflow-y-auto flex-1 text-xs space-y-4">
+
+                <!-- TAB 1: 전체 품목 일괄 편집 -->
+                <div id="acTab_bulk" class="space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <input type="text" id="acBulkSearch" oninput="renderAdminBulkTable()" placeholder="상품명 또는 관리코드 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg w-56 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                            <label class="inline-flex items-center space-x-1.5 cursor-pointer bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200">
+                                <input type="checkbox" id="acBulkShowInactive" onchange="renderAdminBulkTable()" checked>
+                                <span class="font-semibold text-slate-700">숨김 품목 포함 보기</span>
+                            </label>
+                        </div>
+                        <button onclick="saveAdminBulkProducts()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold shadow-sm flex items-center space-x-1.5">
+                            <i class="fa-solid fa-floppy-disk"></i>
+                            <span>표 변경사항 일괄 저장</span>
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto border border-slate-200 rounded-xl">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead class="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                                <tr>
+                                    <th class="p-2 w-20">코드</th>
+                                    <th class="p-2 min-w-[200px]">마스터 상품명</th>
+                                    <th class="p-2 w-20">구분</th>
+                                    <th class="p-2 w-28">카테고리</th>
+                                    <th class="p-2 w-20">리드타임(일)</th>
+                                    <th class="p-2 w-20">입고예정수</th>
+                                    <th class="p-2 w-32">입고예정일</th>
+                                    <th class="p-2 w-32">기본소비기한</th>
+                                    <th class="p-2 w-14 text-center">노출</th>
+                                    <th class="p-2 min-w-[140px]">메모</th>
+                                </tr>
+                            </thead>
+                            <tbody id="acBulkTbody" class="divide-y divide-slate-100"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TAB 2: 소비기한 일괄 입력 -->
+                <div id="acTab_expiry" class="hidden space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-purple-50 border border-purple-200 rounded-xl p-3">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <select id="acExpiryFilterMode" onchange="renderAdminExpiryTable()" class="px-3 py-1.5 border border-purple-300 rounded-lg bg-white font-bold text-purple-950">
+                                <option value="missing">소비기한 미등록 품목만</option>
+                                <option value="soon">소비기한 180일 이내 임박만</option>
+                                <option value="all">전체 단품 보기</option>
+                            </select>
+                            <input type="text" id="acExpirySearch" oninput="renderAdminExpiryTable()" placeholder="상품명 또는 코드 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white w-52">
+                        </div>
+                        <button onclick="saveAdminExpiryBulk()" class="px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-extrabold shadow-sm flex items-center space-x-1.5">
+                            <i class="fa-regular fa-calendar-check"></i>
+                            <span>소비기한 일괄 저장</span>
+                        </button>
+                    </div>
+                    <p class="text-[11px] text-slate-600">
+                        * 개미 CSV 로트가 여러 개인 경우 각 로트별 소비기한을 바로 수정하거나, 여러 개 로트로 쪼개야 할 때는 우측 <strong>[상세 분할]</strong> 버튼을 눌러 로트 분할 모달을 여세요.
+                    </p>
+                    <div class="overflow-x-auto border border-slate-200 rounded-xl">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead class="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                                <tr>
+                                    <th class="p-2.5 w-20">코드</th>
+                                    <th class="p-2.5 min-w-[200px]">상품명 / 개미 재고</th>
+                                    <th class="p-2.5">로트 / 옵션 현황</th>
+                                    <th class="p-2.5 w-44">소비기한 입력/수정</th>
+                                    <th class="p-2.5 w-24 text-center">상세</th>
+                                </tr>
+                            </thead>
+                            <tbody id="acExpiryTbody" class="divide-y divide-slate-100"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TAB 3: B2B/세트(S코드) 매핑 -->
+                <div id="acTab_b2b" class="hidden space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-indigo-50 border border-indigo-200 rounded-xl p-3">
+                        <div class="text-indigo-950 font-semibold">
+                            S코드(B2B/세트 상품)는 메인 보드에서 숨겨지고, 해당 S코드 주문이 들어오면 아래 지정한 <strong>단품 관리코드</strong> 출고량에 배수만큼 자동 합산됩니다.
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <button onclick="addAdminB2bRow()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold">+ S코드 매핑 추가</button>
+                            <button onclick="saveAdminB2bMappings()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold">매핑 저장</button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto border border-slate-200 rounded-xl">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead class="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                                <tr>
+                                    <th class="p-2.5 w-32">세트/B2B 코드 (S코드)</th>
+                                    <th class="p-2.5 w-36">연동 단품 코드</th>
+                                    <th class="p-2.5 w-24">차감 배수(xN)</th>
+                                    <th class="p-2.5">설명</th>
+                                    <th class="p-2.5 w-16 text-center">삭제</th>
+                                </tr>
+                            </thead>
+                            <tbody id="acB2bTbody" class="divide-y divide-slate-100"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TAB 4: 전역 기준 & PIN 변경 -->
+                <div id="acTab_settings" class="hidden space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                            <h4 class="font-extrabold text-slate-800 text-sm border-b border-slate-200 pb-2">전역 발주 / 소비기한 판정 기준 (일)</h4>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block font-bold text-slate-700 mb-1">수입 기본 리드타임(일)</label>
+                                    <input type="number" min="1" id="acSetImportLt" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold">
+                                </div>
+                                <div>
+                                    <label class="block font-bold text-slate-700 mb-1">수입 안전재고 버퍼(일)</label>
+                                    <input type="number" min="0" id="acSetImportBuf" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold">
+                                </div>
+                                <div>
+                                    <label class="block font-bold text-slate-700 mb-1">사입 기본 리드타임(일)</label>
+                                    <input type="number" min="1" id="acSetPurchaseLt" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold">
+                                </div>
+                                <div>
+                                    <label class="block font-bold text-slate-700 mb-1">사입 안전재고 버퍼(일)</label>
+                                    <input type="number" min="0" id="acSetPurchaseBuf" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold">
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block font-bold text-slate-700 mb-1">소비기한 임박 경고 기준(일)</label>
+                                    <input type="number" min="1" id="acSetExpWarn" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-amber-50/50 border border-amber-200 rounded-xl p-4 space-y-3">
+                            <h4 class="font-extrabold text-amber-950 text-sm border-b border-amber-200 pb-2">관리자 PIN 보안 설정</h4>
+                            <div id="acSetPinSourceInfo" class="text-[11px] bg-white border border-amber-200 rounded-lg p-2.5 text-slate-700"></div>
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">새 관리자 PIN 변경 (선택, 4자리 이상)</label>
+                                <input type="password" id="acSetNewPin" inputmode="numeric" placeholder="변경 시에만 입력하세요" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono">
+                                <p class="text-[10px] text-slate-500 mt-1">* Render 환경변수 <code>ADMIN_PIN</code>이 설정되어 있으면 환경변수 PIN이 최우선 적용됩니다.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex justify-end">
+                        <button onclick="saveAdminSettings()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold shadow-sm">
+                            전역 기준 & PIN 저장
+                        </button>
+                    </div>
+                </div>
+
+                <!-- TAB 5: Google Drive 영구 연동 · JSON 백업 · 테스트 도구 -->
+                <div id="acTab_drive" class="hidden space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Google Drive 실시간 연동 제어 -->
+                        <div class="bg-emerald-50/50 border border-emerald-200 rounded-xl p-4 space-y-3">
+                            <div class="flex items-center justify-between border-b border-emerald-200 pb-2">
+                                <h4 class="font-extrabold text-emerald-950 text-sm flex items-center space-x-1.5">
+                                    <i class="fa-brands fa-google-drive text-emerald-600"></i>
+                                    <span>Google Drive 영구 저장소 상태</span>
+                                </h4>
+                            </div>
+                            <div id="acDriveStatusBox" class="text-xs bg-white border border-emerald-200 rounded-lg p-3 space-y-1"></div>
+                            <div class="flex flex-wrap gap-2">
+                                <button onclick="syncDriveNow()" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-sm">
+                                    ☁️ Drive에 즉시 저장
+                                </button>
+                                <button onclick="pullDriveNow()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-sm">
+                                    ⬇️ Drive에서 즉시 복원
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 수동 JSON 백업/복원 & 테스트 샘플 로드 -->
+                        <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                            <h4 class="font-extrabold text-slate-800 text-sm border-b border-slate-200 pb-2">로컬 JSON 백업 파일 & 시스템 도구</h4>
+                            <div class="flex flex-wrap gap-2">
+                                <button onclick="downloadBackupJson()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-bold">
+                                    📥 전체 데이터 JSON 다운로드
+                                </button>
+                                <button onclick="document.getElementById('acBackupFileInput').click()" class="px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-bold">
+                                    📤 JSON 백업 파일 복원
+                                </button>
+                                <input type="file" id="acBackupFileInput" accept=".json" class="hidden" onchange="importBackupJsonFile(this)">
+                            </div>
+                            <div class="pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
+                                <div class="text-[11px] text-slate-500">
+                                    <strong class="text-indigo-700">[테스트용] 샘플 CSV 로드</strong>: 실데이터가 샘플 CSV로 덮어씌워집니다.
+                                </div>
+                                <button onclick="loadSampleData()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shrink-0">
+                                    ✨ 샘플 데이터 즉시 로드
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Google Apps Script 설치 안내 & 원클릭 복사 -->
+                    <div class="bg-slate-900 text-slate-100 rounded-xl p-4 space-y-2.5">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h4 class="font-bold text-xs sm:text-sm text-emerald-300">Google Workspace 드라이브 24시간 영구 연동 스크립트 (1회 설치)</h4>
+                            <button onclick="copyGasScript()" class="px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-slate-950 rounded-lg text-xs font-extrabold">
+                                📋 Apps Script (.gs) 코드 복사
+                            </button>
+                        </div>
+                        <ol class="list-decimal list-inside text-[11px] text-slate-300 space-y-1 leading-relaxed">
+                            <li>Google Drive(<code>script.google.com</code>)에서 <strong>새 프로젝트</strong> 생성 후 아래 코드를 붙여넣고 <code>API_TOKEN</code>을 임의의 비밀번호로 바꿉니다.</li>
+                            <li><strong>배포 → 새 배포 → 웹 앱</strong> 선택 (실행 주체: <strong>나(Me)</strong> / 액세스 권한: <strong>모든 사용자(Anyone)</strong>) 후 생성된 <strong>웹 앱 URL(/exec)</strong>을 복사합니다.</li>
+                            <li>Render 대시보드 → <strong>Environment</strong>에 <code>GOOGLE_APPS_SCRIPT_URL</code>, <code>GOOGLE_APPS_SCRIPT_TOKEN</code>, <code>ADMIN_PIN</code>을 저장하면 서버가 재시작되어도 관리자 수정사항이 영구 보존됩니다.</li>
+                        </ol>
+                        <pre id="acGasCodePreview" class="bg-slate-950 text-emerald-300 p-3 rounded-lg text-[10px] font-mono max-h-48 overflow-auto border border-slate-800"></pre>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
     <!-- 스크립트 로직 -->
     <script>
         // 열 정의 (13개 열): 개미창고와 쿠팡창고 각각의 재고량, 런웨이, 소비기한 미니태그, 추천 조치 버튼 포함
@@ -1492,11 +3046,153 @@ HTML_TEMPLATE = """
             }
         } catch (e) {}
 
+        const ADMIN_TOKEN_KEY = 'iljeomodo_admin_token';
         let allMasterData = [];
         let publicTunnelUrl = null;
         let expandAllOptions = false;
+        let expandedRowIds = new Set();
         let activeCategory = 'all';
         let activeStatus = 'all';
+        let adminToken = '';
+        try { adminToken = sessionStorage.getItem(ADMIN_TOKEN_KEY) || ''; } catch (e) {}
+        let isAdminMode = false;
+        let adminConfigCache = null;
+        let globalSettings = {
+            default_import_lead_time: 110,
+            default_import_buffer: 20,
+            default_purchase_lead_time: 7,
+            default_purchase_buffer: 7,
+            default_expiry_warn_days: 120
+        };
+
+        function isAnyModalOpen() {
+            const m1 = document.getElementById('pinModal');
+            const m2 = document.getElementById('editProductModal');
+            const m3 = document.getElementById('adminCenterModal');
+            return (m1 && !m1.classList.contains('hidden')) ||
+                   (m2 && !m2.classList.contains('hidden')) ||
+                   (m3 && !m3.classList.contains('hidden'));
+        }
+
+        function updateAdminUI() {
+            const btnUnlock = document.getElementById('btnAdminUnlock');
+            const toolbar = document.getElementById('adminToolbarBtns');
+            const banner = document.getElementById('adminModeBanner');
+            if (isAdminMode) {
+                if (btnUnlock) btnUnlock.classList.add('hidden');
+                if (toolbar) toolbar.classList.remove('hidden');
+                if (banner) banner.classList.remove('hidden');
+            } else {
+                if (btnUnlock) btnUnlock.classList.remove('hidden');
+                if (toolbar) toolbar.classList.add('hidden');
+                if (banner) banner.classList.add('hidden');
+            }
+            if (allMasterData.length > 0) renderMasterTable();
+        }
+
+        async function checkAdminSession() {
+            if (!adminToken) {
+                isAdminMode = false;
+                updateAdminUI();
+                return false;
+            }
+            try {
+                const res = await fetch('/api/admin/session', {
+                    headers: { 'X-Admin-Token': adminToken }
+                });
+                const json = await res.json();
+                if (json.authenticated) {
+                    isAdminMode = true;
+                } else {
+                    isAdminMode = false;
+                    adminToken = '';
+                    try { sessionStorage.removeItem(ADMIN_TOKEN_KEY); } catch (e) {}
+                }
+            } catch (e) {
+                isAdminMode = false;
+            }
+            updateAdminUI();
+            return isAdminMode;
+        }
+
+        function openPinModal() {
+            const modal = document.getElementById('pinModal');
+            const input = document.getElementById('pinInput');
+            const err = document.getElementById('pinErrorMsg');
+            err.classList.add('hidden');
+            err.innerText = '';
+            input.value = '';
+            modal.classList.remove('hidden');
+            setTimeout(() => input.focus(), 50);
+        }
+
+        function closePinModal() {
+            document.getElementById('pinModal').classList.add('hidden');
+        }
+
+        async function submitPinVerification(e) {
+            if (e) e.preventDefault();
+            const pin = (document.getElementById('pinInput').value || '').trim();
+            const errEl = document.getElementById('pinErrorMsg');
+            if (!pin) {
+                errEl.innerText = 'PIN 번호를 입력해주세요.';
+                errEl.classList.remove('hidden');
+                return;
+            }
+            try {
+                const res = await fetch('/api/admin/verify-pin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pin })
+                });
+                const json = await res.json();
+                if (res.ok && json.success) {
+                    adminToken = json.token;
+                    try { sessionStorage.setItem(ADMIN_TOKEN_KEY, adminToken); } catch (ex) {}
+                    isAdminMode = true;
+                    closePinModal();
+                    updateAdminUI();
+                    fetchSummary();
+                } else {
+                    errEl.innerText = json.message || 'PIN 인증 실패';
+                    errEl.classList.remove('hidden');
+                    document.getElementById('pinInput').select();
+                }
+            } catch (err) {
+                errEl.innerText = '네트워크 오류: ' + err.message;
+                errEl.classList.remove('hidden');
+            }
+        }
+
+        async function lockAdminMode() {
+            try {
+                await fetch('/api/admin/logout', { method: 'POST' });
+            } catch (e) {}
+            adminToken = '';
+            isAdminMode = false;
+            adminConfigCache = null;
+            try { sessionStorage.removeItem(ADMIN_TOKEN_KEY); } catch (e) {}
+            closeEditProductModal();
+            closeAdminCenter();
+            updateAdminUI();
+            fetchSummary();
+        }
+
+        async function adminFetch(url, options = {}) {
+            const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
+            if (adminToken) headers['X-Admin-Token'] = adminToken;
+            const res = await fetch(url, Object.assign({}, options, { headers }));
+            if (res.status === 401) {
+                isAdminMode = false;
+                adminToken = '';
+                try { sessionStorage.removeItem(ADMIN_TOKEN_KEY); } catch (e) {}
+                updateAdminUI();
+                alert('관리자 세션이 만료되었거나 인증이 필요합니다. 다시 PIN을 입력해주세요.');
+                openPinModal();
+                throw new Error('ADMIN_AUTH_REQUIRED');
+            }
+            return res;
+        }
 
         // 3개 드래그앤드롭 이벤트 리스너 설정
         const setupDropZone = (dropId, fileId, source) => {
@@ -1561,8 +3257,13 @@ HTML_TEMPLATE = """
         }
 
         async function loadSampleData() {
+            if (!isAdminMode) {
+                openPinModal();
+                return;
+            }
+            if (!confirm("현재 재고 수량을 테스트용 샘플 CSV 데이터로 덮어쓰시겠습니까? (관리자 마스터 설정은 유지됩니다)")) return;
             try {
-                const res = await fetch('/api/load-sample', { method: 'POST' });
+                const res = await adminFetch('/api/load-sample', { method: 'POST' });
                 const json = await res.json();
                 if (json.success) {
                     alert("✨ 개미창고(소비기한 포함), 쿠팡윙, 타채널 매출 샘플 데이터가 성공적으로 로드되었습니다!");
@@ -1571,7 +3272,7 @@ HTML_TEMPLATE = """
                     alert("로드 실패: " + json.message);
                 }
             } catch (err) {
-                alert("샘플 로드 오류: " + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert("샘플 로드 오류: " + err.message);
             }
         }
 
@@ -1587,13 +3288,18 @@ HTML_TEMPLATE = """
 
         function toggleAllOptionDetails() {
             expandAllOptions = !expandAllOptions;
+            if (!expandAllOptions) expandedRowIds.clear();
             document.getElementById('expandBtnText').innerText = expandAllOptions ? "소비기한 접기" : "소비기한 세부내역";
             renderMasterTable();
         }
 
         function toggleSingleOption(prodId) {
             const row = document.getElementById(`subrow_${prodId}`);
-            if (row) row.classList.toggle('hidden');
+            if (!row) return;
+            const willOpen = row.classList.contains('hidden');
+            row.classList.toggle('hidden');
+            if (willOpen) expandedRowIds.add(prodId);
+            else expandedRowIds.delete(prodId);
         }
 
         function setCategoryFilter(cat) {
@@ -1602,8 +3308,13 @@ HTML_TEMPLATE = """
                 btn.classList.remove('bg-slate-800', 'text-white');
                 btn.classList.add('bg-slate-100', 'text-slate-600');
             });
-            event.target.classList.remove('bg-slate-100', 'text-slate-600');
-            event.target.classList.add('bg-slate-800', 'text-white');
+            const btn = (typeof event !== 'undefined' && event && event.target)
+                ? event.target.closest('.category-pill')
+                : null;
+            if (btn) {
+                btn.classList.remove('bg-slate-100', 'text-slate-600');
+                btn.classList.add('bg-slate-800', 'text-white');
+            }
             applyFilters();
         }
 
@@ -1732,12 +3443,54 @@ HTML_TEMPLATE = """
             });
         }
 
+        function updateDriveSyncBadge(ds) {
+            const badge = document.getElementById('driveSyncBadge');
+            const text = document.getElementById('driveSyncBadgeText');
+            if (!badge || !text) return;
+            const info = ds || {};
+            if (!info.configured) {
+                badge.className = "inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-slate-800 text-slate-300 border-slate-700";
+                text.innerText = "로컬 저장 모드 (Drive 미연동)";
+            } else if (info.status === 'synced') {
+                badge.className = "inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-emerald-950/70 text-emerald-300 border-emerald-500/40";
+                text.innerText = "Google Drive 동기화 완료";
+            } else if (info.status === 'syncing') {
+                badge.className = "inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-amber-950/70 text-amber-300 border-amber-500/40";
+                text.innerText = "Google Drive 동기화 중...";
+            } else if (info.status === 'error') {
+                badge.className = "inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-rose-950/70 text-rose-300 border-rose-500/40";
+                text.innerText = "Drive 동기화 오류";
+                badge.title = info.last_error || "Google Drive 연결 오류";
+            } else {
+                badge.className = "inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-blue-950/70 text-blue-300 border-blue-500/40";
+                text.innerText = "Google Drive 연결됨";
+            }
+        }
+
         // 데이터 주기적 갱신
         async function fetchSummary() {
             try {
                 const res = await fetch('/api/summary');
                 const data = await res.json();
                 allMasterData = data.masters || [];
+                if (data.settings) {
+                    globalSettings = data.settings;
+                    const impLt = globalSettings.default_import_lead_time || 110;
+                    const impBuf = globalSettings.default_import_buffer || 20;
+                    const expWarn = globalSettings.default_expiry_warn_days || 120;
+                    const prepLim = impLt + impBuf;
+                    const elSub = document.getElementById('headerSubtitleText');
+                    if (elSub) elSub.innerText = `수입 리드타임 ${impLt}일 발주 경보 · 창고 간 불균형 해소 · 소비기한 선입선출(FIFO) 관리`;
+                    const elU = document.getElementById('kpiBadgeUrgent');
+                    if (elU) elU.innerText = `${impLt}일 미만/결품`;
+                    const elP = document.getElementById('kpiBadgePrepare');
+                    if (elP) elP.innerText = `${impLt}~${prepLim}일`;
+                    const elE = document.getElementById('kpiSubExpiry');
+                    if (elE) elE.innerText = `잔여 ${expWarn}일 미만 or 미소진 위험`;
+                    const elS = document.getElementById('kpiBadgeSafe');
+                    if (elS) elS.innerText = `${prepLim}일 이상`;
+                }
+                updateDriveSyncBadge(data.drive_sync);
 
                 // 1. 헤더 재고 업데이트 일시 표기
                 if (data.stats.last_updated) {
@@ -1758,7 +3511,8 @@ HTML_TEMPLATE = """
 
                 document.getElementById('statTotalMasters').innerText = totalMasters + '개';
                 if (document.getElementById('statMasterSubtext')) {
-                    document.getElementById('statMasterSubtext').innerText = `(수입 ${importCount} / 사입 ${purchaseCount})`;
+                    const inactiveTxt = data.stats.inactive_count > 0 ? ` / 숨김 ${data.stats.inactive_count}` : '';
+                    document.getElementById('statMasterSubtext').innerText = `(수입 ${importCount} / 사입 ${purchaseCount}${inactiveTxt})`;
                 }
                 if (document.getElementById('catCountAll')) document.getElementById('catCountAll').innerText = totalMasters;
                 if (document.getElementById('catCountImport')) document.getElementById('catCountImport').innerText = importCount;
@@ -1802,7 +3556,9 @@ HTML_TEMPLATE = """
                 logBox.innerHTML = (data.logs || []).map(l => `<div>${escapeHtml(l)}</div>`).join('');
                 logBox.scrollTop = logBox.scrollHeight;
 
-                renderMasterTable();
+                if (!isAnyModalOpen()) {
+                    renderMasterTable();
+                }
             } catch (err) {
                 console.error("데이터 로드 실패:", err);
             }
@@ -1825,7 +3581,7 @@ HTML_TEMPLATE = """
                         if (m.product_type !== '수입') return false;
                     } else if (activeCategory === '사입') {
                         if (m.product_type !== '사입') return false;
-                    } else if (!m.category.includes(activeCategory)) {
+                    } else if (!(m.category || '').includes(activeCategory)) {
                         return false;
                     }
                 }
@@ -1888,27 +3644,35 @@ HTML_TEMPLATE = """
                     : '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">사입</span>';
 
                 let b2bBadge = (m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0)
-                    ? `<span class="px-1 py-0.2 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 ml-1" title="B2B/세트 출고 연동: ${m.b2b_linked_codes.map(b => b.s_code + ' (x' + b.multiplier + ')').join(', ')}">B2B연동</span>`
+                    ? `<span class="px-1 py-0.2 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 ml-1" title="B2B/세트 출고 연동: ${escapeHtml(m.b2b_linked_codes.map(b => b.s_code + ' (x' + b.multiplier + ')').join(', '))}">B2B연동</span>`
                     : '';
 
                 // 개미 소비기한 미니 태그
                 let expBadgeHtml = "";
-                if (m.nearest_expiry_date) {
-                    let dDayColor = "bg-emerald-50 text-emerald-700 border-emerald-200";
-                    if (m.nearest_days_left <= 90 || m.expiry_risk) {
-                        dDayColor = "bg-rose-100 text-rose-800 border-rose-300 font-bold";
-                    } else if (m.nearest_days_left <= 180) {
-                        dDayColor = "bg-amber-100 text-amber-800 border-amber-300 font-semibold";
-                    }
-                    const expShort = m.nearest_expiry_date.length >= 10 ? m.nearest_expiry_date.slice(2) : m.nearest_expiry_date;
-                    expBadgeHtml = `
-                        <div class="mt-0.5 flex flex-wrap justify-end gap-1">
-                            <span class="inline-flex items-center text-[9px] px-1.5 py-0.2 rounded border ${dDayColor}" title="최단 소비기한: ${m.nearest_expiry_date}">
-                                <i class="fa-regular fa-clock mr-1 text-[8px]"></i>${expShort} (D-${m.nearest_days_left})
+                if (m.nearest_expiry_date || m.has_unassigned_stock) {
+                    let tags = "";
+                    if (m.nearest_expiry_date) {
+                        let dDayColor = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                        if (m.nearest_days_left <= 90 || m.expiry_risk) {
+                            dDayColor = "bg-rose-100 text-rose-800 border-rose-300 font-bold";
+                        } else if (m.nearest_days_left <= 180) {
+                            dDayColor = "bg-amber-100 text-amber-800 border-amber-300 font-semibold";
+                        }
+                        const expShort = m.nearest_expiry_date.length >= 10 ? m.nearest_expiry_date.slice(2) : m.nearest_expiry_date;
+                        const adminMark = m.has_admin_expiry ? '✏️ ' : '';
+                        tags += `
+                            <span class="inline-flex items-center text-[9px] px-1.5 py-0.2 rounded border ${dDayColor}" title="최단 소비기한: ${escapeHtml(m.nearest_expiry_date)}">
+                                <i class="fa-regular fa-clock mr-1 text-[8px]"></i>${adminMark}${escapeHtml(expShort)} (D-${m.nearest_days_left})
                             </span>
-                            ${m.is_mixed_lots ? `<span class="text-[9px] bg-slate-100 text-slate-600 border border-slate-200 px-1 rounded font-mono" title="${m.lot_count}개 로트/기한 혼합">${m.lot_count}개 기한</span>` : ''}
-                        </div>
-                    `;
+                        `;
+                    }
+                    if (m.is_mixed_lots) {
+                        tags += `<span class="text-[9px] bg-slate-100 text-slate-600 border border-slate-200 px-1 rounded font-mono" title="${m.lot_count}개 로트/기한 혼합">${m.lot_count}개 기한</span>`;
+                    }
+                    if (m.has_unassigned_stock) {
+                        tags += `<span class="text-[9px] bg-rose-100 text-rose-800 border border-rose-300 px-1 rounded font-bold" title="신규 입고분의 소비기한 지정 필요">⚠️ 기한미지정</span>`;
+                    }
+                    expBadgeHtml = `<div class="mt-0.5 flex flex-wrap justify-end gap-1">${tags}</div>`;
                 }
 
                 // 쿠팡 런웨이 경고
@@ -1917,14 +3681,23 @@ HTML_TEMPLATE = """
                     coupangRunwayHtml = `<span class="text-rose-600 font-bold animate-pulse">🚨 ${m.coupang_runway_str}</span>`;
                 }
 
-                // 통합 런웨이 프로그레스 바 시각화
+                // 통합 런웨이 프로그레스 바 시각화 (품목별/전역 기준 반영)
+                const effLt = m.effective_lead_time || 110;
+                const effPrep = m.effective_prepare_limit || 130;
                 let runwayBarColor = "bg-emerald-500";
-                if (m.total_runway < 110) runwayBarColor = "bg-rose-500";
-                else if (m.total_runway <= 130) runwayBarColor = "bg-amber-500";
-                const barPercent = Math.min(100, Math.max(8, (m.total_runway / 180) * 100));
+                if (m.total_runway < effLt) runwayBarColor = "bg-rose-500";
+                else if (m.total_runway <= effPrep) runwayBarColor = "bg-amber-500";
+                const barBase = Math.max(180, effPrep + 30);
+                const barPercent = Math.min(100, Math.max(8, (m.total_runway / barBase) * 100));
+
+                const inTransitHtml = (m.in_transit_qty && m.in_transit_qty > 0)
+                    ? `<div class="text-[9px] font-bold text-blue-700 mt-0.5" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 입고예정 +${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
+                    : '';
+
+                const isSubExpanded = expandAllOptions || expandedRowIds.has(m.id);
 
                 html += `
-                    <tr draggable="true" data-row-idx="${allMasterData.indexOf(m)}" class="hover:bg-slate-50 transition cursor-pointer select-none" onclick="toggleSingleOption('${m.id}')">
+                    <tr draggable="true" data-row-idx="${allMasterData.indexOf(m)}" class="hover:bg-slate-50 transition cursor-pointer select-none" onclick="toggleSingleOption('${escapeHtml(m.id)}')">
                 `;
 
                 currentColumnOrder.forEach(colId => {
@@ -1932,17 +3705,21 @@ HTML_TEMPLATE = """
                     if (colId === 'no') {
                         html += `<td class="${col.tdClass}"><i class="fa-solid fa-grip-vertical text-slate-300 mr-1 text-[9px]"></i>${idx + 1}</td>`;
                     } else if (colId === 'status') {
-                        html += `<td class="${col.tdClass}"><span class="inline-block px-2 py-0.5 rounded-full text-[10px] ${badgeClass}">${m.status}</span></td>`;
+                        html += `<td class="${col.tdClass}"><span class="inline-block px-2 py-0.5 rounded-full text-[10px] ${badgeClass}">${escapeHtml(m.status)}</span></td>`;
                     } else if (colId === 'type') {
                         html += `<td class="${col.tdClass}">${ptypeBadge}</td>`;
                     } else if (colId === 'code') {
                         html += `<td class="${col.tdClass}">${escapeHtml(m.seller_code)}${b2bBadge}</td>`;
                     } else if (colId === 'name') {
+                        const customLtBadge = (m.lead_time_days !== null && m.lead_time_days !== undefined)
+                            ? `<span class="text-[9px] bg-blue-50 text-blue-700 border border-blue-200 px-1 rounded font-mono ml-1" title="품목 개별 리드타임">LT ${m.lead_time_days}일</span>`
+                            : '';
                         html += `
                             <td class="${col.tdClass}">
                                 <div class="font-bold text-slate-800 flex items-center space-x-1">
                                     <i class="fa-solid fa-angle-right text-[10px] text-slate-400"></i>
                                     <span>${escapeHtml(m.name)}</span>
+                                    ${customLtBadge}
                                 </div>
                                 <div class="text-[10px] text-slate-400 mt-0.5 truncate max-w-xs">
                                     ${escapeHtml(m.category)} | ${escapeHtml(m.gaemi_details)}
@@ -1950,7 +3727,12 @@ HTML_TEMPLATE = """
                             </td>
                         `;
                     } else if (colId === 'total_stock') {
-                        html += `<td class="${col.tdClass}">${m.master_physical_total.toLocaleString()}</td>`;
+                        html += `
+                            <td class="${col.tdClass}">
+                                <div>${m.master_physical_total.toLocaleString()}</div>
+                                ${inTransitHtml}
+                            </td>
+                        `;
                     } else if (colId === 'gaemi_stock') {
                         html += `
                             <td class="${col.tdClass}">
@@ -1988,11 +3770,17 @@ HTML_TEMPLATE = """
                             </td>
                         `;
                     } else if (colId === 'action_cta') {
+                        const editBtn = isAdminMode
+                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="ml-1 px-2 py-1 rounded-md text-[10px] font-extrabold bg-amber-400 hover:bg-amber-500 text-slate-950 shadow-xs transition" title="관리자 수정">✏️ 수정</button>`
+                            : '';
                         html += `
                             <td class="${col.tdClass}">
-                                <button class="px-2.5 py-1 rounded-md text-[10px] font-bold transition shadow-xs ${m.action_cta_class}">
-                                    ${m.action_cta}
-                                </button>
+                                <div class="inline-flex items-center justify-center flex-wrap gap-1">
+                                    <button type="button" class="px-2.5 py-1 rounded-md text-[10px] font-bold transition shadow-xs ${m.action_cta_class}">
+                                        ${escapeHtml(m.action_cta)}
+                                    </button>
+                                    ${editBtn}
+                                </div>
                             </td>
                         `;
                     }
@@ -2002,9 +3790,28 @@ HTML_TEMPLATE = """
 
                 // 세부 확장 행 (소비기한 로트 목록, 선입선출 우선순위, 소진 시뮬레이션 및 쿠팡 번들 내역)
                 html += `
-                    <tr id="subrow_${m.id}" class="${expandAllOptions ? '' : 'hidden'} bg-slate-50 border-b border-slate-200">
+                    <tr id="subrow_${escapeHtml(m.id)}" class="${isSubExpanded ? '' : 'hidden'} bg-slate-50 border-b border-slate-200">
                         <td colspan="${currentColumnOrder.length}" class="py-3 px-5">
                             <div class="space-y-3">
+
+                                ${isAdminMode ? `
+                                    <div class="flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px]">
+                                        <span class="font-bold text-amber-950">⚙️ 관리자 빠른 작업 — 기준 리드타임: ${effLt}일 (안전버퍼 +${effPrep - effLt}일) · 기한경고: ${m.effective_expiry_warn || 120}일${m.in_transit_qty > 0 ? ` · 입고예정 +${m.in_transit_qty}개 (${escapeHtml(m.expected_arrival_date || '예정일 미정')})` : ''}</span>
+                                        <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="openEditProductModal(this.dataset.prodId)" class="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md font-extrabold shadow-xs">
+                                            ✏️ 이 상품 기준정보 · 소비기한 수정
+                                        </button>
+                                    </div>
+                                ` : (m.in_transit_qty > 0 ? `
+                                    <div class="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-[11px] text-blue-900 font-semibold">
+                                        🚢 입고 예정(선적/발주중): <strong>+${m.in_transit_qty.toLocaleString()}개</strong>${m.expected_arrival_date ? ` (예상 입고일: <strong>${escapeHtml(m.expected_arrival_date)}</strong>)` : ''}
+                                    </div>
+                                ` : '')}
+
+                                ${m.lot_sync_note ? `
+                                    <div class="bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 text-[11px] text-indigo-900 font-semibold">
+                                        🔄 <strong>로트 자동 동기화 메모:</strong> ${escapeHtml(m.lot_sync_note)}
+                                    </div>
+                                ` : ''}
                                 
                                 <!-- 1. 개미창고 소비기한 & 로트별 선입선출(FIFO) 현황판 -->
                                 ${m.gaemi_lots && m.gaemi_lots.length > 0 ? `
@@ -2020,25 +3827,29 @@ HTML_TEMPLATE = """
                                         </div>
 
                                         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-                                            ${m.gaemi_lots.map((lot, lIdx) => {
+                                            ${m.gaemi_lots.map((lot) => {
                                                 const isNearest = (lot.expiry_date && lot.expiry_date === m.nearest_expiry_date);
                                                 let fifoBadge = '<span class="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.2 rounded font-medium">출고 대기</span>';
                                                 let cardBorder = 'border-slate-200 bg-slate-50/50';
 
-                                                if (isNearest && lot.stock > 0) {
+                                                if (lot.source === 'unassigned') {
+                                                    fifoBadge = '<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-2 py-0.5 rounded-full border border-rose-200">⚠️ 기한 지정 필요</span>';
+                                                    cardBorder = 'border-rose-300 bg-rose-50/40';
+                                                } else if (isNearest && lot.stock > 0) {
                                                     fifoBadge = '<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-2 py-0.5 rounded-full border border-rose-200 animate-pulse">🥇 1순위 우선 출고</span>';
                                                     cardBorder = 'border-rose-300 bg-rose-50/40 ring-1 ring-rose-200';
                                                 }
 
                                                 const expText = lot.expiry_date ? `${lot.expiry_date} (D-${lot.days_left}일)` : '미기재/로트명';
+                                                const adminLotBadge = lot.is_admin_expiry ? ' <span class="text-[9px] bg-amber-100 text-amber-900 px-1 rounded font-bold">관리자</span>' : '';
 
                                                 return `
                                                     <div class="p-2.5 rounded-lg border ${cardBorder} flex justify-between items-center">
                                                         <div class="min-w-0 pr-2">
-                                                            <div class="font-bold text-slate-800 truncate">${escapeHtml(lot.option_name)}</div>
+                                                            <div class="font-bold text-slate-800 truncate">${escapeHtml(lot.option_name)}${adminLotBadge}</div>
                                                             <div class="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center">
                                                                 <i class="fa-regular fa-calendar-check mr-1 text-slate-400"></i>
-                                                                <span>${expText}</span>
+                                                                <span>${escapeHtml(expText)}</span>
                                                             </div>
                                                         </div>
                                                         <div class="text-right shrink-0">
@@ -2057,7 +3868,7 @@ HTML_TEMPLATE = """
                                                     <i class="fa-solid fa-chart-pie text-amber-600 text-sm"></i>
                                                     <div>
                                                         <span class="font-bold">판매속도 대비 소진 시뮬레이션:</span>
-                                                        <span>7일(60%)+30일(40%) 가중 일평균 <strong>${m.daily_sales}개</strong> 판매 기준, 최단 소비기한(<strong>${m.nearest_expiry_date}</strong>, D-${m.nearest_days_left}일)까지 <strong>${m.projected_sales_to_exp}개</strong> 소진 예상 (로트 재고 ${m.nearest_lot_stock}개)</span>
+                                                        <span>7일(60%)+30일(40%) 가중 일평균 <strong>${m.daily_sales}개</strong> 판매 기준, 최단 소비기한(<strong>${escapeHtml(m.nearest_expiry_date)}</strong>, D-${m.nearest_days_left}일)까지 <strong>${m.projected_sales_to_exp}개</strong> 소진 예상 (로트 재고 ${m.nearest_lot_stock}개)</span>
                                                     </div>
                                                 </div>
                                                 <div>
@@ -2082,7 +3893,7 @@ HTML_TEMPLATE = """
                                         <div class="flex items-center space-x-1.5">
                                             <i class="fa-solid fa-boxes-stacked text-indigo-600"></i>
                                             <span class="font-bold">B2B/세트(S코드) 출고 연동:</span>
-                                            <span>이 단품은 <strong>${m.b2b_linked_codes.map(b => `${b.s_code} (${b.desc})`).join(', ')}</strong> 주문 시 개미창고 실물 재고에서 차감되며, 출고량(7일/30일) 및 런웨이에 자동 환산 합산되어 있습니다.</span>
+                                            <span>이 단품은 <strong>${escapeHtml(m.b2b_linked_codes.map(b => `${b.s_code} (${b.desc})`).join(', '))}</strong> 주문 시 개미창고 실물 재고에서 차감되며, 출고량(7일/30일) 및 런웨이에 자동 환산 합산되어 있습니다.</span>
                                         </div>
                                         ${m.b2b_shared_sales && m.b2b_shared_sales.length > 0 ? `
                                             <span class="text-[10px] bg-indigo-100 text-indigo-800 font-semibold px-2 py-0.5 rounded border border-indigo-200 whitespace-nowrap">
@@ -2112,8 +3923,8 @@ HTML_TEMPLATE = """
                                             ${m.options.map(opt => `
                                                 <div class="bg-blue-50/40 p-2 rounded border border-blue-100 flex justify-between items-center">
                                                     <div>
-                                                        <span class="font-bold text-slate-800">${opt.name}</span>
-                                                        <span class="text-slate-400 font-mono block text-[10px]">${opt.id} (${opt.bundle}개입)</span>
+                                                        <span class="font-bold text-slate-800">${escapeHtml(opt.name)}</span>
+                                                        <span class="text-slate-400 font-mono block text-[10px]">${escapeHtml(opt.id)} (${opt.bundle}개입)</span>
                                                     </div>
                                                     <div class="text-right">
                                                         <span class="font-bold text-blue-700 font-mono">${opt.coupang_stock}세트</span>
@@ -2195,7 +4006,7 @@ HTML_TEMPLATE = """
         }
 
         function escapeHtml(text) {
-            return (text || '').replace(/[&<>"']/g, function(m) {
+            return String(text ?? '').replace(/[&<>"']/g, function(m) {
                 return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
             });
         }
@@ -2253,8 +4064,931 @@ HTML_TEMPLATE = """
             if (banner) banner.classList.add('hidden');
         }
 
+        // -------------------------------------------------------------
+        // 단품 마스터 생성 / 수정 모달 로직
+        // -------------------------------------------------------------
+        let currentEditGaemiCsvTotal = 0;
+
+        async function ensureAdminConfig() {
+            const res = await adminFetch('/api/admin/config', { method: 'GET' });
+            const json = await res.json();
+            if (json.success) adminConfigCache = json;
+            return adminConfigCache;
+        }
+
+        function computeCsvLotsFromCache(item, cfg) {
+            const gaemi = (cfg && cfg.gaemi_inventory) || {};
+            const overrides = (cfg && cfg.lot_expiry_overrides) || {};
+            const optFilter = (item.gaemi_filter || '').trim();
+            const gCodes = item.gaemi_codes || [];
+            const lots = [];
+            gCodes.forEach(gCode => {
+                (gaemi[gCode] || []).forEach(gItem => {
+                    const optName = gItem.option_name || '';
+                    if (optFilter && !optName.includes(optFilter)) return;
+                    const reg = (gItem.reg_date || '').trim();
+                    const exactKey = reg ? `${gCode}||${optName.trim()}||${reg}` : `${gCode}||${optName.trim()}`;
+                    const optKey = `${gCode}||${optName.trim()}`;
+                    const rawExp = (gItem.expiry_date || '').trim();
+                    const ov = overrides[exactKey] !== undefined ? overrides[exactKey] : overrides[optKey];
+                    let effExp = rawExp;
+                    let isAdmin = false;
+                    if (ov === '__CLEAR__') { effExp = ''; isAdmin = true; }
+                    else if (ov) { effExp = ov; isAdmin = true; }
+                    lots.push({
+                        gaemi_code: gCode,
+                        lot_key: exactKey,
+                        option_name: optName,
+                        stock: parseInt(gItem.stock || 0, 10),
+                        reg_date: reg,
+                        expiry_date: effExp,
+                        raw_expiry_date: rawExp,
+                        is_admin_expiry: isAdmin
+                    });
+                });
+            });
+            return lots;
+        }
+
+        function openCreateProductModal() {
+            if (!isAdminMode) { openPinModal(); return; }
+            document.getElementById('ep_modal_title').innerText = '신규 단품 마스터 등록';
+            document.getElementById('ep_is_new').value = '1';
+            document.getElementById('ep_id').value = '';
+            document.getElementById('ep_orig_seller_code').value = '';
+            document.getElementById('ep_seller_code').value = '';
+            document.getElementById('ep_name').value = '';
+            document.getElementById('ep_product_type').value = '사입';
+            document.getElementById('ep_category').value = '기타';
+            document.getElementById('ep_is_active').checked = true;
+            document.getElementById('ep_note').value = '';
+            document.getElementById('ep_lead_time_days').value = '';
+            document.getElementById('ep_safety_buffer_days').value = '';
+            document.getElementById('ep_expiry_warn_days').value = '';
+            document.getElementById('ep_in_transit_qty').value = 0;
+            document.getElementById('ep_expected_arrival_date').value = '';
+            document.getElementById('ep_default_expiry_date').value = '';
+            document.getElementById('ep_gaemi_codes').value = '';
+            document.getElementById('ep_gaemi_filter').value = '';
+            document.getElementById('ep_lot_sync_note').classList.add('hidden');
+
+            currentEditGaemiCsvTotal = 0;
+            document.getElementById('ep_gaemi_summary_bar').innerText = '개미 CSV 재고: 0개 (신규)';
+            renderEpCsvLots([]);
+            document.getElementById('ep_manual_lots_container').innerHTML = '';
+            updateManualLotsSum();
+            document.getElementById('ep_options_container').innerHTML = '';
+            renderEpTempStocks([], []);
+            document.getElementById('ep_temp_stocks_details').open = false;
+
+            document.getElementById('ep_btn_toggle_hide').classList.add('hidden');
+            document.getElementById('ep_btn_hard_delete').classList.add('hidden');
+            document.getElementById('editProductModal').classList.remove('hidden');
+        }
+
+        async function openEditProductModal(prodId) {
+            if (!isAdminMode) { openPinModal(); return; }
+            let item = allMasterData.find(m => m.id === prodId || m.seller_code === prodId);
+            if (!item && (!adminConfigCache || !adminConfigCache.master_products)) {
+                try { await ensureAdminConfig(); } catch (e) { return; }
+            }
+            let rawCfgItem = null;
+            if (adminConfigCache && adminConfigCache.master_products) {
+                rawCfgItem = adminConfigCache.master_products.find(m => m.id === prodId || m.seller_code === prodId);
+            }
+            if (!item && rawCfgItem) {
+                const csvLots = computeCsvLotsFromCache(rawCfgItem, adminConfigCache);
+                const gTotal = csvLots.reduce((a, b) => a + (b.stock || 0), 0);
+                item = Object.assign({}, rawCfgItem, {
+                    csv_gaemi_lots: csvLots,
+                    gaemi_total: gTotal,
+                    options: (rawCfgItem.options || []).map(o => ({
+                        id: o.id, bundle: o.bundle, name: o.name,
+                        coupang_stock: ((adminConfigCache.coupang_inventory || {})[o.id] || {}).stock || 0
+                    }))
+                });
+            }
+            if (!item) {
+                alert('대상 상품 정보를 찾을 수 없습니다.');
+                return;
+            }
+
+            document.getElementById('ep_modal_title').innerText = `[${item.seller_code}] ${item.name} — 기준정보 수정`;
+            document.getElementById('ep_is_new').value = '0';
+            document.getElementById('ep_id').value = item.id || '';
+            document.getElementById('ep_orig_seller_code').value = item.seller_code || '';
+            document.getElementById('ep_seller_code').value = item.seller_code || '';
+            document.getElementById('ep_name').value = item.name || '';
+            document.getElementById('ep_product_type').value = item.product_type === '수입' ? '수입' : '사입';
+            document.getElementById('ep_category').value = item.category || '기타';
+            document.getElementById('ep_is_active').checked = (item.is_active !== false);
+            document.getElementById('ep_note').value = item.note || '';
+            document.getElementById('ep_lead_time_days').value = (item.lead_time_days !== null && item.lead_time_days !== undefined) ? item.lead_time_days : '';
+            document.getElementById('ep_safety_buffer_days').value = (item.safety_buffer_days !== null && item.safety_buffer_days !== undefined) ? item.safety_buffer_days : '';
+            document.getElementById('ep_expiry_warn_days').value = (item.expiry_warn_days !== null && item.expiry_warn_days !== undefined) ? item.expiry_warn_days : '';
+            document.getElementById('ep_in_transit_qty').value = item.in_transit_qty || 0;
+            document.getElementById('ep_expected_arrival_date').value = item.expected_arrival_date || '';
+            document.getElementById('ep_default_expiry_date').value = item.default_expiry_date || '';
+            document.getElementById('ep_gaemi_codes').value = (item.gaemi_codes || []).join(', ');
+            document.getElementById('ep_gaemi_filter').value = item.gaemi_filter || '';
+
+            const syncNoteEl = document.getElementById('ep_lot_sync_note');
+            if (item.lot_sync_note) {
+                syncNoteEl.innerText = '🔄 ' + item.lot_sync_note;
+                syncNoteEl.classList.remove('hidden');
+            } else {
+                syncNoteEl.classList.add('hidden');
+            }
+
+            const csvLots = item.csv_gaemi_lots || [];
+            currentEditGaemiCsvTotal = csvLots.reduce((a, b) => a + (b.stock || 0), 0);
+            document.getElementById('ep_gaemi_summary_bar').innerText = `개미 CSV 실물 합계: ${currentEditGaemiCsvTotal.toLocaleString()}개 (현재 화면 총합 ${ (item.gaemi_total || 0).toLocaleString() }개)`;
+
+            renderEpCsvLots(csvLots);
+
+            const manualContainer = document.getElementById('ep_manual_lots_container');
+            manualContainer.innerHTML = '';
+            (item.manual_lots || []).forEach(lot => addManualLotRow(lot));
+            updateManualLotsSum();
+
+            const optContainer = document.getElementById('ep_options_container');
+            optContainer.innerHTML = '';
+            (item.options || []).forEach(opt => addCoupangOptionRow(opt));
+
+            renderEpTempStocks(csvLots, item.options || []);
+            document.getElementById('ep_temp_stocks_details').open = false;
+
+            const btnHide = document.getElementById('ep_btn_toggle_hide');
+            const btnDel = document.getElementById('ep_btn_hard_delete');
+            btnHide.classList.remove('hidden');
+            btnDel.classList.remove('hidden');
+            btnHide.innerText = (item.is_active === false) ? '대시보드 노출 복원' : '대시보드 숨김';
+            btnHide.dataset.isActive = (item.is_active === false) ? '0' : '1';
+
+            document.getElementById('editProductModal').classList.remove('hidden');
+        }
+
+        function closeEditProductModal() {
+            const modal = document.getElementById('editProductModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function renderEpCsvLots(csvLots) {
+            const box = document.getElementById('ep_csv_lots_container');
+            if (!csvLots || csvLots.length === 0) {
+                box.innerHTML = '<div class="text-[11px] text-slate-400 bg-white border border-slate-200 rounded-lg p-2.5">연결된 개미창고 CSV 로트가 없습니다. (개미 상품코드 매핑 또는 아래 기본 소비기한을 사용하세요)</div>';
+                return;
+            }
+            box.innerHTML = csvLots.map(lot => {
+                const initMode = (lot.is_admin_expiry && !lot.expiry_date) ? '__CLEAR__' : '';
+                const rawHint = lot.raw_expiry_date ? `CSV원본: ${escapeHtml(lot.raw_expiry_date)}` : 'CSV원본: 미기재';
+                return `
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-white border border-amber-200 rounded-lg p-2">
+                        <div class="min-w-0 flex-1">
+                            <div class="font-bold text-slate-800 truncate">${escapeHtml(lot.option_name || '옵션명 없음')} <span class="text-amber-700 font-mono">(${(lot.stock || 0).toLocaleString()}개)</span></div>
+                            <div class="text-[10px] text-slate-400 font-mono">${escapeHtml(lot.gaemi_code)} · ${lot.reg_date ? '등록 ' + escapeHtml(lot.reg_date) + ' · ' : ''}${rawHint}</div>
+                        </div>
+                        <div class="flex items-center space-x-1.5 shrink-0">
+                            <input type="date" class="ep-csv-lot-input px-2 py-1 border border-slate-300 rounded text-[11px] font-mono" data-lot-key="${escapeHtml(lot.lot_key)}" data-raw-expiry="${escapeHtml(lot.raw_expiry_date || '')}" data-was-admin="${lot.is_admin_expiry ? '1' : '0'}" data-mode="${initMode}" value="${escapeHtml(lot.expiry_date || '')}" oninput="this.dataset.mode=''">
+                            <button type="button" onclick="restoreCsvLotInput(this)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold" title="CSV 원본 소비기한으로 복원">원복</button>
+                            <button type="button" onclick="clearCsvLotInput(this)" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-bold" title="이 로트 소비기한 표시 제거">제거</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function restoreCsvLotInput(btn) {
+            const inp = btn.parentElement.querySelector('.ep-csv-lot-input');
+            if (!inp) return;
+            inp.dataset.mode = '__RESTORE__';
+            inp.value = inp.dataset.rawExpiry || '';
+        }
+
+        function clearCsvLotInput(btn) {
+            const inp = btn.parentElement.querySelector('.ep-csv-lot-input');
+            if (!inp) return;
+            inp.dataset.mode = '__CLEAR__';
+            inp.value = '';
+        }
+
+        function addManualLotRow(lot = {}) {
+            const container = document.getElementById('ep_manual_lots_container');
+            const row = document.createElement('div');
+            row.className = 'ep-manual-lot-row flex flex-wrap items-center gap-2 bg-white border border-amber-300 rounded-lg p-2';
+            row.innerHTML = `
+                <input type="hidden" class="ep-ml-id" value="${escapeHtml(lot.lot_id || '')}">
+                <input type="text" class="ep-ml-label flex-1 min-w-[120px] px-2.5 py-1 border border-slate-300 rounded text-[11px]" placeholder="로트명 (예: 1차 입고분)" value="${escapeHtml(lot.label || '')}">
+                <input type="date" class="ep-ml-expiry px-2.5 py-1 border border-slate-300 rounded text-[11px] font-mono" value="${escapeHtml(lot.expiry_date || '')}">
+                <div class="flex items-center space-x-1">
+                    <input type="number" min="0" class="ep-ml-qty w-24 px-2.5 py-1 border border-slate-300 rounded text-[11px] font-mono font-bold text-right" placeholder="수량" value="${lot.qty !== undefined ? lot.qty : 0}" oninput="updateManualLotsSum()">
+                    <span class="text-[11px] text-slate-500">개</span>
+                </div>
+                <button type="button" onclick="this.closest('.ep-manual-lot-row').remove(); updateManualLotsSum();" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-bold">삭제</button>
+            `;
+            container.appendChild(row);
+            updateManualLotsSum();
+        }
+
+        function updateManualLotsSum() {
+            const rows = document.querySelectorAll('#ep_manual_lots_container .ep-manual-lot-row');
+            const bar = document.getElementById('ep_manual_lots_sum_bar');
+            if (rows.length === 0) {
+                bar.classList.add('hidden');
+                return;
+            }
+            let sum = 0;
+            rows.forEach(r => {
+                sum += Math.max(0, parseInt(r.querySelector('.ep-ml-qty').value || '0', 10) || 0);
+            });
+            bar.classList.remove('hidden');
+            if (currentEditGaemiCsvTotal === 0) {
+                bar.className = 'text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border bg-blue-50 border-blue-200 text-blue-900';
+                bar.innerText = `수동 로트 합계: ${sum.toLocaleString()}개 (CSV 업로드 시 이 수량 기준으로 선입선출 FIFO 자동 차감됩니다)`;
+            } else if (sum === currentEditGaemiCsvTotal) {
+                bar.className = 'text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border bg-emerald-50 border-emerald-200 text-emerald-900';
+                bar.innerText = `✅ 개미 CSV 재고(${currentEditGaemiCsvTotal.toLocaleString()}개)와 수동 분할 합계(${sum.toLocaleString()}개)가 정확히 일치합니다.`;
+            } else if (sum < currentEditGaemiCsvTotal) {
+                const diff = currentEditGaemiCsvTotal - sum;
+                bar.className = 'text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border bg-amber-50 border-amber-300 text-amber-950';
+                bar.innerText = `⚠️ 개미 CSV ${currentEditGaemiCsvTotal.toLocaleString()}개 중 ${sum.toLocaleString()}개만 로트 배정됨 → 나머지 ${diff.toLocaleString()}개는 '미지정 재고'로 경고 표시됩니다.`;
+            } else {
+                bar.className = 'text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border bg-rose-50 border-rose-200 text-rose-900';
+                bar.innerText = `ℹ️ 수동 로트 합계(${sum.toLocaleString()}개)가 현재 개미 CSV(${currentEditGaemiCsvTotal.toLocaleString()}개)를 초과합니다. 차기 CSV 업로드 시 초과분이 FIFO로 자동 차감됩니다.`;
+            }
+        }
+
+        function addCoupangOptionRow(opt = {}) {
+            const container = document.getElementById('ep_options_container');
+            const row = document.createElement('div');
+            row.className = 'ep-opt-row flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg p-2';
+            row.innerHTML = `
+                <input type="text" class="ep-opt-id w-36 px-2.5 py-1 border border-slate-300 rounded font-mono text-[11px]" placeholder="쿠팡 옵션 ID" value="${escapeHtml(opt.id || '')}">
+                <div class="flex items-center space-x-1">
+                    <input type="number" min="1" class="ep-opt-bundle w-16 px-2 py-1 border border-slate-300 rounded font-mono text-[11px] text-right" value="${opt.bundle || 1}">
+                    <span class="text-[11px] text-slate-500">개입</span>
+                </div>
+                <input type="text" class="ep-opt-name flex-1 min-w-[100px] px-2.5 py-1 border border-slate-300 rounded text-[11px]" placeholder="옵션명 (예: 2개)" value="${escapeHtml(opt.name || '')}">
+                <button type="button" onclick="this.closest('.ep-opt-row').remove()" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-bold">삭제</button>
+            `;
+            container.appendChild(row);
+        }
+
+        function renderEpTempStocks(csvLots, options) {
+            const box = document.getElementById('ep_temp_stocks_container');
+            let html = '';
+            if (csvLots && csvLots.length > 0) {
+                html += `<div class="text-[11px] font-bold text-amber-900">개미창고(3PL) 임시 재고 보정</div>`;
+                html += csvLots.map(l => `
+                    <div class="flex items-center justify-between gap-2 bg-white border border-rose-200 rounded px-2.5 py-1.5">
+                        <span class="text-[11px] text-slate-700 truncate">${escapeHtml(l.option_name || l.gaemi_code)} (현재 ${l.stock}개)</span>
+                        <input type="number" min="0" class="ep-temp-gaemi w-24 px-2 py-1 border border-slate-300 rounded font-mono text-[11px] text-right" data-lot-key="${escapeHtml(l.lot_key)}" placeholder="${l.stock}">
+                    </div>
+                `).join('');
+            }
+            if (options && options.length > 0) {
+                html += `<div class="text-[11px] font-bold text-blue-900 mt-2">쿠팡 창고(세트 기준) 임시 재고 보정</div>`;
+                html += options.map(o => `
+                    <div class="flex items-center justify-between gap-2 bg-white border border-rose-200 rounded px-2.5 py-1.5">
+                        <span class="text-[11px] text-slate-700 truncate">${escapeHtml(o.name)} [${escapeHtml(o.id)}] (현재 ${o.coupang_stock || 0}세트)</span>
+                        <input type="number" min="0" class="ep-temp-coupang w-24 px-2 py-1 border border-slate-300 rounded font-mono text-[11px] text-right" data-opt-id="${escapeHtml(o.id)}" placeholder="${o.coupang_stock || 0}">
+                    </div>
+                `).join('');
+            }
+            if (!html) {
+                html = '<div class="text-[11px] text-slate-400">보정 가능한 창고 로트 또는 쿠팡 옵션 ID가 없습니다. 먼저 위 4번에서 개미/쿠팡 코드를 연결하세요.</div>';
+            }
+            box.innerHTML = html;
+        }
+
+        async function saveProductModal() {
+            const sellerCode = document.getElementById('ep_seller_code').value.trim();
+            const name = document.getElementById('ep_name').value.trim();
+            if (!sellerCode || !name) {
+                alert('판매자관리코드와 마스터 상품명은 필수입니다.');
+                return;
+            }
+
+            const options = [];
+            document.querySelectorAll('#ep_options_container .ep-opt-row').forEach(r => {
+                const id = r.querySelector('.ep-opt-id').value.trim();
+                const bundle = parseInt(r.querySelector('.ep-opt-bundle').value || '1', 10) || 1;
+                const oname = r.querySelector('.ep-opt-name').value.trim() || `${bundle}개`;
+                if (id) options.push({ id, bundle, name: oname });
+            });
+
+            const manualLots = [];
+            document.querySelectorAll('#ep_manual_lots_container .ep-manual-lot-row').forEach(r => {
+                const lotId = r.querySelector('.ep-ml-id').value.trim();
+                const label = r.querySelector('.ep-ml-label').value.trim() || '로트';
+                const exp = r.querySelector('.ep-ml-expiry').value.trim();
+                const qty = parseInt(r.querySelector('.ep-ml-qty').value || '0', 10) || 0;
+                if (exp || qty > 0) manualLots.push({ lot_id: lotId, label, expiry_date: exp, qty });
+            });
+
+            const csvLotExpiries = {};
+            document.querySelectorAll('#ep_csv_lots_container .ep-csv-lot-input').forEach(inp => {
+                const k = inp.dataset.lotKey;
+                const mode = inp.dataset.mode || '';
+                const wasAdmin = inp.dataset.wasAdmin === '1';
+                const rawExp = (inp.dataset.rawExpiry || '').trim();
+                const curVal = inp.value.trim();
+                if (!k) return;
+                if (mode === '__RESTORE__') csvLotExpiries[k] = '__RESTORE__';
+                else if (mode === '__CLEAR__') csvLotExpiries[k] = '__CLEAR__';
+                else if (wasAdmin || curVal !== rawExp) csvLotExpiries[k] = curVal;
+            });
+
+            const tempGaemiStocks = {};
+            document.querySelectorAll('#ep_temp_stocks_container .ep-temp-gaemi').forEach(inp => {
+                if (inp.value !== '') tempGaemiStocks[inp.dataset.lotKey] = parseInt(inp.value, 10);
+            });
+            const tempCoupangStocks = {};
+            document.querySelectorAll('#ep_temp_stocks_container .ep-temp-coupang').forEach(inp => {
+                if (inp.value !== '') tempCoupangStocks[inp.dataset.optId] = parseInt(inp.value, 10);
+            });
+
+            const payload = {
+                is_new: document.getElementById('ep_is_new').value === '1',
+                id: document.getElementById('ep_id').value.trim(),
+                original_seller_code: document.getElementById('ep_orig_seller_code').value.trim(),
+                seller_code: sellerCode,
+                name: name,
+                product_type: document.getElementById('ep_product_type').value,
+                category: document.getElementById('ep_category').value.trim() || '기타',
+                is_active: document.getElementById('ep_is_active').checked,
+                note: document.getElementById('ep_note').value.trim(),
+                lead_time_days: document.getElementById('ep_lead_time_days').value.trim(),
+                safety_buffer_days: document.getElementById('ep_safety_buffer_days').value.trim(),
+                expiry_warn_days: document.getElementById('ep_expiry_warn_days').value.trim(),
+                in_transit_qty: parseInt(document.getElementById('ep_in_transit_qty').value || '0', 10) || 0,
+                expected_arrival_date: document.getElementById('ep_expected_arrival_date').value.trim(),
+                default_expiry_date: document.getElementById('ep_default_expiry_date').value.trim(),
+                gaemi_codes: document.getElementById('ep_gaemi_codes').value.trim(),
+                gaemi_filter: document.getElementById('ep_gaemi_filter').value.trim(),
+                options: options,
+                manual_lots: manualLots,
+                csv_lot_expiries: csvLotExpiries,
+                temp_gaemi_stocks: tempGaemiStocks,
+                temp_coupang_stocks: tempCoupangStocks
+            };
+
+            try {
+                const res = await adminFetch('/api/admin/product/save', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    alert(json.message || '저장 실패');
+                    return;
+                }
+                closeEditProductModal();
+                await fetchSummary();
+                if (!document.getElementById('adminCenterModal').classList.contains('hidden')) {
+                    await ensureAdminConfig();
+                    renderAdminCenterTabs();
+                }
+                alert('✅ ' + json.message);
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('저장 오류: ' + err.message);
+            }
+        }
+
+        async function toggleHideCurrentProduct() {
+            const btn = document.getElementById('ep_btn_toggle_hide');
+            const isCurrentlyActive = btn.dataset.isActive === '1';
+            const mode = isCurrentlyActive ? 'hide' : 'restore';
+            const msg = isCurrentlyActive
+                ? '이 상품을 메인 대시보드에서 숨기시겠습니까? (관리자 센터에서 언제든 복원 가능)'
+                : '이 상품을 메인 대시보드에 다시 노출하시겠습니까?';
+            if (!confirm(msg)) return;
+            await executeDeleteProduct(mode);
+        }
+
+        async function deleteCurrentProductHard() {
+            const code = document.getElementById('ep_seller_code').value.trim();
+            if (!confirm(`[${code}] 상품을 마스터 목록에서 영구 삭제하시겠습니까?\\n이 작업은 되돌릴 수 없습니다.`)) return;
+            await executeDeleteProduct('hard');
+        }
+
+        async function executeDeleteProduct(mode) {
+            try {
+                const res = await adminFetch('/api/admin/product/delete', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        id: document.getElementById('ep_id').value.trim(),
+                        seller_code: document.getElementById('ep_orig_seller_code').value.trim(),
+                        mode: mode
+                    })
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    alert(json.message || '처리 실패');
+                    return;
+                }
+                closeEditProductModal();
+                await fetchSummary();
+                if (!document.getElementById('adminCenterModal').classList.contains('hidden')) {
+                    await ensureAdminConfig();
+                    renderAdminCenterTabs();
+                }
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('처리 오류: ' + err.message);
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 관리자 통합 센터 (5개 탭) 로직
+        // -------------------------------------------------------------
+        let activeAdminTab = 'bulk';
+
+        async function openAdminCenter(tabName = 'bulk') {
+            if (!isAdminMode) { openPinModal(); return; }
+            document.getElementById('adminCenterModal').classList.remove('hidden');
+            switchAdminTab(tabName);
+            try {
+                await ensureAdminConfig();
+                renderAdminCenterTabs();
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('관리자 설정 불러오기 실패: ' + err.message);
+            }
+        }
+
+        function closeAdminCenter() {
+            const m = document.getElementById('adminCenterModal');
+            if (m) m.classList.add('hidden');
+            fetchSummary();
+        }
+
+        function switchAdminTab(tabName) {
+            activeAdminTab = tabName;
+            ['bulk', 'expiry', 'b2b', 'settings', 'drive'].forEach(t => {
+                const pane = document.getElementById(`acTab_${t}`);
+                if (pane) pane.classList.toggle('hidden', t !== tabName);
+            });
+            document.querySelectorAll('.ac-tab-btn').forEach(btn => {
+                const isActive = btn.dataset.tab === tabName;
+                btn.className = isActive
+                    ? 'ac-tab-btn px-3.5 py-2 rounded-t-lg font-extrabold border border-b-0 bg-white text-slate-900 shadow-xs'
+                    : 'ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white';
+            });
+        }
+
+        function renderAdminCenterTabs() {
+            if (!adminConfigCache) return;
+            renderAdminBulkTable();
+            renderAdminExpiryTable();
+            renderAdminB2bTable();
+            renderAdminSettingsTab();
+            renderAdminDriveTab();
+        }
+
+        function renderAdminBulkTable() {
+            if (!adminConfigCache) return;
+            const tbody = document.getElementById('acBulkTbody');
+            const q = (document.getElementById('acBulkSearch').value || '').toLowerCase().trim();
+            const showInactive = document.getElementById('acBulkShowInactive').checked;
+            const items = (adminConfigCache.master_products || []).filter(m => {
+                if (!showInactive && m.is_active === false) return false;
+                if (q) {
+                    const mName = (m.name || '').toLowerCase();
+                    const mCode = (m.seller_code || '').toLowerCase();
+                    if (!mName.includes(q) && !mCode.includes(q)) return false;
+                }
+                return true;
+            });
+
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" class="p-6 text-center text-slate-400">표시할 품목이 없습니다.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = items.map(m => {
+                const isAct = m.is_active !== false;
+                return `
+                    <tr class="ac-bulk-row ${isAct ? 'hover:bg-slate-50' : 'bg-slate-100/70 opacity-75'}" data-id="${escapeHtml(m.id || '')}" data-seller-code="${escapeHtml(m.seller_code)}">
+                        <td class="p-1.5 font-mono font-bold text-slate-700">${escapeHtml(m.seller_code)}</td>
+                        <td class="p-1.5"><input type="text" class="ac-b-name w-full px-2 py-1 border border-slate-300 rounded font-semibold" value="${escapeHtml(m.name || '')}"></td>
+                        <td class="p-1.5">
+                            <select class="ac-b-type w-full px-1.5 py-1 border border-slate-300 rounded bg-white">
+                                <option value="수입" ${m.product_type === '수입' ? 'selected' : ''}>수입</option>
+                                <option value="사입" ${m.product_type !== '수입' ? 'selected' : ''}>사입</option>
+                            </select>
+                        </td>
+                        <td class="p-1.5"><input type="text" list="categorySuggestions" class="ac-b-cat w-full px-2 py-1 border border-slate-300 rounded" value="${escapeHtml(m.category || '')}"></td>
+                        <td class="p-1.5"><input type="number" min="0" class="ac-b-lt w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-right" placeholder="기본" value="${(m.lead_time_days !== null && m.lead_time_days !== undefined) ? m.lead_time_days : ''}"></td>
+                        <td class="p-1.5"><input type="number" min="0" class="ac-b-transit w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-right" value="${m.in_transit_qty || 0}"></td>
+                        <td class="p-1.5"><input type="date" class="ac-b-arr w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-[11px]" value="${escapeHtml(m.expected_arrival_date || '')}"></td>
+                        <td class="p-1.5"><input type="date" class="ac-b-defexp w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-[11px]" value="${escapeHtml(m.default_expiry_date || '')}"></td>
+                        <td class="p-1.5 text-center"><input type="checkbox" class="ac-b-active" ${isAct ? 'checked' : ''}></td>
+                        <td class="p-1.5"><input type="text" class="ac-b-note w-full px-2 py-1 border border-slate-300 rounded" value="${escapeHtml(m.note || '')}"></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function saveAdminBulkProducts() {
+            const products = [];
+            document.querySelectorAll('#acBulkTbody .ac-bulk-row').forEach(tr => {
+                products.push({
+                    id: tr.dataset.id,
+                    seller_code: tr.dataset.sellerCode,
+                    name: tr.querySelector('.ac-b-name').value.trim(),
+                    product_type: tr.querySelector('.ac-b-type').value,
+                    category: tr.querySelector('.ac-b-cat').value.trim(),
+                    lead_time_days: tr.querySelector('.ac-b-lt').value.trim(),
+                    in_transit_qty: parseInt(tr.querySelector('.ac-b-transit').value || '0', 10) || 0,
+                    expected_arrival_date: tr.querySelector('.ac-b-arr').value.trim(),
+                    default_expiry_date: tr.querySelector('.ac-b-defexp').value.trim(),
+                    is_active: tr.querySelector('.ac-b-active').checked,
+                    note: tr.querySelector('.ac-b-note').value.trim()
+                });
+            });
+            try {
+                const res = await adminFetch('/api/admin/products/bulk-save', {
+                    method: 'POST',
+                    body: JSON.stringify({ products })
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    alert(json.message || '일괄 저장 실패');
+                    return;
+                }
+                await ensureAdminConfig();
+                await fetchSummary();
+                renderAdminCenterTabs();
+                alert('✅ ' + json.message);
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('일괄 저장 오류: ' + err.message);
+            }
+        }
+
+        function renderAdminExpiryTable() {
+            if (!adminConfigCache) return;
+            const tbody = document.getElementById('acExpiryTbody');
+            const mode = document.getElementById('acExpiryFilterMode').value;
+            const q = (document.getElementById('acExpirySearch').value || '').toLowerCase().trim();
+            const b2bMap = adminConfigCache.b2b_mappings || {};
+
+            const enriched = (adminConfigCache.master_products || [])
+                .filter(m => {
+                    const c = (m.seller_code || '').toUpperCase();
+                    return m.is_active !== false && !c.startsWith('S') && !b2bMap[c];
+                })
+                .map(m => {
+                    const sItem = allMasterData.find(x => x.id === m.id || x.seller_code === m.seller_code) || {};
+                    const csvLots = sItem.csv_gaemi_lots || computeCsvLotsFromCache(m, adminConfigCache);
+                    const gTotal = sItem.gaemi_total !== undefined ? sItem.gaemi_total : csvLots.reduce((a, b) => a + (b.stock || 0), 0);
+                    const nearestExp = sItem.nearest_expiry_date || m.default_expiry_date || '';
+                    const nearestDays = sItem.nearest_days_left;
+                    return { m, csvLots, gTotal, nearestExp, nearestDays };
+                })
+                .filter(({ m, csvLots, nearestExp, nearestDays }) => {
+                    if (q) {
+                        const mn = (m.name || '').toLowerCase();
+                        const mc = (m.seller_code || '').toLowerCase();
+                        if (!mn.includes(q) && !mc.includes(q)) return false;
+                    }
+                    if (mode === 'missing') {
+                        const hasAnyLotMissing = csvLots.some(l => !l.expiry_date);
+                        return !nearestExp || hasAnyLotMissing;
+                    } else if (mode === 'soon') {
+                        return nearestDays !== null && nearestDays !== undefined && nearestDays <= 180;
+                    }
+                    return true;
+                });
+
+            if (enriched.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-400">조건에 해당하는 품목이 없습니다.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = enriched.map(({ m, csvLots, gTotal, nearestExp, nearestDays }) => {
+                let lotSummaryHtml = '';
+                let inputColHtml = '';
+                if (csvLots.length > 0) {
+                    lotSummaryHtml = csvLots.map(l => `<div class="text-[11px] text-slate-600 truncate">• ${escapeHtml(l.option_name)} (${l.stock}개)</div>`).join('');
+                    inputColHtml = csvLots.map(l => `
+                        <div class="mb-1 flex items-center gap-1">
+                            <input type="date" class="ac-exp-lot-input w-full px-2 py-1 border border-slate-300 rounded font-mono text-[11px]" data-lot-key="${escapeHtml(l.lot_key)}" data-orig="${escapeHtml(l.expiry_date || '')}" value="${escapeHtml(l.expiry_date || '')}">
+                        </div>
+                    `).join('');
+                } else {
+                    const manLots = m.manual_lots || [];
+                    lotSummaryHtml = manLots.length > 0
+                        ? manLots.map(l => `<div class="text-[11px] text-amber-800">• ${escapeHtml(l.label)}: ${l.qty}개 (${escapeHtml(l.expiry_date || '미지정')})</div>`).join('')
+                        : '<span class="text-[11px] text-slate-400">개미 CSV 로트 없음 (기본 소비기한 적용)</span>';
+                    inputColHtml = `
+                        <input type="date" class="ac-exp-default-input w-full px-2 py-1 border border-slate-300 rounded font-mono text-[11px]" data-id="${escapeHtml(m.id || '')}" data-seller-code="${escapeHtml(m.seller_code)}" data-orig="${escapeHtml(m.default_expiry_date || '')}" value="${escapeHtml(m.default_expiry_date || '')}">
+                    `;
+                }
+                const dBadge = (nearestDays !== null && nearestDays !== undefined)
+                    ? `<span class="text-[10px] font-mono ${nearestDays <= 120 ? 'text-rose-700 font-bold' : 'text-slate-500'}">(D-${nearestDays}일)</span>`
+                    : `<span class="text-[10px] text-rose-600 font-bold">미등록</span>`;
+
+                return `
+                    <tr class="hover:bg-slate-50">
+                        <td class="p-2 font-mono font-bold text-slate-700 align-top">${escapeHtml(m.seller_code)}</td>
+                        <td class="p-2 align-top">
+                            <div class="font-bold text-slate-800">${escapeHtml(m.name)}</div>
+                            <div class="text-[10px] text-slate-500 mt-0.5">개미 재고: ${gTotal.toLocaleString()}개 · ${dBadge}</div>
+                        </td>
+                        <td class="p-2 align-top">${lotSummaryHtml}</td>
+                        <td class="p-2 align-top">${inputColHtml}</td>
+                        <td class="p-2 text-center align-top">
+                            <button type="button" data-prod-id="${escapeHtml(m.id || m.seller_code)}" onclick="openEditProductModal(this.dataset.prodId)" class="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded font-bold text-[11px]">상세 분할</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function saveAdminExpiryBulk() {
+            const products = [];
+            const lotOverrides = {};
+
+            document.querySelectorAll('#acExpiryTbody .ac-exp-default-input').forEach(inp => {
+                const v = inp.value.trim();
+                const orig = inp.dataset.orig || '';
+                if (v !== orig) {
+                    products.push({
+                        id: inp.dataset.id,
+                        seller_code: inp.dataset.sellerCode,
+                        default_expiry_date: v
+                    });
+                }
+            });
+
+            document.querySelectorAll('#acExpiryTbody .ac-exp-lot-input').forEach(inp => {
+                const v = inp.value.trim();
+                const orig = inp.dataset.orig || '';
+                const key = inp.dataset.lotKey;
+                if (key && v !== orig) {
+                    lotOverrides[key] = v ? v : '__CLEAR__';
+                }
+            });
+
+            if (products.length === 0 && Object.keys(lotOverrides).length === 0) {
+                alert('변경된 소비기한 항목이 없습니다.');
+                return;
+            }
+
+            try {
+                const res = await adminFetch('/api/admin/products/bulk-save', {
+                    method: 'POST',
+                    body: JSON.stringify({ products, lot_expiry_overrides: lotOverrides })
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    alert(json.message || '소비기한 일괄 저장 실패');
+                    return;
+                }
+                await ensureAdminConfig();
+                await fetchSummary();
+                renderAdminCenterTabs();
+                alert('✅ 소비기한 일괄 반영 완료!');
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('소비기한 저장 오류: ' + err.message);
+            }
+        }
+
+        function renderAdminB2bTable() {
+            if (!adminConfigCache) return;
+            const tbody = document.getElementById('acB2bTbody');
+            tbody.innerHTML = '';
+            const map = adminConfigCache.b2b_mappings || {};
+            const entries = Object.entries(map);
+            if (entries.length === 0) {
+                addAdminB2bRow();
+            } else {
+                entries.forEach(([sCode, info]) => {
+                    addAdminB2bRow({
+                        s_code: sCode,
+                        base_code: info.base_code || '',
+                        multiplier: info.multiplier || 1,
+                        desc: info.desc || ''
+                    });
+                });
+            }
+        }
+
+        function addAdminB2bRow(row = {}) {
+            const tbody = document.getElementById('acB2bTbody');
+            const tr = document.createElement('tr');
+            tr.className = 'ac-b2b-row hover:bg-slate-50';
+            tr.innerHTML = `
+                <td class="p-2"><input type="text" class="ac-b2b-s w-full px-2 py-1 border border-slate-300 rounded font-mono font-bold uppercase" placeholder="예: S100005" value="${escapeHtml(row.s_code || '')}"></td>
+                <td class="p-2"><input type="text" class="ac-b2b-base w-full px-2 py-1 border border-slate-300 rounded font-mono font-bold uppercase" placeholder="예: 10GL02" value="${escapeHtml(row.base_code || '')}"></td>
+                <td class="p-2"><input type="number" min="1" class="ac-b2b-mult w-full px-2 py-1 border border-slate-300 rounded font-mono text-right font-bold" value="${row.multiplier || 1}"></td>
+                <td class="p-2"><input type="text" class="ac-b2b-desc w-full px-2 py-1 border border-slate-300 rounded" placeholder="설명" value="${escapeHtml(row.desc || '')}"></td>
+                <td class="p-2 text-center"><button type="button" onclick="this.closest('tr').remove()" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded font-bold">삭제</button></td>
+            `;
+            tbody.appendChild(tr);
+        }
+
+        async function saveAdminB2bMappings() {
+            const mappings = [];
+            document.querySelectorAll('#acB2bTbody .ac-b2b-row').forEach(tr => {
+                const s_code = tr.querySelector('.ac-b2b-s').value.trim().toUpperCase();
+                const base_code = tr.querySelector('.ac-b2b-base').value.trim().toUpperCase();
+                const multiplier = parseInt(tr.querySelector('.ac-b2b-mult').value || '1', 10) || 1;
+                const desc = tr.querySelector('.ac-b2b-desc').value.trim();
+                if (s_code && base_code) mappings.push({ s_code, base_code, multiplier, desc });
+            });
+            try {
+                const res = await adminFetch('/api/admin/b2b-mappings/save', {
+                    method: 'POST',
+                    body: JSON.stringify({ mappings })
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    alert(json.message || 'B2B 매핑 저장 실패');
+                    return;
+                }
+                await ensureAdminConfig();
+                await fetchSummary();
+                renderAdminCenterTabs();
+                alert('✅ ' + json.message);
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('B2B 매핑 오류: ' + err.message);
+            }
+        }
+
+        function renderAdminSettingsTab() {
+            if (!adminConfigCache) return;
+            const s = adminConfigCache.settings || {};
+            document.getElementById('acSetImportLt').value = s.default_import_lead_time ?? 110;
+            document.getElementById('acSetImportBuf').value = s.default_import_buffer ?? 20;
+            document.getElementById('acSetPurchaseLt').value = s.default_purchase_lead_time ?? 7;
+            document.getElementById('acSetPurchaseBuf').value = s.default_purchase_buffer ?? 7;
+            document.getElementById('acSetExpWarn').value = s.default_expiry_warn_days ?? 120;
+            document.getElementById('acSetNewPin').value = '';
+
+            const src = adminConfigCache.pin_source || 'default';
+            const infoEl = document.getElementById('acSetPinSourceInfo');
+            if (src === 'env') {
+                infoEl.innerHTML = '🔒 현재 PIN 적용 방식: <strong>Render 환경변수 (ADMIN_PIN)</strong> 적용 중입니다. (환경변수 변경은 Render 대시보드에서 가능)';
+            } else if (src === 'custom') {
+                infoEl.innerHTML = '🔑 현재 PIN 적용 방식: <strong>관리자 커스텀 PIN</strong>이 저장되어 있습니다.';
+            } else {
+                infoEl.innerHTML = 'ℹ️ 현재 <strong>초기 기본 PIN</strong> 상태입니다. 보안을 위해 아래에서 새 PIN을 지정하거나 Render 환경변수 <code>ADMIN_PIN</code>을 설정하는 것을 권장합니다.';
+            }
+        }
+
+        async function saveAdminSettings() {
+            const payload = {
+                default_import_lead_time: parseInt(document.getElementById('acSetImportLt').value || '110', 10),
+                default_import_buffer: parseInt(document.getElementById('acSetImportBuf').value || '20', 10),
+                default_purchase_lead_time: parseInt(document.getElementById('acSetPurchaseLt').value || '7', 10),
+                default_purchase_buffer: parseInt(document.getElementById('acSetPurchaseBuf').value || '7', 10),
+                default_expiry_warn_days: parseInt(document.getElementById('acSetExpWarn').value || '120', 10),
+                new_pin: document.getElementById('acSetNewPin').value.trim()
+            };
+            try {
+                const res = await adminFetch('/api/admin/settings/save', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    alert(json.message || '설정 저장 실패');
+                    return;
+                }
+                if (json.new_token) {
+                    adminToken = json.new_token;
+                    try { sessionStorage.setItem(ADMIN_TOKEN_KEY, adminToken); } catch (e) {}
+                }
+                await ensureAdminConfig();
+                await fetchSummary();
+                renderAdminCenterTabs();
+                alert('✅ ' + json.message);
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('설정 저장 오류: ' + err.message);
+            }
+        }
+
+        function renderAdminDriveTab() {
+            if (!adminConfigCache) return;
+            const ds = adminConfigCache.drive_sync || {};
+            const box = document.getElementById('acDriveStatusBox');
+            const configuredLabel = ds.configured
+                ? '<span class="text-emerald-700 font-bold">✅ 환경변수 연결됨</span>'
+                : '<span class="text-amber-700 font-bold">⚠️ 미설정 (현재 Render 로컬 캐시만 사용)</span>';
+            box.innerHTML = `
+                <div><strong>연동 상태:</strong> ${configuredLabel} (${escapeHtml(ds.status || '-')})</div>
+                <div><strong>마지막 Drive 백업:</strong> <span class="font-mono">${escapeHtml(ds.last_synced_at || '기록 없음')}</span></div>
+                <div><strong>마지막 Drive 복원:</strong> <span class="font-mono">${escapeHtml(ds.last_loaded_at || '기록 없음')}</span></div>
+                ${ds.file_id ? `<div><strong>Drive 파일 ID:</strong> <span class="font-mono text-[11px]">${escapeHtml(ds.file_id)}</span></div>` : ''}
+                ${ds.last_error ? `<div class="text-rose-600 font-bold"><strong>최근 오류:</strong> ${escapeHtml(ds.last_error)}</div>` : ''}
+            `;
+            document.getElementById('acGasCodePreview').textContent = adminConfigCache.gas_script || '// google_apps_script_bridge.gs 파일 내용을 불러올 수 없습니다.';
+        }
+
+        async function syncDriveNow() {
+            try {
+                const res = await adminFetch('/api/admin/drive/sync-now', { method: 'POST' });
+                const json = await res.json();
+                await ensureAdminConfig();
+                renderAdminDriveTab();
+                fetchSummary();
+                alert(json.success ? ('✅ ' + json.message) : ('⚠️ ' + json.message));
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('Drive 저장 오류: ' + err.message);
+            }
+        }
+
+        async function pullDriveNow() {
+            if (!confirm('Google Drive에 저장된 최신 백업으로 현재 서버의 모든 데이터를 덮어쓰고 복원하시겠습니까?')) return;
+            try {
+                const res = await adminFetch('/api/admin/drive/pull-now', { method: 'POST' });
+                const json = await res.json();
+                await ensureAdminConfig();
+                renderAdminCenterTabs();
+                await fetchSummary();
+                alert(json.success ? ('✅ ' + json.message) : ('⚠️ ' + json.message));
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('Drive 복원 오류: ' + err.message);
+            }
+        }
+
+        async function downloadBackupJson() {
+            try {
+                const res = await adminFetch('/api/admin/backup/export', { method: 'GET' });
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `iljeomodo_backup_${new Date().toISOString().slice(0, 10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('백업 다운로드 오류: ' + err.message);
+            }
+        }
+
+        function importBackupJsonFile(inputEl) {
+            const file = inputEl.files && inputEl.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                try {
+                    const parsed = JSON.parse(e.target.result);
+                    if (!confirm(`'${file.name}' 백업 파일로 전체 마스터/재고 데이터를 복원하시겠습니까?`)) return;
+                    const res = await adminFetch('/api/admin/backup/import', {
+                        method: 'POST',
+                        body: JSON.stringify({ data: parsed })
+                    });
+                    const json = await res.json();
+                    if (!res.ok || !json.success) {
+                        alert(json.message || '백업 복원 실패');
+                        return;
+                    }
+                    await ensureAdminConfig();
+                    renderAdminCenterTabs();
+                    await fetchSummary();
+                    alert('✅ ' + json.message);
+                } catch (err) {
+                    if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('JSON 백업 파일 파싱/복원 오류: ' + err.message);
+                } finally {
+                    inputEl.value = '';
+                }
+            };
+            reader.readAsText(file, 'utf-8');
+        }
+
+        function copyGasScript() {
+            const code = (adminConfigCache && adminConfigCache.gas_script) || document.getElementById('acGasCodePreview').textContent;
+            if (!code) {
+                alert('복사할 스크립트 내용이 없습니다.');
+                return;
+            }
+            const fallbackCopy = () => {
+                const ta = document.createElement('textarea');
+                ta.value = code;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                const ok = document.execCommand('copy');
+                ta.remove();
+                if (ok) alert('Google Apps Script (.gs) 전체 코드가 클립보드에 복사되었습니다!');
+                else alert('자동 복사가 차단되었습니다. 아래 코드 영역을 직접 선택해 복사해주세요.');
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(code).then(() => {
+                    alert('Google Apps Script (.gs) 전체 코드가 클립보드에 복사되었습니다!');
+                }).catch(fallbackCopy);
+            } else {
+                fallbackCopy();
+            }
+        }
+
         // 초기화
         renderTableHeader();
+        checkAdminSession();
         setInterval(fetchSummary, 3000);
         fetchSummary();
     </script>
