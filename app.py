@@ -164,14 +164,52 @@ def is_s_product_code(code):
     return c.startswith("S") or c in get_active_b2b_mappings()
 
 def get_matching_gaemi_items(m, gaemi_inv):
-    """마스터 상품과 매칭되는 개미창고 (gaemi_code, item) 튜플 목록 반환"""
+    """
+    마스터 상품과 매칭되는 개미창고 (gaemi_code, item) 튜플 목록 반환.
+    우선순위:
+    1) 관리자 명시 매핑 gaemi_mappings ([{gaemi_code, option_name}]) - 상품코드+옵션명 정확 매칭 (option_name이 '' 또는 '*'면 전체 옵션)
+    2) 하위 호환 키워드 매핑 gaemi_codes + gaemi_filter
+    """
     items = []
+    gaemi_mappings = m.get("gaemi_mappings")
+    if isinstance(gaemi_mappings, list) and len(gaemi_mappings) > 0:
+        upper_code_map = {str(k).strip().upper(): (k, v) for k, v in gaemi_inv.items()}
+        seen_refs = set()
+        for rule in gaemi_mappings:
+            if not isinstance(rule, dict):
+                continue
+            req_code = str(rule.get("gaemi_code") or rule.get("code") or "").strip()
+            req_opt = str(rule.get("option_name", "")).strip()
+            if not req_code:
+                continue
+            matched = gaemi_inv.get(req_code)
+            actual_code = req_code
+            if matched is None:
+                found = upper_code_map.get(req_code.upper())
+                if found:
+                    actual_code, matched = found
+            if not matched:
+                continue
+            for idx, item in enumerate(matched):
+                item_opt = str(item.get("option_name", "")).strip()
+                if req_opt in ("", "*") or item_opt == req_opt:
+                    ref = (actual_code, idx)
+                    if ref not in seen_refs:
+                        seen_refs.add(ref)
+                        items.append((actual_code, item))
+        return items
+
     opt_filter = (m.get("gaemi_filter") or "").strip()
+    seen_legacy = set()
     for g_code in m.get("gaemi_codes", []):
-        for item in gaemi_inv.get(g_code, []):
+        g_c = str(g_code).strip()
+        if not g_c or g_c in seen_legacy:
+            continue
+        seen_legacy.add(g_c)
+        for item in gaemi_inv.get(g_c, []):
             if opt_filter and opt_filter not in item.get("option_name", ""):
                 continue
-            items.append((g_code, item))
+            items.append((g_c, item))
     return items
 
 def make_gaemi_lot_keys(g_code, item):
@@ -653,7 +691,7 @@ def parse_sales_rows(rows):
     header_idx = -1
     for i, r in enumerate(rows[:5]):
         line_str = " ".join([str(c) for c in r])
-        if "판매자관리코드" in line_str or "주문수량" in line_str or "온라인상품명" in line_str:
+        if "판매자관리코드" in line_str or "상품관리코드" in line_str or "주문수량" in line_str or "온라인상품명" in line_str:
             header_idx = i
             break
 
@@ -661,7 +699,9 @@ def parse_sales_rows(rows):
         return {}
 
     headers = [str(c).strip() for c in rows[header_idx]]
-    col_code = next((i for i, h in enumerate(headers) if "판매자관리코드" in h or "판매자코드" in h), -1)
+    col_code = next((i for i, h in enumerate(headers) if "판매자관리코드" in h or "상품관리코드" in h or "판매자코드" in h), -1)
+    if col_code == -1:
+        col_code = next((i for i, h in enumerate(headers) if "관리코드" in h), -1)
     col_qty = next((i for i, h in enumerate(headers) if "주문수량" in h or "수량" in h), 4)
     col_date = next((i for i, h in enumerate(headers) if "주문일" in h), 0)
     col_mall = next((i for i, h in enumerate(headers) if "쇼핑몰" in h), 2)
@@ -677,7 +717,7 @@ def parse_sales_rows(rows):
         if len(r) <= max(col_code, col_qty):
             continue
         code = str(r[col_code]).strip().upper()
-        if not code or code == "판매자관리코드":
+        if not code or code in ("판매자관리코드", "상품관리코드", "판매자코드", "관리코드"):
             continue
         name = str(r[col_name]).strip() if len(r) > col_name else ""
         mall = str(r[col_mall]).strip() if len(r) > col_mall else ""
@@ -927,12 +967,37 @@ def get_summary():
                 "doc": doc
             })
 
-        s_data = sales.get(norm_code, {"total_7d": 0, "total_30d": 0, "orders": []})
-        raw_other_sales_7d = s_data.get("total_7d", 0)
-        raw_other_sales_30d = s_data.get("total_30d", raw_other_sales_7d)
-        recent_orders = list(s_data.get("orders", [])[:5])
+        # 쿠팡외 매출정보 상품관리코드 매핑 집계 (explicit sales_codes 또는 기본 [seller_code])
+        has_explicit_sales = ("sales_codes" in m and isinstance(m["sales_codes"], list))
+        raw_sales_codes = m["sales_codes"] if has_explicit_sales else ([norm_code] if norm_code else [])
+        seen_sc = set()
+        effective_sales_codes = []
+        raw_other_sales_7d = 0
+        raw_other_sales_30d = 0
+        collected_orders = []
+
+        for sc_raw in raw_sales_codes:
+            sc = str(sc_raw).strip().upper()
+            if not sc or sc in seen_sc:
+                continue
+            seen_sc.add(sc)
+            effective_sales_codes.append(sc)
+            if sc != norm_code and sc in b2b_mappings and str(b2b_mappings[sc].get("base_code", "")).strip().upper() == norm_code:
+                continue
+            s_data = sales.get(sc, {"total_7d": 0, "total_30d": 0, "orders": []})
+            s7 = int(s_data.get("total_7d", 0) or 0)
+            s30 = int(s_data.get("total_30d", s7) or 0)
+            raw_other_sales_7d += s7
+            raw_other_sales_30d += s30
+            collected_orders.extend(list(s_data.get("orders", [])[:5]))
+
+        if len(effective_sales_codes) > 1 and len(collected_orders) > 1:
+            collected_orders.sort(key=lambda o: str(o.get("date", "")), reverse=True)
+        recent_orders = collected_orders[:5]
 
         base_calc_map[norm_code] = {
+            "sales_codes": effective_sales_codes,
+            "has_custom_sales_codes": has_explicit_sales,
             "gaemi_total": g_total,
             "gaemi_details": ", ".join(g_details) if g_details else "등록 정보 없음",
             "gaemi_lots": gaemi_lots,
@@ -1077,6 +1142,8 @@ def get_summary():
         other_sales_7d = calc.get("other_sales_7d", 0)
         other_sales_30d = calc.get("other_sales_30d", 0)
         recent_orders = calc.get("recent_orders", [])
+        sales_codes = calc.get("sales_codes", [seller_code.upper()] if seller_code else [])
+        has_custom_sales_codes = calc.get("has_custom_sales_codes", False)
         b2b_shared_sales = calc.get("b2b_shared_sales", [])
         b2b_linked_codes = base_to_shared_map.get(norm_code, [])
 
@@ -1239,6 +1306,9 @@ def get_summary():
             "b2b_linked_codes": b2b_linked_codes,
             "b2b_shared_sales": b2b_shared_sales,
             "category": m.get("category", "기타"),
+            "sales_codes": sales_codes,
+            "has_custom_sales_codes": has_custom_sales_codes,
+            "gaemi_mappings": copy.deepcopy(m.get("gaemi_mappings") or []),
             "gaemi_codes": m.get("gaemi_codes", []),
             "gaemi_filter": m.get("gaemi_filter", ""),
             "gaemi_total": g_total,
@@ -1594,6 +1664,28 @@ def admin_get_config():
         }
         gaemi = copy.deepcopy(app_state.get("gaemi_inventory", {}))
         coupang = copy.deepcopy(app_state.get("coupang_inventory", {}))
+        raw_sales = app_state.get("sales_inventory", {})
+        sales_summary_map = {}
+        for sc, sdata in raw_sales.items():
+            orders = sdata.get("orders") or []
+            sample_names = []
+            malls = []
+            for o in orders:
+                nm = str(o.get("name", "")).strip()
+                ml = str(o.get("mall", "")).strip()
+                if nm and nm not in sample_names:
+                    sample_names.append(nm)
+                if ml and ml not in malls:
+                    malls.append(ml)
+                if len(sample_names) >= 2 and len(malls) >= 2:
+                    break
+            sales_summary_map[sc] = {
+                "total_7d": int(sdata.get("total_7d", 0) or 0),
+                "total_30d": int(sdata.get("total_30d", sdata.get("total_7d", 0)) or 0),
+                "orders_count": len(orders),
+                "sample_names": sample_names,
+                "malls": malls
+            }
 
     return jsonify({
         "success": True,
@@ -1603,6 +1695,7 @@ def admin_get_config():
         "settings": settings_public,
         "gaemi_inventory": gaemi,
         "coupang_inventory": coupang,
+        "sales_inventory": sales_summary_map,
         "pin_source": pin_source,
         "drive_sync": copy.deepcopy(drive_sync_state),
         "gas_script": gas_code
@@ -1617,10 +1710,63 @@ def _parse_optional_positive_int(val):
     except Exception:
         return None
 
+def _parse_sales_codes_input(raw_val):
+    if raw_val is None:
+        return None
+    if isinstance(raw_val, str):
+        parts = [c.strip().upper() for c in raw_val.split(",") if c.strip()]
+    elif isinstance(raw_val, list):
+        parts = [str(c).strip().upper() for c in raw_val if str(c).strip()]
+    else:
+        parts = []
+    seen = set()
+    res = []
+    for p in parts:
+        if p not in seen:
+            seen.add(p)
+            res.append(p)
+    return res
+
+def _parse_gaemi_mappings_input(raw_val):
+    if not isinstance(raw_val, list):
+        return []
+    seen = set()
+    res = []
+    for item in raw_val:
+        if not isinstance(item, dict):
+            continue
+        g_code = str(item.get("gaemi_code") or item.get("code") or "").strip()
+        opt_name = str(item.get("option_name", "")).strip()
+        if not g_code:
+            continue
+        sig = (g_code.upper(), opt_name)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        res.append({"gaemi_code": g_code, "option_name": opt_name})
+    return res
+
+def _parse_coupang_options_input(raw_val):
+    if not isinstance(raw_val, list):
+        return []
+    seen = set()
+    clean_options = []
+    for opt in raw_val:
+        if not isinstance(opt, dict):
+            continue
+        oid = str(opt.get("id", "")).strip()
+        if not oid or oid in seen:
+            continue
+        seen.add(oid)
+        bundle = max(1, _parse_optional_positive_int(opt.get("bundle")) or 1)
+        oname = str(opt.get("name", f"{bundle}개")).strip() or f"{bundle}개"
+        clean_options.append({"id": oid, "bundle": bundle, "name": oname})
+    return clean_options
+
 @app.route("/api/admin/product/save", methods=["POST"])
 @require_admin
 def admin_save_product():
-    """단일 마스터 상품 생성/수정 + 소비기한 오버라이드/분할 로트 + (선택) 임시 수량 보정"""
+    """단일 마스터 상품 생성/수정 + 소비기한 오버라이드/분할 로트 + 코드매핑 + (선택) 임시 수량 보정"""
     body = request.get_json() or {}
     seller_code = str(body.get("seller_code", "")).strip()
     orig_id = str(body.get("id", "")).strip()
@@ -1654,15 +1800,13 @@ def admin_save_product():
         gaemi_codes = []
     gaemi_filter = str(body.get("gaemi_filter", "")).strip()
 
+    has_sales_codes = ("sales_codes" in body)
+    parsed_sales_codes = _parse_sales_codes_input(body.get("sales_codes")) if has_sales_codes else None
+    has_gaemi_mappings = ("gaemi_mappings" in body)
+    clean_gaemi_mappings = _parse_gaemi_mappings_input(body.get("gaemi_mappings")) if has_gaemi_mappings else []
+
     # 쿠팡 옵션 파싱
-    clean_options = []
-    for opt in (body.get("options") or []):
-        oid = str(opt.get("id", "")).strip()
-        if not oid:
-            continue
-        bundle = max(1, _parse_optional_positive_int(opt.get("bundle")) or 1)
-        oname = str(opt.get("name", f"{bundle}개")).strip() or f"{bundle}개"
-        clean_options.append({"id": oid, "bundle": bundle, "name": oname})
+    clean_options = _parse_coupang_options_input(body.get("options") or [])
 
     # 수동 분할 소비기한 로트 파싱
     clean_manual_lots = []
@@ -1709,6 +1853,8 @@ def admin_save_product():
             existing_ids = {str(x.get("id", "")) for x in masters}
             if new_id in existing_ids:
                 new_id = f"P_{seller_code}_{uuid.uuid4().hex[:4]}"
+            eff_g_codes = list(dict.fromkeys([r["gaemi_code"] for r in clean_gaemi_mappings])) if clean_gaemi_mappings else gaemi_codes
+            eff_g_filter = "" if clean_gaemi_mappings else gaemi_filter
             record = {
                 "id": new_id,
                 "seller_code": seller_code,
@@ -1723,12 +1869,16 @@ def admin_save_product():
                 "in_transit_qty": in_transit_qty,
                 "expected_arrival_date": expected_arrival_date,
                 "default_expiry_date": default_expiry_date,
-                "gaemi_codes": gaemi_codes,
-                "gaemi_filter": gaemi_filter,
+                "gaemi_codes": eff_g_codes,
+                "gaemi_filter": eff_g_filter,
                 "options": clean_options,
                 "manual_lots": clean_manual_lots,
                 "lot_sync_note": ""
             }
+            if clean_gaemi_mappings:
+                record["gaemi_mappings"] = clean_gaemi_mappings
+            if has_sales_codes and parsed_sales_codes is not None:
+                record["sales_codes"] = parsed_sales_codes
             masters.append(record)
             action_label = "신규 등록"
         else:
@@ -1756,10 +1906,26 @@ def admin_save_product():
                 record["expected_arrival_date"] = expected_arrival_date
             if "default_expiry_date" in body:
                 record["default_expiry_date"] = default_expiry_date
-            if "gaemi_codes" in body:
-                record["gaemi_codes"] = gaemi_codes
-            if "gaemi_filter" in body:
-                record["gaemi_filter"] = gaemi_filter
+            if has_sales_codes:
+                if parsed_sales_codes is None:
+                    record.pop("sales_codes", None)
+                else:
+                    record["sales_codes"] = parsed_sales_codes
+            if has_gaemi_mappings:
+                record["gaemi_mappings"] = clean_gaemi_mappings
+                if len(clean_gaemi_mappings) > 0:
+                    record["gaemi_codes"] = list(dict.fromkeys([r["gaemi_code"] for r in clean_gaemi_mappings]))
+                    record["gaemi_filter"] = ""
+                else:
+                    if "gaemi_codes" in body:
+                        record["gaemi_codes"] = gaemi_codes
+                    if "gaemi_filter" in body:
+                        record["gaemi_filter"] = gaemi_filter
+            else:
+                if "gaemi_codes" in body:
+                    record["gaemi_codes"] = gaemi_codes
+                if "gaemi_filter" in body:
+                    record["gaemi_filter"] = gaemi_filter
             if "options" in body:
                 record["options"] = clean_options
             if "manual_lots" in body:
@@ -1826,13 +1992,77 @@ def admin_save_product():
                     }
 
         app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        saved_copy = copy.deepcopy(record)
 
     sync_res = save_state(sync_drive=True, wait_drive=True)
     add_log(f"✏️ [관리자 {action_label}] {seller_code} ({name}) 기준 정보가 업데이트되었습니다.")
     return jsonify({
         "success": True,
         "message": f"[{seller_code}] {name} {action_label} 완료!",
-        "product": record,
+        "product": saved_copy,
+        "drive_sync": sync_res
+    })
+
+@app.route("/api/admin/product/mappings/save", methods=["POST"])
+@require_admin
+def admin_save_product_mappings():
+    """마스터 상품의 3채널 코드 매핑(쿠팡외 매출 상품관리코드, 개미창고 상품코드+옵션명, 쿠팡 옵션 ID)만 수동 저장"""
+    body = request.get_json() or {}
+    prod_id = str(body.get("id", "")).strip()
+    seller_code_req = str(body.get("seller_code", "")).strip().upper()
+
+    with data_lock:
+        masters = app_state["master_products"]
+        target = None
+        for m in masters:
+            m_id = str(m.get("id", "")).strip()
+            m_code = str(m.get("seller_code", "")).strip().upper()
+            if (prod_id and m_id == prod_id) or (seller_code_req and m_code == seller_code_req):
+                target = m
+                break
+        if target is None:
+            return jsonify({"success": False, "message": "대상 마스터 상품을 찾을 수 없습니다."}), 404
+
+        if "sales_codes" in body:
+            parsed_sc = _parse_sales_codes_input(body.get("sales_codes"))
+            if parsed_sc is None:
+                target.pop("sales_codes", None)
+            else:
+                target["sales_codes"] = parsed_sc
+
+        if "gaemi_mappings" in body:
+            clean_gm = _parse_gaemi_mappings_input(body.get("gaemi_mappings"))
+            target["gaemi_mappings"] = clean_gm
+            if len(clean_gm) > 0:
+                target["gaemi_codes"] = list(dict.fromkeys([r["gaemi_code"] for r in clean_gm]))
+                target["gaemi_filter"] = ""
+            elif body.get("clear_legacy_gaemi"):
+                target["gaemi_codes"] = []
+                target["gaemi_filter"] = ""
+        elif "gaemi_codes" in body or "gaemi_filter" in body:
+            if "gaemi_codes" in body:
+                raw_gc = body.get("gaemi_codes") or []
+                if isinstance(raw_gc, str):
+                    target["gaemi_codes"] = [c.strip() for c in raw_gc.split(",") if c.strip()]
+                elif isinstance(raw_gc, list):
+                    target["gaemi_codes"] = [str(c).strip() for c in raw_gc if str(c).strip()]
+            if "gaemi_filter" in body:
+                target["gaemi_filter"] = str(body.get("gaemi_filter", "")).strip()
+
+        if "options" in body:
+            target["options"] = _parse_coupang_options_input(body.get("options") or [])
+
+        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        saved_copy = copy.deepcopy(target)
+        t_code = target.get("seller_code", "")
+        t_name = target.get("name", "")
+
+    sync_res = save_state(sync_drive=True, wait_drive=True)
+    add_log(f"🔗 [관리자 코드매핑] {t_code} ({t_name}) 채널별 코드 매핑이 저장되었습니다.")
+    return jsonify({
+        "success": True,
+        "message": f"[{t_code}] {t_name} 코드 매핑 저장 완료!",
+        "product": saved_copy,
         "drive_sync": sync_res
     })
 
@@ -2167,6 +2397,10 @@ HTML_TEMPLATE = """
                         <i class="fa-solid fa-plus"></i>
                         <span>단품 추가</span>
                     </button>
+                    <button onclick="openAdminCenter('mapping')" class="px-2.5 py-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-lg text-xs font-extrabold transition flex items-center space-x-1 shadow-sm" title="쿠팡외 매출코드 · 개미 상품코드+옵션명 · 쿠팡 옵션ID 수동 매핑">
+                        <i class="fa-solid fa-link"></i>
+                        <span>코드 매핑</span>
+                    </button>
                     <button onclick="openAdminCenter('bulk')" class="px-2.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-lg text-xs font-extrabold transition flex items-center space-x-1 shadow-sm">
                         <i class="fa-solid fa-sliders"></i>
                         <span>관리자 센터</span>
@@ -2190,9 +2424,12 @@ HTML_TEMPLATE = """
         <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center space-x-2">
                 <span class="px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-extrabold text-[10px]">관리자 편집 모드 ON</span>
-                <span class="font-medium">목록 각 행의 <strong>[수정]</strong> 버튼으로 상품명·소비기한·리드타임·입고예정을 편집할 수 있으며, CSV 재업로드 시에도 관리자 기준값이 최우선 보존됩니다.</span>
+                <span class="font-medium">각 행의 <strong>[🔗 매핑]</strong>·<strong>[✏️ 수정]</strong> 버튼으로 채널별 코드 매핑·상품명·소비기한·입고예정을 편집할 수 있습니다.</span>
             </div>
             <div class="flex items-center space-x-2">
+                <button onclick="openAdminCenter('mapping')" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 rounded font-bold text-[11px] text-indigo-900 transition">
+                    🔗 상품 코드 매핑
+                </button>
                 <button onclick="openAdminCenter('expiry')" class="px-2 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded font-bold text-[11px] text-amber-900 transition">
                     ⏳ 소비기한 일괄입력
                 </button>
@@ -2710,25 +2947,41 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
 
-                <!-- 섹션 4: 창고 코드 & 쿠팡 옵션 매핑 -->
+                <!-- 섹션 4: 창고 코드 & 채널별 코드 매핑 -->
                 <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
-                    <div class="font-extrabold text-slate-800 text-xs flex items-center space-x-1.5 border-b border-slate-200 pb-2">
-                        <i class="fa-solid fa-cubes text-slate-600"></i>
-                        <span>4. 개미창고 코드 & 쿠팡 옵션 ID 매핑</span>
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                        <span class="font-extrabold text-slate-800 text-xs flex items-center space-x-1.5">
+                            <i class="fa-solid fa-cubes text-slate-600"></i>
+                            <span>4. 채널별 코드 매핑 (쿠팡외 매출코드 · 개미 상품코드+옵션명 · 쿠팡 옵션 ID)</span>
+                        </span>
+                        <button type="button" id="ep_btn_open_mapping" onclick="openCodeMappingFromEditModal()" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition shadow-xs">
+                            🔗 3채널 코드 매핑 전용창 열기
+                        </button>
                     </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1 text-[11px]">① 쿠팡외 매출정보 상품관리코드 (비워두면 판매자관리코드 자동 사용, 여러 개면 쉼표 구분)</label>
+                        <input type="text" id="ep_sales_codes" placeholder="기본값: 판매자관리코드와 동일 (추가/변경 시 쉼표로 구분 입력)" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg font-mono uppercase focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div id="ep_gaemi_mappings_box" class="hidden bg-amber-50 border border-amber-200 rounded-lg p-2.5 space-y-1.5">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <span class="text-[11px] font-bold text-amber-900">② 개미창고 정확 매핑 (상품코드 + 옵션명) 사용 중</span>
+                            <button type="button" onclick="clearEpGaemiMappingsOverride()" class="px-2 py-0.5 bg-white hover:bg-rose-50 border border-amber-300 text-rose-700 rounded text-[10px] font-bold">구방식(코드+키워드)으로 전환</button>
+                        </div>
+                        <div id="ep_gaemi_mappings_badges" class="flex flex-wrap gap-1"></div>
+                    </div>
+                    <div id="ep_gaemi_legacy_fields" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">개미창고 상품코드 (여러 개면 쉼표 구분)</label>
+                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">② 개미창고 상품코드 (여러 개면 쉼표 구분)</label>
                             <input type="text" id="ep_gaemi_codes" placeholder="예: PJ1489503" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
                         </div>
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">개미 옵션 필터 키워드 (선택)</label>
+                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">개미 옵션 필터 키워드 (선택 · 전용창에서 정확 매핑 권장)</label>
                             <input type="text" id="ep_gaemi_filter" placeholder="특정 옵션명 포함 시만 매칭할 경우 입력" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
                         </div>
                     </div>
                     <div class="space-y-1.5">
                         <div class="flex items-center justify-between">
-                            <span class="font-bold text-slate-700 text-[11px]">쿠팡 윙 옵션 ID & 번들(개입수) 연결</span>
+                            <span class="font-bold text-slate-700 text-[11px]">③ 쿠팡 재고건전성 옵션 ID & 번들(개입수) 연결</span>
                             <button type="button" onclick="addCoupangOptionRow()" class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold">
                                 + 쿠팡 옵션 추가
                             </button>
@@ -2788,8 +3041,9 @@ HTML_TEMPLATE = """
             <!-- 탭 네비게이션 -->
             <div class="bg-slate-100 border-b border-slate-200 px-4 pt-2 flex flex-wrap gap-1.5 shrink-0 text-xs">
                 <button data-tab="bulk" onclick="switchAdminTab('bulk')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-white text-slate-900">📋 전체 품목 일괄 편집</button>
+                <button data-tab="mapping" onclick="switchAdminTab('mapping')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">🔗 상품 코드 매핑</button>
                 <button data-tab="expiry" onclick="switchAdminTab('expiry')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">⏳ 소비기한 일괄 입력</button>
-                <button data-tab="b2b" onclick="switchAdminTab('b2b')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">🔗 B2B/세트(S코드) 매핑</button>
+                <button data-tab="b2b" onclick="switchAdminTab('b2b')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">📦 B2B/세트(S코드) 매핑</button>
                 <button data-tab="settings" onclick="switchAdminTab('settings')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">⚙️ 전역 기준 & PIN 변경</button>
                 <button data-tab="drive" onclick="switchAdminTab('drive')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">☁️ Google Drive 연동 · 백업</button>
             </div>
@@ -2830,6 +3084,87 @@ HTML_TEMPLATE = """
                             </thead>
                             <tbody id="acBulkTbody" class="divide-y divide-slate-100"></tbody>
                         </table>
+                    </div>
+                </div>
+
+                <!-- TAB 2: 상품 3채널 코드 매핑 수동 지정 -->
+                <div id="acTab_mapping" class="hidden space-y-4">
+                    <div id="acMapToast" class="hidden px-3 py-2 rounded-lg text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900"></div>
+
+                    <!-- 상단: 업로드된 CSV 미매핑/전체 코드 탐색기 -->
+                    <details open id="acMapExplorerDetails" class="bg-sky-50/50 border border-sky-200 rounded-xl p-3 space-y-2.5">
+                        <summary class="cursor-pointer font-extrabold text-sky-950 text-xs select-none flex flex-wrap items-center justify-between gap-2">
+                            <span class="flex items-center space-x-1.5">
+                                <i class="fa-solid fa-magnifying-glass-chart text-sky-600"></i>
+                                <span>업로드된 CSV 미매핑 / 전체 코드 탐색기 (클릭하여 접기/펼치기)</span>
+                            </span>
+                            <span id="acMapCsvCounts" class="text-[11px] font-semibold text-sky-900"></span>
+                        </summary>
+                        <div class="pt-2 border-t border-sky-200/70 space-y-2.5">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <select id="acMapCsvChannel" onchange="renderAdminMappingExplorer()" class="px-2.5 py-1.5 border border-sky-300 rounded-lg bg-white font-bold text-sky-950 text-[11px]">
+                                        <option value="all">전체 (3개 채널 CSV)</option>
+                                        <option value="sales">① 쿠팡외 매출정보 (상품관리코드)</option>
+                                        <option value="gaemi">② 개미창고 (상품코드 + 옵션명)</option>
+                                        <option value="coupang">③ 쿠팡 재고건전성 (쿠팡 옵션 ID)</option>
+                                    </select>
+                                    <label class="inline-flex items-center space-x-1.5 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-sky-200 text-[11px]">
+                                        <input type="checkbox" id="acMapCsvOnlyUnmapped" onchange="renderAdminMappingExplorer()" checked>
+                                        <span class="font-bold text-slate-700">미매핑 코드만 보기</span>
+                                    </label>
+                                    <input type="text" id="acMapCsvSearch" oninput="renderAdminMappingExplorer()" placeholder="CSV 코드, 옵션명, 상품명 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white w-56 text-[11px]">
+                                </div>
+                                <span class="text-[10px] text-slate-500">* B2B S코드는 'B2B/세트' 탭 규칙으로 별도 판정됩니다.</span>
+                            </div>
+                            <div class="max-h-60 overflow-y-auto bg-white border border-sky-200 rounded-lg">
+                                <table class="w-full text-left border-collapse text-[11px]">
+                                    <thead class="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
+                                        <tr>
+                                            <th class="p-2 w-24">채널</th>
+                                            <th class="p-2 min-w-[190px]">CSV 코드 / 옵션명</th>
+                                            <th class="p-2">CSV 품목 정보 · 수량/매출</th>
+                                            <th class="p-2 w-28">연결 상태</th>
+                                            <th class="p-2 min-w-[260px]">빠른 마스터 연결 / 신규등록</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="acMapCsvTbody" class="divide-y divide-slate-100"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </details>
+
+                    <!-- 하단: 마스터 단품별 3채널 코드 매핑 현황표 -->
+                    <div class="space-y-2.5">
+                        <div class="flex flex-wrap items-center justify-between gap-2 bg-indigo-50/70 border border-indigo-200 rounded-xl p-3">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <input type="text" id="acMapMasterSearch" oninput="renderAdminMappingMasterTable()" placeholder="마스터 상품명 또는 코드 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white w-52">
+                                <select id="acMapMasterFilter" onchange="renderAdminMappingMasterTable()" class="px-2.5 py-1.5 border border-indigo-300 rounded-lg bg-white font-bold text-indigo-950">
+                                    <option value="all">전체 단품 보기</option>
+                                    <option value="missing">매핑 누락/0건 확인 필요만</option>
+                                    <option value="custom">수동 매핑 지정 완료만</option>
+                                </select>
+                                <label class="inline-flex items-center space-x-1.5 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-indigo-200">
+                                    <input type="checkbox" id="acMapMasterShowInactive" onchange="renderAdminMappingMasterTable()">
+                                    <span class="font-semibold text-slate-700">숨김 품목 포함</span>
+                                </label>
+                            </div>
+                            <span class="text-[11px] text-indigo-900 font-semibold">상품명·소비기한 등 다른 정보는 그대로 두고 <strong>코드 매핑만 단독 수정</strong>할 수 있습니다.</span>
+                        </div>
+                        <div class="overflow-x-auto border border-slate-200 rounded-xl">
+                            <table class="w-full text-left border-collapse text-xs">
+                                <thead class="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                                    <tr>
+                                        <th class="p-2.5 min-w-[180px]">마스터 상품</th>
+                                        <th class="p-2.5 min-w-[170px]">① 쿠팡외 매출<br><span class="text-[10px] font-normal text-slate-400">상품관리코드</span></th>
+                                        <th class="p-2.5 min-w-[230px]">② 개미창고 상품목록<br><span class="text-[10px] font-normal text-slate-400">상품코드 + 옵션명</span></th>
+                                        <th class="p-2.5 min-w-[210px]">③ 쿠팡 재고건전성<br><span class="text-[10px] font-normal text-slate-400">쿠팡 옵션 ID</span></th>
+                                        <th class="p-2.5 w-24 text-center">매핑 관리</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="acMapMasterTbody" class="divide-y divide-slate-100"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
@@ -3007,6 +3342,134 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
+    <!-- 4. 상품별 3채널 코드 매핑 수동 지정 전용 모달 (z-[110]) -->
+    <div id="codeMappingModal" class="hidden fixed inset-0 z-[110] bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-5xl flex flex-col max-h-[92vh] overflow-hidden">
+            <div class="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between shrink-0">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-link text-sky-400"></i>
+                    <h3 id="cm_modal_title" class="font-bold text-sm sm:text-base">3채널 코드 매핑 수동 지정</h3>
+                </div>
+                <button onclick="closeCodeMappingModal()" class="text-slate-400 hover:text-white text-base">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="p-4 sm:p-5 overflow-y-auto flex-1 text-xs space-y-5">
+                <div class="bg-sky-50 border border-sky-200 rounded-xl px-3.5 py-2.5 text-[11px] text-sky-950 font-semibold flex flex-wrap items-center justify-between gap-2">
+                    <span>💡 상품명·소비기한·리드타임 등은 변경하지 않고 <strong>① 쿠팡외 매출(상품관리코드) · ② 개미창고(상품코드+옵션명) · ③ 쿠팡(쿠팡 옵션 ID)</strong> 코드 매핑만 저장합니다.</span>
+                    <span id="cm_target_badge" class="font-mono bg-white border border-sky-300 px-2 py-0.5 rounded text-sky-900"></span>
+                </div>
+
+                <!-- ① 쿠팡외 매출정보: 상품관리코드 -->
+                <div class="bg-indigo-50/40 border border-indigo-200 rounded-xl p-4 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-200 pb-2">
+                        <div>
+                            <div class="font-extrabold text-indigo-950 text-xs flex items-center space-x-1.5">
+                                <span class="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px]">①</span>
+                                <span>쿠팡외 매출정보 — 상품관리코드 매핑</span>
+                            </div>
+                            <div id="cm_sales_status_text" class="text-[11px] text-indigo-800 mt-0.5"></div>
+                        </div>
+                        <div class="flex items-center space-x-1.5">
+                            <button type="button" onclick="resetCmSalesDefault()" class="px-2.5 py-1 bg-white hover:bg-indigo-100 border border-indigo-300 text-indigo-900 rounded-lg text-[11px] font-bold">대표코드로 기본 복원</button>
+                            <button type="button" onclick="clearCmSalesAll()" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-bold">모두 비우기</button>
+                        </div>
+                    </div>
+
+                    <div id="cm_sales_chips" class="flex flex-wrap gap-1.5 min-h-[28px] items-center"></div>
+
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input type="text" id="cm_sales_add_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmSalesManual();}" placeholder="직접 입력 (예: 20DC02 또는 스마트스토어 상품관리코드, 쉼표 구분 가능)" class="flex-1 min-w-[220px] px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono uppercase focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <button type="button" onclick="addCmSalesManual()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold">+ 직접 추가</button>
+                    </div>
+
+                    <div class="bg-white border border-indigo-200 rounded-lg p-2.5 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <span class="font-bold text-slate-700 text-[11px]">업로드된 쿠팡외 매출 CSV에서 선택</span>
+                            <input type="text" id="cm_sales_csv_search" oninput="renderCmSalesCsvList()" placeholder="매출 코드, 상품명, 쇼핑몰 검색..." class="px-2.5 py-1 border border-slate-300 rounded-lg text-[11px] w-56">
+                        </div>
+                        <div id="cm_sales_csv_list" class="max-h-44 overflow-y-auto divide-y divide-slate-100"></div>
+                    </div>
+                </div>
+
+                <!-- ② 개미창고 상품목록: 상품코드 + 옵션명 -->
+                <div class="bg-amber-50/40 border border-amber-200 rounded-xl p-4 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 pb-2">
+                        <div>
+                            <div class="font-extrabold text-amber-950 text-xs flex items-center space-x-1.5">
+                                <span class="px-1.5 py-0.5 rounded bg-amber-600 text-white text-[10px]">②</span>
+                                <span>개미창고 상품목록 — 상품코드 + 옵션명 매핑</span>
+                            </div>
+                            <div class="text-[11px] text-amber-800 mt-0.5">같은 상품코드 안에 여러 옵션명이 섞여 있어도 <strong>상품코드 + 옵션명 정확 일치</strong>로 분리 매핑됩니다. (동일 옵션명의 다중 등록일 로트 자동 합산)</div>
+                        </div>
+                        <button type="button" onclick="clearCmGaemiAll()" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-bold">매핑 모두 비우기</button>
+                    </div>
+
+                    <div id="cm_gaemi_legacy_banner" class="hidden rounded-lg border px-3 py-2 text-[11px] space-y-1.5"></div>
+
+                    <div id="cm_gaemi_chips" class="flex flex-wrap gap-1.5 min-h-[28px] items-center"></div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                        <input type="text" id="cm_gaemi_code_input" placeholder="개미 상품코드 (예: PJ1491144)" class="sm:col-span-4 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <input type="text" id="cm_gaemi_opt_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmGaemiManual();}" placeholder="옵션명 (예: 정제 1L · 빈칸 또는 * 입력 시 해당 코드 전체 옵션)" class="sm:col-span-6 px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <button type="button" onclick="addCmGaemiManual()" class="sm:col-span-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold">+ 직접 추가</button>
+                    </div>
+
+                    <div class="bg-white border border-amber-200 rounded-lg p-2.5 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <span class="font-bold text-slate-700 text-[11px]">업로드된 개미창고 CSV (상품코드 + 옵션명 그룹)에서 선택</span>
+                            <input type="text" id="cm_gaemi_csv_search" oninput="renderCmGaemiCsvList()" placeholder="개미 상품코드, 옵션명, 상품명 검색..." class="px-2.5 py-1 border border-slate-300 rounded-lg text-[11px] w-56">
+                        </div>
+                        <div id="cm_gaemi_csv_list" class="max-h-52 overflow-y-auto divide-y divide-slate-100"></div>
+                    </div>
+                </div>
+
+                <!-- ③ 쿠팡 재고건전성: 쿠팡 옵션 ID -->
+                <div class="bg-blue-50/40 border border-blue-200 rounded-xl p-4 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200 pb-2">
+                        <div>
+                            <div class="font-extrabold text-blue-950 text-xs flex items-center space-x-1.5">
+                                <span class="px-1.5 py-0.5 rounded bg-blue-600 text-white text-[10px]">③</span>
+                                <span>쿠팡 재고건전성 — 쿠팡 옵션 ID & 번들(개입수) 매핑</span>
+                            </div>
+                            <div class="text-[11px] text-blue-800 mt-0.5">연결된 각 옵션 ID의 세트 재고·7일 출고량에 개입(배수)을 곱해 단품 실물 재고로 환산합니다.</div>
+                        </div>
+                        <button type="button" onclick="clearCmCoupangAll()" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-bold">모두 비우기</button>
+                    </div>
+
+                    <div id="cm_coupang_rows" class="space-y-1.5"></div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                        <input type="text" id="cm_coupang_id_input" placeholder="쿠팡 옵션 ID (예: 95844803290)" class="sm:col-span-4 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <div class="sm:col-span-2 flex items-center space-x-1">
+                            <input type="number" min="1" id="cm_coupang_bundle_input" value="1" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-right focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <span class="text-[11px] text-slate-600 shrink-0">개입</span>
+                        </div>
+                        <input type="text" id="cm_coupang_name_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmCoupangManual();}" placeholder="옵션명 (예: 2개 500ml)" class="sm:col-span-4 px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <button type="button" onclick="addCmCoupangManual()" class="sm:col-span-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold">+ 직접 추가</button>
+                    </div>
+
+                    <div class="bg-white border border-blue-200 rounded-lg p-2.5 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <span class="font-bold text-slate-700 text-[11px]">업로드된 쿠팡 재고건전성 CSV에서 선택 (개입수 자동 추정)</span>
+                            <input type="text" id="cm_coupang_csv_search" oninput="renderCmCoupangCsvList()" placeholder="옵션 ID, 옵션명, 쿠팡 상품명 검색..." class="px-2.5 py-1 border border-slate-300 rounded-lg text-[11px] w-56">
+                        </div>
+                        <div id="cm_coupang_csv_list" class="max-h-48 overflow-y-auto divide-y divide-slate-100"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-slate-50 border-t border-slate-200 px-5 py-3 flex items-center justify-end space-x-2 shrink-0">
+                <button type="button" onclick="closeCodeMappingModal()" class="px-4 py-1.5 rounded-lg text-xs font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 transition">취소</button>
+                <button type="button" onclick="saveCodeMappingModal()" class="px-5 py-1.5 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-700 text-white transition shadow-sm flex items-center space-x-1.5">
+                    <i class="fa-solid fa-link"></i>
+                    <span>코드 매핑 저장 및 반영</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- 스크립트 로직 -->
     <script>
         // 열 정의 (13개 열): 개미창고와 쿠팡창고 각각의 재고량, 런웨이, 소비기한 미니태그, 추천 조치 버튼 포함
@@ -3069,9 +3532,11 @@ HTML_TEMPLATE = """
             const m1 = document.getElementById('pinModal');
             const m2 = document.getElementById('editProductModal');
             const m3 = document.getElementById('adminCenterModal');
+            const m4 = document.getElementById('codeMappingModal');
             return (m1 && !m1.classList.contains('hidden')) ||
                    (m2 && !m2.classList.contains('hidden')) ||
-                   (m3 && !m3.classList.contains('hidden'));
+                   (m3 && !m3.classList.contains('hidden')) ||
+                   (m4 && !m4.classList.contains('hidden'));
         }
 
         function updateAdminUI() {
@@ -3172,6 +3637,7 @@ HTML_TEMPLATE = """
             isAdminMode = false;
             adminConfigCache = null;
             try { sessionStorage.removeItem(ADMIN_TOKEN_KEY); } catch (e) {}
+            closeCodeMappingModal();
             closeEditProductModal();
             closeAdminCenter();
             updateAdminUI();
@@ -3770,6 +4236,9 @@ HTML_TEMPLATE = """
                             </td>
                         `;
                     } else if (colId === 'action_cta') {
+                        const mapBtn = isAdminMode
+                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="ml-1 px-2 py-1 rounded-md text-[10px] font-extrabold bg-indigo-100 hover:bg-indigo-200 text-indigo-900 border border-indigo-300 shadow-xs transition" title="3채널 코드 매핑 수동 지정">🔗 매핑</button>`
+                            : '';
                         const editBtn = isAdminMode
                             ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="ml-1 px-2 py-1 rounded-md text-[10px] font-extrabold bg-amber-400 hover:bg-amber-500 text-slate-950 shadow-xs transition" title="관리자 수정">✏️ 수정</button>`
                             : '';
@@ -3779,6 +4248,7 @@ HTML_TEMPLATE = """
                                     <button type="button" class="px-2.5 py-1 rounded-md text-[10px] font-bold transition shadow-xs ${m.action_cta_class}">
                                         ${escapeHtml(m.action_cta)}
                                     </button>
+                                    ${mapBtn}
                                     ${editBtn}
                                 </div>
                             </td>
@@ -3797,9 +4267,14 @@ HTML_TEMPLATE = """
                                 ${isAdminMode ? `
                                     <div class="flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px]">
                                         <span class="font-bold text-amber-950">⚙️ 관리자 빠른 작업 — 기준 리드타임: ${effLt}일 (안전버퍼 +${effPrep - effLt}일) · 기한경고: ${m.effective_expiry_warn || 120}일${m.in_transit_qty > 0 ? ` · 입고예정 +${m.in_transit_qty}개 (${escapeHtml(m.expected_arrival_date || '예정일 미정')})` : ''}</span>
-                                        <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="openEditProductModal(this.dataset.prodId)" class="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md font-extrabold shadow-xs">
-                                            ✏️ 이 상품 기준정보 · 소비기한 수정
-                                        </button>
+                                        <div class="flex items-center gap-1.5">
+                                            <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="openCodeMappingModal(this.dataset.prodId)" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-extrabold shadow-xs">
+                                                🔗 코드 매핑만 지정
+                                            </button>
+                                            <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="openEditProductModal(this.dataset.prodId)" class="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md font-extrabold shadow-xs">
+                                                ✏️ 이 상품 기준정보 · 소비기한 수정
+                                            </button>
+                                        </div>
                                     </div>
                                 ` : (m.in_transit_qty > 0 ? `
                                     <div class="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-[11px] text-blue-900 font-semibold">
@@ -4068,6 +4543,10 @@ HTML_TEMPLATE = """
         // 단품 마스터 생성 / 수정 모달 로직
         // -------------------------------------------------------------
         let currentEditGaemiCsvTotal = 0;
+        let epSalesOrigState = '';
+        let epSalesExplicitEmpty = false;
+        let epGaemiMappingsState = [];
+        let epGaemiClearedExplicit = false;
 
         async function ensureAdminConfig() {
             const res = await adminFetch('/api/admin/config', { method: 'GET' });
@@ -4079,47 +4558,119 @@ HTML_TEMPLATE = """
         function computeCsvLotsFromCache(item, cfg) {
             const gaemi = (cfg && cfg.gaemi_inventory) || {};
             const overrides = (cfg && cfg.lot_expiry_overrides) || {};
+            const lots = [];
+
+            const pushLot = (actualCode, gItem) => {
+                const optName = gItem.option_name || '';
+                const reg = (gItem.reg_date || '').trim();
+                const exactKey = reg ? `${actualCode}||${optName.trim()}||${reg}` : `${actualCode}||${optName.trim()}`;
+                const optKey = `${actualCode}||${optName.trim()}`;
+                const rawExp = (gItem.expiry_date || '').trim();
+                const ov = overrides[exactKey] !== undefined ? overrides[exactKey] : overrides[optKey];
+                let effExp = rawExp;
+                let isAdmin = false;
+                if (ov === '__CLEAR__') { effExp = ''; isAdmin = true; }
+                else if (ov) { effExp = ov; isAdmin = true; }
+                lots.push({
+                    gaemi_code: actualCode,
+                    lot_key: exactKey,
+                    option_name: optName,
+                    stock: parseInt(gItem.stock || 0, 10),
+                    reg_date: reg,
+                    expiry_date: effExp,
+                    raw_expiry_date: rawExp,
+                    is_admin_expiry: isAdmin
+                });
+            };
+
+            const gMappings = item.gaemi_mappings;
+            if (Array.isArray(gMappings) && gMappings.length > 0) {
+                const upperCodeMap = {};
+                Object.keys(gaemi).forEach(k => {
+                    upperCodeMap[String(k).trim().toUpperCase()] = { actualCode: k, rows: gaemi[k] || [] };
+                });
+                const seenRefs = new Set();
+                gMappings.forEach(rule => {
+                    if (!rule || typeof rule !== 'object') return;
+                    const reqCode = String(rule.gaemi_code || rule.code || '').trim();
+                    const reqOpt = String(rule.option_name || '').trim();
+                    if (!reqCode) return;
+                    let actualCode = reqCode;
+                    let matched = gaemi[reqCode];
+                    if (!matched) {
+                        const found = upperCodeMap[reqCode.toUpperCase()];
+                        if (found) {
+                            actualCode = found.actualCode;
+                            matched = found.rows;
+                        }
+                    }
+                    if (!matched) return;
+                    matched.forEach((gItem, idx) => {
+                        const itemOpt = String(gItem.option_name || '').trim();
+                        if (reqOpt === '' || reqOpt === '*' || itemOpt === reqOpt) {
+                            const ref = `${actualCode}::${idx}`;
+                            if (!seenRefs.has(ref)) {
+                                seenRefs.add(ref);
+                                pushLot(actualCode, gItem);
+                            }
+                        }
+                    });
+                });
+                return lots;
+            }
+
             const optFilter = (item.gaemi_filter || '').trim();
             const gCodes = item.gaemi_codes || [];
-            const lots = [];
+            const seenLegacy = new Set();
             gCodes.forEach(gCode => {
-                (gaemi[gCode] || []).forEach(gItem => {
+                const gC = String(gCode || '').trim();
+                if (!gC || seenLegacy.has(gC)) return;
+                seenLegacy.add(gC);
+                (gaemi[gC] || []).forEach(gItem => {
                     const optName = gItem.option_name || '';
                     if (optFilter && !optName.includes(optFilter)) return;
-                    const reg = (gItem.reg_date || '').trim();
-                    const exactKey = reg ? `${gCode}||${optName.trim()}||${reg}` : `${gCode}||${optName.trim()}`;
-                    const optKey = `${gCode}||${optName.trim()}`;
-                    const rawExp = (gItem.expiry_date || '').trim();
-                    const ov = overrides[exactKey] !== undefined ? overrides[exactKey] : overrides[optKey];
-                    let effExp = rawExp;
-                    let isAdmin = false;
-                    if (ov === '__CLEAR__') { effExp = ''; isAdmin = true; }
-                    else if (ov) { effExp = ov; isAdmin = true; }
-                    lots.push({
-                        gaemi_code: gCode,
-                        lot_key: exactKey,
-                        option_name: optName,
-                        stock: parseInt(gItem.stock || 0, 10),
-                        reg_date: reg,
-                        expiry_date: effExp,
-                        raw_expiry_date: rawExp,
-                        is_admin_expiry: isAdmin
-                    });
+                    pushLot(gC, gItem);
                 });
             });
             return lots;
         }
 
-        function openCreateProductModal() {
+        function renderEpGaemiMappingSection() {
+            const box = document.getElementById('ep_gaemi_mappings_box');
+            const badges = document.getElementById('ep_gaemi_mappings_badges');
+            const legacyFields = document.getElementById('ep_gaemi_legacy_fields');
+            if (!box || !badges || !legacyFields) return;
+            if (Array.isArray(epGaemiMappingsState) && epGaemiMappingsState.length > 0) {
+                box.classList.remove('hidden');
+                legacyFields.classList.add('hidden');
+                badges.innerHTML = epGaemiMappingsState.map(r => `
+                    <span class="inline-flex items-center px-2 py-0.5 rounded bg-white border border-amber-300 text-amber-950 font-mono text-[11px] font-bold">
+                        ${escapeHtml(r.gaemi_code)} · ${escapeHtml(r.option_name || '* (전체 옵션)')}
+                    </span>
+                `).join('');
+            } else {
+                box.classList.add('hidden');
+                legacyFields.classList.remove('hidden');
+                badges.innerHTML = '';
+            }
+        }
+
+        function clearEpGaemiMappingsOverride() {
+            epGaemiMappingsState = [];
+            epGaemiClearedExplicit = true;
+            renderEpGaemiMappingSection();
+        }
+
+        function openCreateProductModal(prefill = null) {
             if (!isAdminMode) { openPinModal(); return; }
             document.getElementById('ep_modal_title').innerText = '신규 단품 마스터 등록';
             document.getElementById('ep_is_new').value = '1';
             document.getElementById('ep_id').value = '';
             document.getElementById('ep_orig_seller_code').value = '';
-            document.getElementById('ep_seller_code').value = '';
-            document.getElementById('ep_name').value = '';
-            document.getElementById('ep_product_type').value = '사입';
-            document.getElementById('ep_category').value = '기타';
+            document.getElementById('ep_seller_code').value = (prefill && prefill.seller_code) ? prefill.seller_code : '';
+            document.getElementById('ep_name').value = (prefill && prefill.name) ? prefill.name : '';
+            document.getElementById('ep_product_type').value = (prefill && prefill.product_type) ? prefill.product_type : '사입';
+            document.getElementById('ep_category').value = (prefill && prefill.category) ? prefill.category : '기타';
             document.getElementById('ep_is_active').checked = true;
             document.getElementById('ep_note').value = '';
             document.getElementById('ep_lead_time_days').value = '';
@@ -4128,8 +4679,23 @@ HTML_TEMPLATE = """
             document.getElementById('ep_in_transit_qty').value = 0;
             document.getElementById('ep_expected_arrival_date').value = '';
             document.getElementById('ep_default_expiry_date').value = '';
-            document.getElementById('ep_gaemi_codes').value = '';
+
+            epSalesExplicitEmpty = false;
+            epSalesOrigState = '';
+            const epSalesEl = document.getElementById('ep_sales_codes');
+            if (prefill && Array.isArray(prefill.sales_codes) && prefill.sales_codes.length > 0) {
+                epSalesEl.value = prefill.sales_codes.join(', ');
+            } else {
+                epSalesEl.value = '';
+            }
+            epSalesEl.placeholder = '기본값: 판매자관리코드와 동일 (추가/변경 시 쉼표로 구분 입력)';
+
+            epGaemiMappingsState = (prefill && Array.isArray(prefill.gaemi_mappings)) ? JSON.parse(JSON.stringify(prefill.gaemi_mappings)) : [];
+            epGaemiClearedExplicit = false;
+            document.getElementById('ep_gaemi_codes').value = (prefill && prefill.gaemi_codes) ? prefill.gaemi_codes : '';
             document.getElementById('ep_gaemi_filter').value = '';
+            renderEpGaemiMappingSection();
+
             document.getElementById('ep_lot_sync_note').classList.add('hidden');
 
             currentEditGaemiCsvTotal = 0;
@@ -4137,10 +4703,15 @@ HTML_TEMPLATE = """
             renderEpCsvLots([]);
             document.getElementById('ep_manual_lots_container').innerHTML = '';
             updateManualLotsSum();
-            document.getElementById('ep_options_container').innerHTML = '';
+            const optContainer = document.getElementById('ep_options_container');
+            optContainer.innerHTML = '';
+            if (prefill && Array.isArray(prefill.options)) {
+                prefill.options.forEach(o => addCoupangOptionRow(o));
+            }
             renderEpTempStocks([], []);
             document.getElementById('ep_temp_stocks_details').open = false;
 
+            document.getElementById('ep_btn_open_mapping').classList.add('hidden');
             document.getElementById('ep_btn_toggle_hide').classList.add('hidden');
             document.getElementById('ep_btn_hard_delete').classList.add('hidden');
             document.getElementById('editProductModal').classList.remove('hidden');
@@ -4160,6 +4731,7 @@ HTML_TEMPLATE = """
                 const csvLots = computeCsvLotsFromCache(rawCfgItem, adminConfigCache);
                 const gTotal = csvLots.reduce((a, b) => a + (b.stock || 0), 0);
                 item = Object.assign({}, rawCfgItem, {
+                    has_custom_sales_codes: Array.isArray(rawCfgItem.sales_codes),
                     csv_gaemi_lots: csvLots,
                     gaemi_total: gTotal,
                     options: (rawCfgItem.options || []).map(o => ({
@@ -4189,8 +4761,33 @@ HTML_TEMPLATE = """
             document.getElementById('ep_in_transit_qty').value = item.in_transit_qty || 0;
             document.getElementById('ep_expected_arrival_date').value = item.expected_arrival_date || '';
             document.getElementById('ep_default_expiry_date').value = item.default_expiry_date || '';
+
+            const epSalesEl = document.getElementById('ep_sales_codes');
+            if (item.has_custom_sales_codes) {
+                const scList = item.sales_codes || [];
+                if (scList.length === 0) {
+                    epSalesExplicitEmpty = true;
+                    epSalesOrigState = '__EXPLICIT_EMPTY__';
+                    epSalesEl.value = '';
+                    epSalesEl.placeholder = '⚠️ 현재 매출 연동 비활성(0건) — 코드 입력 시 재연동';
+                } else {
+                    epSalesExplicitEmpty = false;
+                    epSalesEl.value = scList.join(', ');
+                    epSalesOrigState = epSalesEl.value.trim();
+                    epSalesEl.placeholder = '기본값: 판매자관리코드와 동일';
+                }
+            } else {
+                epSalesExplicitEmpty = false;
+                epSalesOrigState = '';
+                epSalesEl.value = '';
+                epSalesEl.placeholder = `기본값: 판매자관리코드 (${item.seller_code || ''}) 자동 연동`;
+            }
+
+            epGaemiMappingsState = Array.isArray(item.gaemi_mappings) ? JSON.parse(JSON.stringify(item.gaemi_mappings)) : [];
+            epGaemiClearedExplicit = false;
             document.getElementById('ep_gaemi_codes').value = (item.gaemi_codes || []).join(', ');
             document.getElementById('ep_gaemi_filter').value = item.gaemi_filter || '';
+            renderEpGaemiMappingSection();
 
             const syncNoteEl = document.getElementById('ep_lot_sync_note');
             if (item.lot_sync_note) {
@@ -4218,6 +4815,7 @@ HTML_TEMPLATE = """
             renderEpTempStocks(csvLots, item.options || []);
             document.getElementById('ep_temp_stocks_details').open = false;
 
+            document.getElementById('ep_btn_open_mapping').classList.remove('hidden');
             const btnHide = document.getElementById('ep_btn_toggle_hide');
             const btnDel = document.getElementById('ep_btn_hard_delete');
             btnHide.classList.remove('hidden');
@@ -4226,6 +4824,58 @@ HTML_TEMPLATE = """
             btnHide.dataset.isActive = (item.is_active === false) ? '0' : '1';
 
             document.getElementById('editProductModal').classList.remove('hidden');
+        }
+
+        function openCodeMappingFromEditModal() {
+            const prodId = document.getElementById('ep_id').value.trim() || document.getElementById('ep_orig_seller_code').value.trim();
+            if (prodId) openCodeMappingModal(prodId);
+        }
+
+        function syncEditModalFromSavedProduct(savedProd) {
+            if (!savedProd) return;
+            const editModal = document.getElementById('editProductModal');
+            if (!editModal || editModal.classList.contains('hidden')) return;
+            const curId = document.getElementById('ep_id').value.trim();
+            const curCode = document.getElementById('ep_orig_seller_code').value.trim().toUpperCase();
+            if ((curId && savedProd.id !== curId) && (curCode && String(savedProd.seller_code || '').toUpperCase() !== curCode)) return;
+
+            const epSalesEl = document.getElementById('ep_sales_codes');
+            if (Array.isArray(savedProd.sales_codes)) {
+                if (savedProd.sales_codes.length === 0) {
+                    epSalesExplicitEmpty = true;
+                    epSalesOrigState = '__EXPLICIT_EMPTY__';
+                    epSalesEl.value = '';
+                    epSalesEl.placeholder = '⚠️ 현재 매출 연동 비활성(0건) — 코드 입력 시 재연동';
+                } else {
+                    epSalesExplicitEmpty = false;
+                    epSalesEl.value = savedProd.sales_codes.join(', ');
+                    epSalesOrigState = epSalesEl.value.trim();
+                    epSalesEl.placeholder = '기본값: 판매자관리코드와 동일';
+                }
+            } else {
+                epSalesExplicitEmpty = false;
+                epSalesOrigState = '';
+                epSalesEl.value = '';
+                epSalesEl.placeholder = `기본값: 판매자관리코드 (${savedProd.seller_code || ''}) 자동 연동`;
+            }
+
+            epGaemiMappingsState = Array.isArray(savedProd.gaemi_mappings) ? JSON.parse(JSON.stringify(savedProd.gaemi_mappings)) : [];
+            epGaemiClearedExplicit = false;
+            document.getElementById('ep_gaemi_codes').value = (savedProd.gaemi_codes || []).join(', ');
+            document.getElementById('ep_gaemi_filter').value = savedProd.gaemi_filter || '';
+            renderEpGaemiMappingSection();
+
+            const optContainer = document.getElementById('ep_options_container');
+            optContainer.innerHTML = '';
+            (savedProd.options || []).forEach(opt => addCoupangOptionRow(opt));
+
+            if (adminConfigCache) {
+                const csvLots = computeCsvLotsFromCache(savedProd, adminConfigCache);
+                currentEditGaemiCsvTotal = csvLots.reduce((a, b) => a + (b.stock || 0), 0);
+                document.getElementById('ep_gaemi_summary_bar').innerText = `개미 CSV 실물 합계: ${currentEditGaemiCsvTotal.toLocaleString()}개`;
+                renderEpCsvLots(csvLots);
+                renderEpTempStocks(csvLots, savedProd.options || []);
+            }
         }
 
         function closeEditProductModal() {
@@ -4408,8 +5058,11 @@ HTML_TEMPLATE = """
                 if (inp.value !== '') tempCoupangStocks[inp.dataset.optId] = parseInt(inp.value, 10);
             });
 
+            const isNewFlag = document.getElementById('ep_is_new').value === '1';
+            const scCur = (document.getElementById('ep_sales_codes').value || '').trim();
+
             const payload = {
-                is_new: document.getElementById('ep_is_new').value === '1',
+                is_new: isNewFlag,
                 id: document.getElementById('ep_id').value.trim(),
                 original_seller_code: document.getElementById('ep_orig_seller_code').value.trim(),
                 seller_code: sellerCode,
@@ -4433,6 +5086,20 @@ HTML_TEMPLATE = """
                 temp_coupang_stocks: tempCoupangStocks
             };
 
+            if (isNewFlag) {
+                if (scCur) payload.sales_codes = scCur;
+            } else if (epSalesExplicitEmpty) {
+                if (scCur) payload.sales_codes = scCur;
+            } else if (scCur !== epSalesOrigState) {
+                payload.sales_codes = scCur ? scCur : null;
+            }
+
+            if (Array.isArray(epGaemiMappingsState) && epGaemiMappingsState.length > 0) {
+                payload.gaemi_mappings = epGaemiMappingsState;
+            } else if (epGaemiClearedExplicit) {
+                payload.gaemi_mappings = [];
+            }
+
             try {
                 const res = await adminFetch('/api/admin/product/save', {
                     method: 'POST',
@@ -4445,9 +5112,11 @@ HTML_TEMPLATE = """
                 }
                 closeEditProductModal();
                 await fetchSummary();
-                if (!document.getElementById('adminCenterModal').classList.contains('hidden')) {
+                if (adminConfigCache || !document.getElementById('adminCenterModal').classList.contains('hidden')) {
                     await ensureAdminConfig();
-                    renderAdminCenterTabs();
+                    if (!document.getElementById('adminCenterModal').classList.contains('hidden')) {
+                        renderAdminCenterTabs();
+                    }
                 }
                 alert('✅ ' + json.message);
             } catch (err) {
@@ -4499,7 +5168,7 @@ HTML_TEMPLATE = """
         }
 
         // -------------------------------------------------------------
-        // 관리자 통합 센터 (5개 탭) 로직
+        // 관리자 통합 센터 (6개 탭) 로직
         // -------------------------------------------------------------
         let activeAdminTab = 'bulk';
 
@@ -4523,7 +5192,7 @@ HTML_TEMPLATE = """
 
         function switchAdminTab(tabName) {
             activeAdminTab = tabName;
-            ['bulk', 'expiry', 'b2b', 'settings', 'drive'].forEach(t => {
+            ['bulk', 'mapping', 'expiry', 'b2b', 'settings', 'drive'].forEach(t => {
                 const pane = document.getElementById(`acTab_${t}`);
                 if (pane) pane.classList.toggle('hidden', t !== tabName);
             });
@@ -4538,6 +5207,7 @@ HTML_TEMPLATE = """
         function renderAdminCenterTabs() {
             if (!adminConfigCache) return;
             renderAdminBulkTable();
+            renderAdminMappingTab();
             renderAdminExpiryTable();
             renderAdminB2bTable();
             renderAdminSettingsTab();
@@ -4983,6 +5653,1195 @@ HTML_TEMPLATE = """
                 }).catch(fallbackCopy);
             } else {
                 fallbackCopy();
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 상품 3채널 코드 매핑 수동 지정 (탐색기 + 마스터 현황표 + 전용 모달)
+        // -------------------------------------------------------------
+        let acMapExplorerRows = [];
+        let cmState = {
+            id: '',
+            seller_code: '',
+            name: '',
+            sales_codes: [],
+            sales_is_custom: false,
+            gaemi_mappings: [],
+            clear_legacy_gaemi: false,
+            legacy_gaemi_codes: [],
+            legacy_gaemi_filter: '',
+            options: []
+        };
+        let cmSalesCsvItems = [];
+        let cmGaemiCsvItems = [];
+        let cmCoupangCsvItems = [];
+
+        function isMasterSCodeRecord(m, cfg) {
+            const c = String((m && m.seller_code) || '').trim().toUpperCase();
+            const b2b = (cfg && cfg.b2b_mappings) || {};
+            return c.startsWith('S') || Boolean(b2b[c]);
+        }
+
+        function guessCoupangBundle(text) {
+            const s = String(text || '');
+            const m1 = s.match(/(\\d+)\\s*개(?!입)/);
+            if (m1) return Math.max(1, parseInt(m1[1], 10) || 1);
+            const m2 = s.match(/(\\d+)\\s*(?:팩|입|병|봉|통|박스)/);
+            if (m2) return Math.max(1, parseInt(m2[1], 10) || 1);
+            return 1;
+        }
+
+        function getGroupedGaemiEntries(cfg) {
+            const gaemiInv = (cfg && cfg.gaemi_inventory) || {};
+            const map = new Map();
+            Object.entries(gaemiInv).forEach(([gCode, rows]) => {
+                (rows || []).forEach(r => {
+                    const optName = String(r.option_name || '').trim();
+                    const key = `${String(gCode).trim().toUpperCase()}||${optName}`;
+                    if (!map.has(key)) {
+                        map.set(key, {
+                            key,
+                            gaemi_code: String(gCode).trim(),
+                            option_name: optName,
+                            product_name: String(r.product_name || '').trim(),
+                            stock: 0,
+                            lot_count: 0
+                        });
+                    }
+                    const entry = map.get(key);
+                    entry.stock += (parseInt(r.stock || 0, 10) || 0);
+                    entry.lot_count += 1;
+                    if (!entry.product_name && r.product_name) {
+                        entry.product_name = String(r.product_name).trim();
+                    }
+                });
+            });
+            return Array.from(map.values()).sort((a, b) => {
+                const cCmp = a.gaemi_code.localeCompare(b.gaemi_code);
+                return cCmp !== 0 ? cCmp : a.option_name.localeCompare(b.option_name);
+            });
+        }
+
+        function getMatchedGaemiEntriesForMaster(m, groupedEntries) {
+            const gMappings = m.gaemi_mappings;
+            if (Array.isArray(gMappings) && gMappings.length > 0) {
+                const matched = [];
+                const seenKeys = new Set();
+                gMappings.forEach(rule => {
+                    if (!rule || typeof rule !== 'object') return;
+                    const reqCode = String(rule.gaemi_code || rule.code || '').trim().toUpperCase();
+                    const reqOpt = String(rule.option_name || '').trim();
+                    if (!reqCode) return;
+                    groupedEntries.forEach(entry => {
+                        if (entry.gaemi_code.toUpperCase() !== reqCode) return;
+                        if (reqOpt === '' || reqOpt === '*' || entry.option_name === reqOpt) {
+                            if (!seenKeys.has(entry.key)) {
+                                seenKeys.add(entry.key);
+                                matched.push(entry);
+                            }
+                        }
+                    });
+                });
+                return { matched, usedLegacy: false };
+            }
+
+            const legacyCodes = (m.gaemi_codes || []).map(c => String(c || '').trim()).filter(Boolean);
+            const optFilter = String(m.gaemi_filter || '').trim();
+            const matched = [];
+            const seenKeys = new Set();
+            legacyCodes.forEach(lc => {
+                groupedEntries.forEach(entry => {
+                    if (entry.gaemi_code !== lc) return;
+                    if (optFilter && !entry.option_name.includes(optFilter)) return;
+                    if (!seenKeys.has(entry.key)) {
+                        seenKeys.add(entry.key);
+                        matched.push(entry);
+                    }
+                });
+            });
+            return { matched, usedLegacy: legacyCodes.length > 0 };
+        }
+
+        function buildMappingOwnershipIndex(cfg) {
+            const masters = (cfg && cfg.master_products) || [];
+            const b2bMap = (cfg && cfg.b2b_mappings) || {};
+            const groupedGaemi = getGroupedGaemiEntries(cfg);
+
+            const salesOwners = {};
+            const gaemiOwners = {};
+            const coupangOwners = {};
+            const b2bSalesOwners = {};
+
+            Object.entries(b2bMap).forEach(([sCode, info]) => {
+                const sc = String(sCode || '').trim().toUpperCase();
+                if (!sc) return;
+                b2bSalesOwners[sc] = String((info && info.base_code) || '').trim().toUpperCase();
+            });
+
+            masters.forEach(m => {
+                if (m.is_active === false || isMasterSCodeRecord(m, cfg)) return;
+                const ownerInfo = {
+                    id: m.id || '',
+                    seller_code: String(m.seller_code || '').trim(),
+                    name: String(m.name || '').trim()
+                };
+                const normCode = ownerInfo.seller_code.toUpperCase();
+
+                const scList = Array.isArray(m.sales_codes)
+                    ? m.sales_codes
+                    : (normCode ? [normCode] : []);
+                scList.forEach(rawSc => {
+                    const sc = String(rawSc || '').trim().toUpperCase();
+                    if (!sc) return;
+                    if (!salesOwners[sc]) salesOwners[sc] = [];
+                    if (!salesOwners[sc].some(o => o.seller_code === ownerInfo.seller_code)) {
+                        salesOwners[sc].push(ownerInfo);
+                    }
+                });
+
+                const { matched } = getMatchedGaemiEntriesForMaster(m, groupedGaemi);
+                matched.forEach(entry => {
+                    if (!gaemiOwners[entry.key]) gaemiOwners[entry.key] = [];
+                    if (!gaemiOwners[entry.key].some(o => o.seller_code === ownerInfo.seller_code)) {
+                        gaemiOwners[entry.key].push(ownerInfo);
+                    }
+                });
+
+                (m.options || []).forEach(opt => {
+                    const oid = String(opt.id || '').trim();
+                    if (!oid) return;
+                    if (!coupangOwners[oid]) coupangOwners[oid] = [];
+                    if (!coupangOwners[oid].some(o => o.seller_code === ownerInfo.seller_code)) {
+                        coupangOwners[oid].push(ownerInfo);
+                    }
+                });
+            });
+
+            return { groupedGaemi, salesOwners, b2bSalesOwners, gaemiOwners, coupangOwners };
+        }
+
+        function showAcMapToast(msg, isError = false) {
+            const el = document.getElementById('acMapToast');
+            if (!el) return;
+            el.className = isError
+                ? 'px-3 py-2 rounded-lg text-xs font-bold bg-rose-50 border border-rose-300 text-rose-900'
+                : 'px-3 py-2 rounded-lg text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900';
+            el.innerText = msg;
+            el.classList.remove('hidden');
+            clearTimeout(window._acMapToastTimer);
+            window._acMapToastTimer = setTimeout(() => {
+                el.classList.add('hidden');
+            }, 3500);
+        }
+
+        function renderAdminMappingTab() {
+            if (!adminConfigCache) return;
+            renderAdminMappingExplorer();
+            renderAdminMappingMasterTable();
+        }
+
+        function renderAdminMappingExplorer() {
+            if (!adminConfigCache) return;
+            const cfg = adminConfigCache;
+            const idxData = buildMappingOwnershipIndex(cfg);
+            const salesInv = cfg.sales_inventory || {};
+            const coupangInv = cfg.coupang_inventory || {};
+
+            const allCsvItems = [];
+            let salesTotal = 0, salesUnmapped = 0;
+            Object.entries(salesInv).sort((a, b) => a[0].localeCompare(b[0])).forEach(([code, sdata]) => {
+                const upCode = String(code || '').trim().toUpperCase();
+                if (!upCode) return;
+                salesTotal += 1;
+                const owners = idxData.salesOwners[upCode] || [];
+                const b2bBase = idxData.b2bSalesOwners[upCode] || '';
+                const isMapped = owners.length > 0 || Boolean(b2bBase) || upCode.startsWith('S');
+                if (!isMapped) salesUnmapped += 1;
+                allCsvItems.push({
+                    channel: 'sales',
+                    code: upCode,
+                    sampleName: (sdata.sample_names || [])[0] || '',
+                    malls: (sdata.malls || []).join(', '),
+                    total_7d: sdata.total_7d || 0,
+                    total_30d: sdata.total_30d || 0,
+                    owners,
+                    b2bBase,
+                    isMapped,
+                    searchBlob: `${upCode} ${(sdata.sample_names || []).join(' ')} ${(sdata.malls || []).join(' ')}`.toLowerCase()
+                });
+            });
+
+            let gaemiTotal = 0, gaemiUnmapped = 0;
+            idxData.groupedGaemi.forEach(entry => {
+                gaemiTotal += 1;
+                const owners = idxData.gaemiOwners[entry.key] || [];
+                const isMapped = owners.length > 0;
+                if (!isMapped) gaemiUnmapped += 1;
+                allCsvItems.push({
+                    channel: 'gaemi',
+                    gaemi_code: entry.gaemi_code,
+                    option_name: entry.option_name,
+                    product_name: entry.product_name,
+                    stock: entry.stock,
+                    lot_count: entry.lot_count,
+                    owners,
+                    isMapped,
+                    searchBlob: `${entry.gaemi_code} ${entry.option_name} ${entry.product_name}`.toLowerCase()
+                });
+            });
+
+            let coupangTotal = 0, coupangUnmapped = 0;
+            Object.entries(coupangInv).sort((a, b) => a[0].localeCompare(b[0])).forEach(([oid, cdata]) => {
+                const oidStr = String(oid || '').trim();
+                if (!oidStr) return;
+                coupangTotal += 1;
+                const owners = idxData.coupangOwners[oidStr] || [];
+                const isMapped = owners.length > 0;
+                if (!isMapped) coupangUnmapped += 1;
+                const optLabel = String(cdata.option_name || '').trim();
+                const prodName = String(cdata.product_name || '').trim();
+                allCsvItems.push({
+                    channel: 'coupang',
+                    option_id: oidStr,
+                    option_name: optLabel,
+                    product_name: prodName,
+                    stock: parseInt(cdata.stock || 0, 10) || 0,
+                    sales_7d: parseInt(cdata.sales_7d || 0, 10) || 0,
+                    guessedBundle: guessCoupangBundle(optLabel || prodName),
+                    owners,
+                    isMapped,
+                    searchBlob: `${oidStr} ${optLabel} ${prodName}`.toLowerCase()
+                });
+            });
+
+            const countsEl = document.getElementById('acMapCsvCounts');
+            if (countsEl) {
+                countsEl.innerText = `매출코드 ${salesTotal}건 (미매핑 ${salesUnmapped}) · 개미 ${gaemiTotal}건 (미매핑 ${gaemiUnmapped}) · 쿠팡 ${coupangTotal}건 (미매핑 ${coupangUnmapped})`;
+            }
+
+            const chFilter = (document.getElementById('acMapCsvChannel') || {}).value || 'all';
+            const onlyUnmapped = Boolean((document.getElementById('acMapCsvOnlyUnmapped') || {}).checked);
+            const q = String((document.getElementById('acMapCsvSearch') || {}).value || '').toLowerCase().trim();
+
+            acMapExplorerRows = allCsvItems.filter(row => {
+                if (chFilter !== 'all' && row.channel !== chFilter) return false;
+                if (onlyUnmapped && row.isMapped) return false;
+                if (q && !row.searchBlob.includes(q)) return false;
+                return true;
+            });
+
+            const tbody = document.getElementById('acMapCsvTbody');
+            if (!tbody) return;
+            if (acMapExplorerRows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-400">표시할 CSV 코드가 없습니다. (모든 코드가 매핑되었거나 CSV가 아직 업로드되지 않았습니다)</td></tr>';
+                return;
+            }
+
+            const activeMasters = (cfg.master_products || [])
+                .filter(m => m.is_active !== false && !isMasterSCodeRecord(m, cfg))
+                .slice()
+                .sort((a, b) => String(a.seller_code || '').localeCompare(String(b.seller_code || '')));
+            const masterOptsHtml = '<option value="">-- 대상 상품 선택 --</option>' + activeMasters.map(m =>
+                `<option value="${escapeHtml(m.id || m.seller_code)}">[${escapeHtml(m.seller_code)}] ${escapeHtml(m.name)}</option>`
+            ).join('');
+
+            const MAX_ROWS = 200;
+            const visibleRows = acMapExplorerRows.slice(0, MAX_ROWS);
+            let html = visibleRows.map((row, idx) => {
+                let chBadge = '';
+                let codeCell = '';
+                let infoCell = '';
+                if (row.channel === 'sales') {
+                    chBadge = '<span class="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 font-bold text-[10px]">매출코드</span>';
+                    codeCell = `<span class="font-mono font-bold text-indigo-950">${escapeHtml(row.code)}</span>`;
+                    infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.sampleName)}">${escapeHtml(row.sampleName || '상품명 미기재')}</div><div class="text-[10px] text-slate-400">7일 ${row.total_7d}개 · 30일 ${row.total_30d}개${row.malls ? ' · ' + escapeHtml(row.malls) : ''}</div>`;
+                } else if (row.channel === 'gaemi') {
+                    chBadge = '<span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-bold text-[10px]">개미창고</span>';
+                    codeCell = `<div class="font-mono font-bold text-amber-950">${escapeHtml(row.gaemi_code)}</div><div class="text-[11px] font-semibold text-slate-800">${escapeHtml(row.option_name || '(옵션명 없음)')}</div>`;
+                    infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock.toLocaleString()}개${row.lot_count > 1 ? ` (${row.lot_count}개 로트 합계)` : ''}</div>`;
+                } else {
+                    chBadge = '<span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px]">쿠팡옵션</span>';
+                    codeCell = `<div class="font-mono font-bold text-blue-950">${escapeHtml(row.option_id)}</div><div class="text-[10px] text-slate-600">${escapeHtml(row.option_name || '')}</div>`;
+                    infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock}세트 · 7일출고 ${row.sales_7d}세트 (추천 ${row.guessedBundle}개입)</div>`;
+                }
+
+                let statusBadge = '';
+                if (row.b2bBase) {
+                    statusBadge = `<span class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200 font-bold text-[10px]">B2B→${escapeHtml(row.b2bBase)}</span>`;
+                } else if (row.owners && row.owners.length > 0) {
+                    statusBadge = row.owners.map(o => `<span class="inline-block px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono text-[10px] mr-0.5">${escapeHtml(o.seller_code)}</span>`).join('');
+                } else if (row.channel === 'sales' && row.code.startsWith('S')) {
+                    statusBadge = '<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold text-[10px]">S코드</span>';
+                } else {
+                    statusBadge = '<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[10px]">미매핑</span>';
+                }
+
+                const bundleInputHtml = row.channel === 'coupang'
+                    ? `<input type="number" min="1" value="${row.guessedBundle}" class="ac-map-exp-bundle w-12 px-1 py-1 border border-slate-300 rounded font-mono text-[10px] text-right" title="개입(배수)">`
+                    : '';
+
+                return `
+                    <tr class="hover:bg-slate-50" data-exp-idx="${idx}">
+                        <td class="p-2 align-top">${chBadge}</td>
+                        <td class="p-2 align-top">${codeCell}</td>
+                        <td class="p-2 align-top">${infoCell}</td>
+                        <td class="p-2 align-top">${statusBadge}</td>
+                        <td class="p-2 align-top">
+                            <div class="flex flex-wrap items-center gap-1">
+                                <select class="ac-map-exp-target flex-1 min-w-[140px] max-w-[200px] px-1.5 py-1 border border-slate-300 rounded bg-white text-[10px]">${masterOptsHtml}</select>
+                                ${bundleInputHtml}
+                                <button type="button" onclick="quickLinkCsvRow(${idx}, this)" class="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded font-bold text-[10px] shrink-0">연결</button>
+                                <button type="button" onclick="quickCreateFromCsvRow(${idx})" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded font-bold text-[10px] shrink-0" title="이 코드로 신규 단품 마스터 생성">+ 신규</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            if (acMapExplorerRows.length > MAX_ROWS) {
+                html += `<tr><td colspan="5" class="p-2 text-center text-[10px] text-slate-500 bg-slate-50">상위 ${MAX_ROWS}건만 표시 중입니다 (전체 ${acMapExplorerRows.length}건 — 검색어로 좁혀보세요).</td></tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        async function quickLinkCsvRow(idx, btnEl) {
+            const row = acMapExplorerRows[idx];
+            if (!row) return;
+            const tr = btnEl.closest('tr');
+            const selectEl = tr ? tr.querySelector('.ac-map-exp-target') : null;
+            const targetId = selectEl ? selectEl.value : '';
+            if (!targetId) {
+                alert('먼저 연결할 마스터 상품을 선택하세요.');
+                return;
+            }
+            const target = (adminConfigCache.master_products || []).find(m => m.id === targetId || m.seller_code === targetId);
+            if (!target) {
+                alert('선택한 마스터 상품을 찾을 수 없습니다.');
+                return;
+            }
+
+            const payload = { id: target.id, seller_code: target.seller_code };
+            if (row.channel === 'sales') {
+                let curCodes = Array.isArray(target.sales_codes)
+                    ? target.sales_codes.map(c => String(c).trim().toUpperCase()).filter(Boolean)
+                    : (target.seller_code ? [String(target.seller_code).trim().toUpperCase()] : []);
+                if (!curCodes.includes(row.code)) curCodes.push(row.code);
+                payload.sales_codes = curCodes;
+            } else if (row.channel === 'gaemi') {
+                const curRules = Array.isArray(target.gaemi_mappings)
+                    ? target.gaemi_mappings.map(r => ({ gaemi_code: String(r.gaemi_code || '').trim(), option_name: String(r.option_name || '').trim() })).filter(r => r.gaemi_code)
+                    : [];
+                if (curRules.length === 0 && Array.isArray(target.gaemi_codes) && target.gaemi_codes.length > 0) {
+                    const legacyRes = getMatchedGaemiEntriesForMaster(target, getGroupedGaemiEntries(adminConfigCache));
+                    legacyRes.matched.forEach(entry => {
+                        if (!curRules.some(r => r.gaemi_code.toUpperCase() === entry.gaemi_code.toUpperCase() && r.option_name === entry.option_name)) {
+                            curRules.push({ gaemi_code: entry.gaemi_code, option_name: entry.option_name });
+                        }
+                    });
+                }
+                const dup = curRules.some(r => r.gaemi_code.toUpperCase() === row.gaemi_code.toUpperCase() && r.option_name === row.option_name);
+                if (!dup) curRules.push({ gaemi_code: row.gaemi_code, option_name: row.option_name });
+                payload.gaemi_mappings = curRules;
+            } else if (row.channel === 'coupang') {
+                const bundleEl = tr ? tr.querySelector('.ac-map-exp-bundle') : null;
+                const bundleVal = Math.max(1, parseInt((bundleEl && bundleEl.value) || row.guessedBundle || '1', 10) || 1);
+                const curOpts = (target.options || []).map(o => ({ id: String(o.id || '').trim(), bundle: o.bundle || 1, name: o.name || '' })).filter(o => o.id);
+                if (!curOpts.some(o => o.id === row.option_id)) {
+                    curOpts.push({ id: row.option_id, bundle: bundleVal, name: row.option_name || `${bundleVal}개` });
+                }
+                payload.options = curOpts;
+            }
+
+            try {
+                const res = await adminFetch('/api/admin/product/mappings/save', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    alert(json.message || '연결 실패');
+                    return;
+                }
+                await ensureAdminConfig();
+                renderAdminCenterTabs();
+                await fetchSummary();
+                showAcMapToast(`✅ [${target.seller_code}] ${target.name}에 코드가 연결되었습니다.`);
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('연결 오류: ' + err.message);
+            }
+        }
+
+        function quickCreateFromCsvRow(idx) {
+            const row = acMapExplorerRows[idx];
+            if (!row) return;
+            const prefill = {};
+            if (row.channel === 'sales') {
+                prefill.seller_code = row.code;
+                prefill.name = row.sampleName || '';
+                prefill.sales_codes = [row.code];
+            } else if (row.channel === 'gaemi') {
+                prefill.name = row.product_name || '';
+                prefill.gaemi_mappings = [{ gaemi_code: row.gaemi_code, option_name: row.option_name }];
+                prefill.gaemi_codes = row.gaemi_code;
+            } else if (row.channel === 'coupang') {
+                prefill.name = row.product_name || '';
+                prefill.options = [{ id: row.option_id, bundle: row.guessedBundle || 1, name: row.option_name || `${row.guessedBundle || 1}개` }];
+            }
+            openCreateProductModal(prefill);
+        }
+
+        function renderAdminMappingMasterTable() {
+            if (!adminConfigCache) return;
+            const cfg = adminConfigCache;
+            const tbody = document.getElementById('acMapMasterTbody');
+            if (!tbody) return;
+
+            const q = String((document.getElementById('acMapMasterSearch') || {}).value || '').toLowerCase().trim();
+            const mode = (document.getElementById('acMapMasterFilter') || {}).value || 'all';
+            const showInactive = Boolean((document.getElementById('acMapMasterShowInactive') || {}).checked);
+
+            const salesInv = cfg.sales_inventory || {};
+            const coupangInv = cfg.coupang_inventory || {};
+            const groupedGaemi = getGroupedGaemiEntries(cfg);
+            const hasGaemiCsv = groupedGaemi.length > 0;
+
+            const rows = (cfg.master_products || []).filter(m => {
+                if (isMasterSCodeRecord(m, cfg)) return false;
+                if (!showInactive && m.is_active === false) return false;
+                if (q) {
+                    const mn = String(m.name || '').toLowerCase();
+                    const mc = String(m.seller_code || '').toLowerCase();
+                    const gs = (m.gaemi_mappings || []).map(r => `${r.gaemi_code} ${r.option_name}`).join(' ').toLowerCase();
+                    const sc = (m.sales_codes || []).join(' ').toLowerCase();
+                    if (!mn.includes(q) && !mc.includes(q) && !gs.includes(q) && !sc.includes(q)) return false;
+                }
+                return true;
+            }).map(m => {
+                const normCode = String(m.seller_code || '').trim().toUpperCase();
+                const hasCustomSales = Array.isArray(m.sales_codes);
+                const effSalesCodes = hasCustomSales ? m.sales_codes : (normCode ? [normCode] : []);
+                const gInfo = getMatchedGaemiEntriesForMaster(m, groupedGaemi);
+                const opts = m.options || [];
+
+                const hasMissing = effSalesCodes.length === 0 || (Array.isArray(m.gaemi_mappings) ? m.gaemi_mappings.length === 0 && (m.gaemi_codes || []).length === 0 : (m.gaemi_codes || []).length === 0) || (hasGaemiCsv && gInfo.matched.length === 0) || opts.length === 0;
+                const hasCustom = hasCustomSales || (Array.isArray(m.gaemi_mappings) && m.gaemi_mappings.length > 0);
+                return { m, effSalesCodes, hasCustomSales, gInfo, opts, hasMissing, hasCustom };
+            }).filter(r => {
+                if (mode === 'missing') return r.hasMissing;
+                if (mode === 'custom') return r.hasCustom;
+                return true;
+            });
+
+            if (rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-400">조건에 맞는 마스터 상품이 없습니다.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = rows.map(({ m, effSalesCodes, hasCustomSales, gInfo, opts }) => {
+                const isAct = m.is_active !== false;
+
+                let salesHtml = '';
+                if (effSalesCodes.length === 0) {
+                    salesHtml = '<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">매출 연동 해제 (0건)</span>';
+                } else {
+                    salesHtml = effSalesCodes.map(sc => {
+                        const up = String(sc).trim().toUpperCase();
+                        const hit = salesInv[up];
+                        const hitTxt = hit ? ` <span class="text-indigo-600">(7일 ${hit.total_7d})</span>` : '';
+                        const cls = hasCustomSales
+                            ? 'bg-indigo-50 text-indigo-900 border-indigo-200'
+                            : 'bg-slate-50 text-slate-700 border-slate-200';
+                        const tag = hasCustomSales ? '' : '<span class="text-[9px] text-slate-400 mr-0.5">기본</span>';
+                        return `<span class="inline-block px-1.5 py-0.5 rounded border font-mono text-[10px] mr-1 mb-1 ${cls}">${tag}${escapeHtml(up)}${hitTxt}</span>`;
+                    }).join('');
+                }
+
+                let gaemiHtml = '';
+                const gMaps = Array.isArray(m.gaemi_mappings) ? m.gaemi_mappings : [];
+                if (gMaps.length > 0) {
+                    gaemiHtml = gMaps.map(rule => {
+                        const rc = String(rule.gaemi_code || '').trim();
+                        const ro = String(rule.option_name || '').trim();
+                        const sumStock = groupedGaemi
+                            .filter(e => e.gaemi_code.toUpperCase() === rc.toUpperCase() && (ro === '' || ro === '*' || e.option_name === ro))
+                            .reduce((a, b) => a + b.stock, 0);
+                        return `<span class="inline-block px-1.5 py-0.5 rounded bg-amber-50 text-amber-950 border border-amber-300 font-mono text-[10px] mr-1 mb-1"><strong>${escapeHtml(rc)}</strong> · ${escapeHtml(ro || '* 전체')} <span class="text-amber-700">(${sumStock.toLocaleString()}개)</span></span>`;
+                    }).join('');
+                } else if ((m.gaemi_codes || []).length > 0) {
+                    const legText = `${(m.gaemi_codes || []).join(', ')}${m.gaemi_filter ? ` (키워드: ${m.gaemi_filter})` : ''}`;
+                    const legStock = gInfo.matched.reduce((a, b) => a + b.stock, 0);
+                    const warnZero = (hasGaemiCsv && gInfo.matched.length === 0)
+                        ? '<span class="block text-[10px] text-rose-600 font-bold mt-0.5">⚠️ CSV 0건 일치 (옵션 재지정 필요)</span>'
+                        : `<span class="block text-[10px] text-slate-500 mt-0.5">매칭 ${gInfo.matched.length}건 · ${legStock.toLocaleString()}개</span>`;
+                    gaemiHtml = `<span class="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-mono text-[10px]">[구방식] ${escapeHtml(legText)}</span>${warnZero}`;
+                } else {
+                    gaemiHtml = '<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">미지정</span>';
+                }
+
+                let coupangHtml = '';
+                if (opts.length === 0) {
+                    coupangHtml = '<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">미지정</span>';
+                } else {
+                    coupangHtml = opts.map(o => {
+                        const cd = coupangInv[String(o.id || '').trim()];
+                        const stTxt = cd ? ` · ${cd.stock}세트` : '';
+                        return `<span class="inline-block px-1.5 py-0.5 rounded bg-blue-50 text-blue-900 border border-blue-200 font-mono text-[10px] mr-1 mb-1">${escapeHtml(o.id)} <span class="text-blue-700">(${o.bundle || 1}개입${stTxt})</span></span>`;
+                    }).join('');
+                }
+
+                return `
+                    <tr class="${isAct ? 'hover:bg-slate-50' : 'bg-slate-100/70 opacity-75'}">
+                        <td class="p-2.5 align-top">
+                            <div class="font-mono font-bold text-slate-800">${escapeHtml(m.seller_code)}${!isAct ? ' <span class="text-[9px] bg-slate-200 text-slate-600 px-1 rounded">숨김</span>' : ''}</div>
+                            <div class="font-semibold text-slate-700 mt-0.5">${escapeHtml(m.name)}</div>
+                        </td>
+                        <td class="p-2.5 align-top">${salesHtml}</td>
+                        <td class="p-2.5 align-top">${gaemiHtml}</td>
+                        <td class="p-2.5 align-top">${coupangHtml}</td>
+                        <td class="p-2.5 text-center align-top">
+                            <button type="button" data-prod-id="${escapeHtml(m.id || m.seller_code)}" onclick="openCodeMappingModal(this.dataset.prodId)" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-[11px] shadow-xs whitespace-nowrap">
+                                🔗 매핑 지정
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function openCodeMappingModal(prodId) {
+            if (!isAdminMode) { openPinModal(); return; }
+            try {
+                await ensureAdminConfig();
+            } catch (e) {
+                return;
+            }
+            const cfg = adminConfigCache || {};
+            const target = (cfg.master_products || []).find(m => m.id === prodId || m.seller_code === prodId);
+            if (!target) {
+                alert('대상 마스터 상품을 찾을 수 없습니다.');
+                return;
+            }
+
+            const normSeller = String(target.seller_code || '').trim().toUpperCase();
+            const hasCustomSales = Array.isArray(target.sales_codes);
+
+            cmState = {
+                id: target.id || '',
+                seller_code: target.seller_code || '',
+                name: target.name || '',
+                sales_codes: hasCustomSales
+                    ? target.sales_codes.map(c => String(c).trim().toUpperCase()).filter(Boolean)
+                    : (normSeller ? [normSeller] : []),
+                sales_is_custom: hasCustomSales,
+                gaemi_mappings: Array.isArray(target.gaemi_mappings)
+                    ? target.gaemi_mappings.map(r => ({
+                        gaemi_code: String(r.gaemi_code || r.code || '').trim(),
+                        option_name: String(r.option_name || '').trim()
+                    })).filter(r => r.gaemi_code)
+                    : [],
+                clear_legacy_gaemi: false,
+                legacy_gaemi_codes: Array.isArray(target.gaemi_codes) ? target.gaemi_codes.slice() : [],
+                legacy_gaemi_filter: String(target.gaemi_filter || '').trim(),
+                options: Array.isArray(target.options)
+                    ? target.options.map(o => ({
+                        id: String(o.id || '').trim(),
+                        bundle: Math.max(1, parseInt(o.bundle || 1, 10) || 1),
+                        name: String(o.name || '').trim()
+                    })).filter(o => o.id)
+                    : []
+            };
+
+            document.getElementById('cm_modal_title').innerText = `[${cmState.seller_code}] ${cmState.name} — 3채널 코드 매핑`;
+            document.getElementById('cm_target_badge').innerText = `대표코드: ${cmState.seller_code}`;
+            document.getElementById('cm_sales_add_input').value = '';
+            document.getElementById('cm_sales_csv_search').value = '';
+            document.getElementById('cm_gaemi_code_input').value = '';
+            document.getElementById('cm_gaemi_opt_input').value = '';
+            document.getElementById('cm_gaemi_csv_search').value = '';
+            document.getElementById('cm_coupang_id_input').value = '';
+            document.getElementById('cm_coupang_bundle_input').value = '1';
+            document.getElementById('cm_coupang_name_input').value = '';
+            document.getElementById('cm_coupang_csv_search').value = '';
+
+            renderCodeMappingModalBody();
+            document.getElementById('codeMappingModal').classList.remove('hidden');
+        }
+
+        function closeCodeMappingModal() {
+            const m = document.getElementById('codeMappingModal');
+            if (m) m.classList.add('hidden');
+        }
+
+        function renderCodeMappingModalBody() {
+            renderCmSalesChips();
+            renderCmSalesCsvList();
+            renderCmGaemiSection();
+            renderCmCoupangRows();
+            renderCmCoupangCsvList();
+        }
+
+        // --- ① 쿠팡외 매출 (상품관리코드) ---
+        function renderCmSalesChips() {
+            const box = document.getElementById('cm_sales_chips');
+            const stEl = document.getElementById('cm_sales_status_text');
+            const salesInv = (adminConfigCache && adminConfigCache.sales_inventory) || {};
+
+            if (!cmState.sales_is_custom) {
+                stEl.innerText = `현재 기본값 모드: 대표코드(${cmState.seller_code}) 매출을 자동 연동합니다.`;
+            } else if (cmState.sales_codes.length === 0) {
+                stEl.innerText = '⚠️ 매출 코드가 모두 비워져 있습니다 (쿠팡외 매출 출고량 0으로 집계됨).';
+            } else {
+                stEl.innerText = `수동 지정됨: ${cmState.sales_codes.length}개 상품관리코드 매출을 합산합니다.`;
+            }
+
+            if (cmState.sales_codes.length === 0) {
+                box.innerHTML = '<span class="text-[11px] text-rose-700 font-bold bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-lg">연동된 매출 코드 없음 (0건)</span>';
+                return;
+            }
+
+            box.innerHTML = cmState.sales_codes.map((sc, idx) => {
+                const hit = salesInv[sc];
+                const statTxt = hit ? ` · 7일 ${hit.total_7d} / 30일 ${hit.total_30d}` : ' · CSV 미매칭';
+                const defBadge = (!cmState.sales_is_custom && sc === String(cmState.seller_code).toUpperCase())
+                    ? '<span class="text-[9px] bg-indigo-100 text-indigo-800 px-1 rounded mr-1">기본</span>'
+                    : '';
+                return `
+                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-indigo-300 text-indigo-950 font-mono text-[11px] font-bold shadow-xs">
+                        ${defBadge}${escapeHtml(sc)}<span class="font-sans font-normal text-[10px] text-slate-500">${statTxt}</span>
+                        <button type="button" onclick="removeCmSalesCode(${idx})" class="ml-1 text-rose-500 hover:text-rose-700 font-black" title="제거">&times;</button>
+                    </span>
+                `;
+            }).join('');
+        }
+
+        function resetCmSalesDefault() {
+            const up = String(cmState.seller_code || '').trim().toUpperCase();
+            cmState.sales_is_custom = false;
+            cmState.sales_codes = up ? [up] : [];
+            renderCmSalesChips();
+            renderCmSalesCsvList();
+        }
+
+        function clearCmSalesAll() {
+            cmState.sales_is_custom = true;
+            cmState.sales_codes = [];
+            renderCmSalesChips();
+            renderCmSalesCsvList();
+        }
+
+        function removeCmSalesCode(idx) {
+            cmState.sales_is_custom = true;
+            cmState.sales_codes.splice(idx, 1);
+            renderCmSalesChips();
+            renderCmSalesCsvList();
+        }
+
+        function addCmSalesManual() {
+            const inp = document.getElementById('cm_sales_add_input');
+            const parts = String(inp.value || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+            if (parts.length === 0) return;
+            cmState.sales_is_custom = true;
+            parts.forEach(p => {
+                if (!cmState.sales_codes.includes(p)) cmState.sales_codes.push(p);
+            });
+            inp.value = '';
+            renderCmSalesChips();
+            renderCmSalesCsvList();
+        }
+
+        function renderCmSalesCsvList() {
+            const box = document.getElementById('cm_sales_csv_list');
+            const cfg = adminConfigCache || {};
+            const salesInv = cfg.sales_inventory || {};
+            const entries = Object.entries(salesInv);
+            if (entries.length === 0) {
+                cmSalesCsvItems = [];
+                box.innerHTML = '<div class="py-3 text-center text-[11px] text-slate-400">업로드된 쿠팡외 매출 CSV가 없습니다. 위 입력란에서 직접 코드를 추가할 수 있습니다.</div>';
+                return;
+            }
+            const idxData = buildMappingOwnershipIndex(cfg);
+            const q = String((document.getElementById('cm_sales_csv_search') || {}).value || '').toLowerCase().trim();
+
+            cmSalesCsvItems = entries
+                .map(([code, sdata]) => {
+                    const up = String(code || '').trim().toUpperCase();
+                    const sNames = (sdata.sample_names || []).join(', ');
+                    const malls = (sdata.malls || []).join(', ');
+                    return {
+                        code: up,
+                        total_7d: sdata.total_7d || 0,
+                        total_30d: sdata.total_30d || 0,
+                        sampleNames: sNames,
+                        malls,
+                        owners: (idxData.salesOwners[up] || []).filter(o => o.seller_code !== cmState.seller_code),
+                        b2bBase: idxData.b2bSalesOwners[up] || '',
+                        searchBlob: `${up} ${sNames} ${malls}`.toLowerCase()
+                    };
+                })
+                .filter(it => !q || it.searchBlob.includes(q))
+                .sort((a, b) => {
+                    const aSel = cmState.sales_codes.includes(a.code) ? 0 : 1;
+                    const bSel = cmState.sales_codes.includes(b.code) ? 0 : 1;
+                    return aSel !== bSel ? aSel - bSel : a.code.localeCompare(b.code);
+                });
+
+            if (cmSalesCsvItems.length === 0) {
+                box.innerHTML = '<div class="py-3 text-center text-[11px] text-slate-400">검색어와 일치하는 매출 코드가 없습니다.</div>';
+                return;
+            }
+
+            box.innerHTML = cmSalesCsvItems.slice(0, 120).map((it, idx) => {
+                const isSelected = cmState.sales_codes.includes(it.code);
+                let ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px]">미매핑</span>';
+                if (isSelected) {
+                    ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[10px]">연결됨</span>';
+                } else if (it.b2bBase) {
+                    ownerBadge = `<span class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 text-[10px]">B2B→${escapeHtml(it.b2bBase)}</span>`;
+                } else if (it.owners.length > 0) {
+                    ownerBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px]">타상품: ${escapeHtml(it.owners.map(o => o.seller_code).join(', '))}</span>`;
+                }
+                const btnHtml = isSelected
+                    ? `<button type="button" onclick="toggleCmSalesCsvItem(${idx})" class="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[10px]">해제</button>`
+                    : `<button type="button" onclick="toggleCmSalesCsvItem(${idx})" class="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px]">+ 연결</button>`;
+                return `
+                    <div class="py-1.5 px-1 flex items-center justify-between gap-2 hover:bg-slate-50">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-1.5">
+                                <span class="font-mono font-bold text-slate-900">${escapeHtml(it.code)}</span>
+                                ${ownerBadge}
+                                <span class="text-[10px] text-slate-500 font-mono">7일 ${it.total_7d} / 30일 ${it.total_30d}</span>
+                            </div>
+                            <div class="text-[10px] text-slate-500 truncate">${escapeHtml(it.sampleNames || '상품명 미기재')}${it.malls ? ' · ' + escapeHtml(it.malls) : ''}</div>
+                        </div>
+                        <div class="shrink-0">${btnHtml}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleCmSalesCsvItem(idx) {
+            const it = cmSalesCsvItems[idx];
+            if (!it) return;
+            cmState.sales_is_custom = true;
+            const pos = cmState.sales_codes.indexOf(it.code);
+            if (pos >= 0) cmState.sales_codes.splice(pos, 1);
+            else cmState.sales_codes.push(it.code);
+            renderCmSalesChips();
+            renderCmSalesCsvList();
+        }
+
+        // --- ② 개미창고 (상품코드 + 옵션명) ---
+        function renderCmGaemiSection() {
+            renderCmGaemiLegacyBanner();
+            renderCmGaemiChips();
+            renderCmGaemiCsvList();
+        }
+
+        function renderCmGaemiLegacyBanner() {
+            const banner = document.getElementById('cm_gaemi_legacy_banner');
+            if (!banner) return;
+            const showLegacy = cmState.gaemi_mappings.length === 0 && !cmState.clear_legacy_gaemi && cmState.legacy_gaemi_codes.length > 0;
+            if (!showLegacy) {
+                banner.classList.add('hidden');
+                return;
+            }
+            const cfg = adminConfigCache || {};
+            const grouped = getGroupedGaemiEntries(cfg);
+            const legRes = getMatchedGaemiEntriesForMaster({
+                gaemi_codes: cmState.legacy_gaemi_codes,
+                gaemi_filter: cmState.legacy_gaemi_filter
+            }, grouped);
+            const legTxt = `${cmState.legacy_gaemi_codes.join(', ')}${cmState.legacy_gaemi_filter ? ` (키워드: '${cmState.legacy_gaemi_filter}')` : ''}`;
+            const hasCsv = grouped.length > 0;
+            banner.classList.remove('hidden');
+
+            if (hasCsv && legRes.matched.length === 0) {
+                banner.className = 'rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-[11px] text-rose-900 space-y-1.5';
+                banner.innerHTML = `
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <span>⚠️ 현재 구방식 규칙 <strong>[${escapeHtml(legTxt)}]</strong>이 업로드된 개미 CSV와 <strong>0건 일치</strong>합니다. 아래 목록에서 정확한 '상품코드 + 옵션명'을 선택하세요.</span>
+                        <button type="button" onclick="clearLegacyGaemiInCm()" class="px-2 py-0.5 bg-white border border-rose-300 text-rose-700 rounded font-bold text-[10px]">구방식 규칙 비우기</button>
+                    </div>
+                `;
+            } else {
+                banner.className = 'rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-950 space-y-1.5';
+                banner.innerHTML = `
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <span>ℹ️ 현재 구방식 규칙 <strong>[${escapeHtml(legTxt)}]</strong> 사용 중 (CSV 일치 ${legRes.matched.length}건).</span>
+                        <div class="flex items-center gap-1.5">
+                            ${legRes.matched.length > 0 ? `<button type="button" onclick="importLegacyGaemiMatchesToCm()" class="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-[10px]">✨ 현재 일치 ${legRes.matched.length}건 정확 매핑으로 가져오기</button>` : ''}
+                            <button type="button" onclick="clearLegacyGaemiInCm()" class="px-2 py-0.5 bg-white border border-amber-300 text-slate-700 rounded font-bold text-[10px]">구방식 규칙 비우기</button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function importLegacyGaemiMatchesToCm() {
+            const grouped = getGroupedGaemiEntries(adminConfigCache || {});
+            const legRes = getMatchedGaemiEntriesForMaster({
+                gaemi_codes: cmState.legacy_gaemi_codes,
+                gaemi_filter: cmState.legacy_gaemi_filter
+            }, grouped);
+            legRes.matched.forEach(entry => {
+                const exists = cmState.gaemi_mappings.some(r =>
+                    r.gaemi_code.toUpperCase() === entry.gaemi_code.toUpperCase() && r.option_name === entry.option_name
+                );
+                if (!exists) {
+                    cmState.gaemi_mappings.push({ gaemi_code: entry.gaemi_code, option_name: entry.option_name });
+                }
+            });
+            renderCmGaemiSection();
+        }
+
+        function clearLegacyGaemiInCm() {
+            cmState.clear_legacy_gaemi = true;
+            cmState.legacy_gaemi_codes = [];
+            cmState.legacy_gaemi_filter = '';
+            renderCmGaemiSection();
+        }
+
+        function renderCmGaemiChips() {
+            const box = document.getElementById('cm_gaemi_chips');
+            const grouped = getGroupedGaemiEntries(adminConfigCache || {});
+            if (cmState.gaemi_mappings.length === 0) {
+                box.innerHTML = '<span class="text-[11px] text-slate-500">지정된 정확 매핑(상품코드+옵션명)이 없습니다. 아래에서 추가하거나 CSV 목록에서 선택하세요.</span>';
+                return;
+            }
+            box.innerHTML = cmState.gaemi_mappings.map((rule, idx) => {
+                const rc = rule.gaemi_code;
+                const ro = rule.option_name;
+                const matches = grouped.filter(e =>
+                    e.gaemi_code.toUpperCase() === rc.toUpperCase() && (ro === '' || ro === '*' || e.option_name === ro)
+                );
+                const sumStock = matches.reduce((a, b) => a + b.stock, 0);
+                const optLabel = ro ? ro : '* (해당 코드 전체 옵션)';
+                const stockLabel = grouped.length > 0 ? ` · ${sumStock.toLocaleString()}개` : '';
+                return `
+                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-amber-950 text-[11px] font-bold shadow-xs">
+                        <span class="font-mono">${escapeHtml(rc)}</span>
+                        <span class="text-slate-400">|</span>
+                        <span>${escapeHtml(optLabel)}</span>
+                        <span class="font-mono font-normal text-[10px] text-amber-700">${stockLabel}</span>
+                        <button type="button" onclick="removeCmGaemiRule(${idx})" class="ml-1 text-rose-500 hover:text-rose-700 font-black" title="제거">&times;</button>
+                    </span>
+                `;
+            }).join('');
+        }
+
+        function clearCmGaemiAll() {
+            cmState.gaemi_mappings = [];
+            cmState.clear_legacy_gaemi = true;
+            renderCmGaemiSection();
+        }
+
+        function removeCmGaemiRule(idx) {
+            cmState.gaemi_mappings.splice(idx, 1);
+            if (cmState.gaemi_mappings.length === 0) {
+                cmState.clear_legacy_gaemi = true;
+            }
+            renderCmGaemiSection();
+        }
+
+        function addCmGaemiManual() {
+            const codeEl = document.getElementById('cm_gaemi_code_input');
+            const optEl = document.getElementById('cm_gaemi_opt_input');
+            const gCode = String(codeEl.value || '').trim();
+            const optName = String(optEl.value || '').trim();
+            if (!gCode) {
+                alert('개미 상품코드를 입력해주세요.');
+                codeEl.focus();
+                return;
+            }
+            const exists = cmState.gaemi_mappings.some(r =>
+                r.gaemi_code.toUpperCase() === gCode.toUpperCase() && r.option_name === optName
+            );
+            if (!exists) {
+                cmState.gaemi_mappings.push({ gaemi_code: gCode, option_name: optName });
+            }
+            cmState.clear_legacy_gaemi = false;
+            codeEl.value = '';
+            optEl.value = '';
+            renderCmGaemiSection();
+        }
+
+        function renderCmGaemiCsvList() {
+            const box = document.getElementById('cm_gaemi_csv_list');
+            const cfg = adminConfigCache || {};
+            const grouped = getGroupedGaemiEntries(cfg);
+            if (grouped.length === 0) {
+                cmGaemiCsvItems = [];
+                box.innerHTML = '<div class="py-3 text-center text-[11px] text-slate-400">업로드된 개미창고 CSV가 없습니다. 위 입력란에서 직접 추가할 수 있습니다.</div>';
+                return;
+            }
+            const idxData = buildMappingOwnershipIndex(cfg);
+            const q = String((document.getElementById('cm_gaemi_csv_search') || {}).value || '').toLowerCase().trim();
+
+            const isSelectedEntry = (entry) => cmState.gaemi_mappings.some(r =>
+                r.gaemi_code.toUpperCase() === entry.gaemi_code.toUpperCase() &&
+                (r.option_name === entry.option_name || r.option_name === '' || r.option_name === '*')
+            );
+
+            cmGaemiCsvItems = grouped
+                .map(entry => ({
+                    gaemi_code: entry.gaemi_code,
+                    option_name: entry.option_name,
+                    product_name: entry.product_name,
+                    stock: entry.stock,
+                    lot_count: entry.lot_count,
+                    owners: (idxData.gaemiOwners[entry.key] || []).filter(o => o.seller_code !== cmState.seller_code),
+                    searchBlob: `${entry.gaemi_code} ${entry.option_name} ${entry.product_name}`.toLowerCase()
+                }))
+                .filter(it => !q || it.searchBlob.includes(q))
+                .sort((a, b) => {
+                    const aSel = isSelectedEntry(a) ? 0 : 1;
+                    const bSel = isSelectedEntry(b) ? 0 : 1;
+                    if (aSel !== bSel) return aSel - bSel;
+                    const cCmp = a.gaemi_code.localeCompare(b.gaemi_code);
+                    return cCmp !== 0 ? cCmp : a.option_name.localeCompare(b.option_name);
+                });
+
+            if (cmGaemiCsvItems.length === 0) {
+                box.innerHTML = '<div class="py-3 text-center text-[11px] text-slate-400">검색어와 일치하는 개미창고 품목이 없습니다.</div>';
+                return;
+            }
+
+            box.innerHTML = cmGaemiCsvItems.slice(0, 120).map((it, idx) => {
+                const exactIdx = cmState.gaemi_mappings.findIndex(r =>
+                    r.gaemi_code.toUpperCase() === it.gaemi_code.toUpperCase() && r.option_name === it.option_name
+                );
+                const wildMatch = exactIdx < 0 && isSelectedEntry(it);
+                let ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px]">미매핑</span>';
+                if (exactIdx >= 0 || wildMatch) {
+                    ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[10px]">연결됨</span>';
+                } else if (it.owners.length > 0) {
+                    ownerBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px]">타상품: ${escapeHtml(it.owners.map(o => o.seller_code).join(', '))}</span>`;
+                }
+                const btnHtml = (exactIdx >= 0)
+                    ? `<button type="button" onclick="toggleCmGaemiCsvItem(${idx})" class="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[10px]">해제</button>`
+                    : (wildMatch
+                        ? '<span class="text-[10px] text-emerald-700 font-semibold">전체규칙 포함</span>'
+                        : `<button type="button" onclick="toggleCmGaemiCsvItem(${idx})" class="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px]">+ 연결</button>`);
+                return `
+                    <div class="py-1.5 px-1 flex items-center justify-between gap-2 hover:bg-slate-50">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex flex-wrap items-center gap-1.5">
+                                <span class="font-mono font-bold text-slate-900">${escapeHtml(it.gaemi_code)}</span>
+                                <span class="font-bold text-amber-950 bg-amber-100/70 px-1.5 rounded text-[10px]">${escapeHtml(it.option_name || '(옵션명 없음)')}</span>
+                                ${ownerBadge}
+                                <span class="text-[10px] text-slate-600 font-mono">재고 ${it.stock.toLocaleString()}개${it.lot_count > 1 ? ` (${it.lot_count}로트)` : ''}</span>
+                            </div>
+                            <div class="text-[10px] text-slate-500 truncate">${escapeHtml(it.product_name || '상품명 미기재')}</div>
+                        </div>
+                        <div class="shrink-0">${btnHtml}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleCmGaemiCsvItem(idx) {
+            const it = cmGaemiCsvItems[idx];
+            if (!it) return;
+            const pos = cmState.gaemi_mappings.findIndex(r =>
+                r.gaemi_code.toUpperCase() === it.gaemi_code.toUpperCase() && r.option_name === it.option_name
+            );
+            if (pos >= 0) {
+                cmState.gaemi_mappings.splice(pos, 1);
+                if (cmState.gaemi_mappings.length === 0) cmState.clear_legacy_gaemi = true;
+            } else {
+                cmState.gaemi_mappings.push({ gaemi_code: it.gaemi_code, option_name: it.option_name });
+                cmState.clear_legacy_gaemi = false;
+            }
+            renderCmGaemiSection();
+        }
+
+        // --- ③ 쿠팡 재고건전성 (쿠팡 옵션 ID) ---
+        function renderCmCoupangRows() {
+            const box = document.getElementById('cm_coupang_rows');
+            const coupangInv = (adminConfigCache && adminConfigCache.coupang_inventory) || {};
+            if (cmState.options.length === 0) {
+                box.innerHTML = '<div class="text-[11px] text-slate-500 bg-white border border-blue-200 rounded-lg p-2.5">연결된 쿠팡 옵션 ID가 없습니다. 아래에서 직접 입력하거나 CSV 목록에서 추가하세요.</div>';
+                return;
+            }
+            box.innerHTML = cmState.options.map((opt, idx) => {
+                const cd = coupangInv[opt.id];
+                const csvInfo = cd
+                    ? `현재 ${cd.stock || 0}세트 · 7일출고 ${cd.sales_7d || 0}세트`
+                    : 'CSV 미등록';
+                return `
+                    <div class="flex flex-wrap items-center gap-2 bg-white border border-blue-200 rounded-lg p-2">
+                        <span class="font-mono font-bold text-blue-950 w-32 truncate" title="${escapeHtml(opt.id)}">${escapeHtml(opt.id)}</span>
+                        <div class="flex items-center space-x-1">
+                            <input type="number" min="1" value="${opt.bundle || 1}" oninput="cmState.options[${idx}].bundle = Math.max(1, parseInt(this.value || '1', 10) || 1)" class="w-16 px-2 py-1 border border-slate-300 rounded font-mono text-[11px] text-right font-bold">
+                            <span class="text-[11px] text-slate-500">개입</span>
+                        </div>
+                        <input type="text" value="${escapeHtml(opt.name || '')}" oninput="cmState.options[${idx}].name = this.value" placeholder="옵션명" class="flex-1 min-w-[120px] px-2.5 py-1 border border-slate-300 rounded text-[11px]">
+                        <span class="text-[10px] font-mono text-slate-500 shrink-0">${csvInfo}</span>
+                        <button type="button" onclick="removeCmCoupangRow(${idx})" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-bold">삭제</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function clearCmCoupangAll() {
+            cmState.options = [];
+            renderCmCoupangRows();
+            renderCmCoupangCsvList();
+        }
+
+        function removeCmCoupangRow(idx) {
+            cmState.options.splice(idx, 1);
+            renderCmCoupangRows();
+            renderCmCoupangCsvList();
+        }
+
+        function addCmCoupangManual() {
+            const idEl = document.getElementById('cm_coupang_id_input');
+            const bEl = document.getElementById('cm_coupang_bundle_input');
+            const nameEl = document.getElementById('cm_coupang_name_input');
+            const oid = String(idEl.value || '').trim();
+            if (!oid) {
+                alert('쿠팡 옵션 ID를 입력해주세요.');
+                idEl.focus();
+                return;
+            }
+            const bundle = Math.max(1, parseInt(bEl.value || '1', 10) || 1);
+            const oname = String(nameEl.value || '').trim() || `${bundle}개`;
+            if (!cmState.options.some(o => o.id === oid)) {
+                cmState.options.push({ id: oid, bundle, name: oname });
+            }
+            idEl.value = '';
+            bEl.value = '1';
+            nameEl.value = '';
+            renderCmCoupangRows();
+            renderCmCoupangCsvList();
+        }
+
+        function renderCmCoupangCsvList() {
+            const box = document.getElementById('cm_coupang_csv_list');
+            const cfg = adminConfigCache || {};
+            const coupangInv = cfg.coupang_inventory || {};
+            const entries = Object.entries(coupangInv);
+            if (entries.length === 0) {
+                cmCoupangCsvItems = [];
+                box.innerHTML = '<div class="py-3 text-center text-[11px] text-slate-400">업로드된 쿠팡 재고건전성 CSV가 없습니다. 위 입력란에서 직접 추가할 수 있습니다.</div>';
+                return;
+            }
+            const idxData = buildMappingOwnershipIndex(cfg);
+            const q = String((document.getElementById('cm_coupang_csv_search') || {}).value || '').toLowerCase().trim();
+
+            cmCoupangCsvItems = entries
+                .map(([oid, cdata]) => {
+                    const oidStr = String(oid || '').trim();
+                    const optLabel = String(cdata.option_name || '').trim();
+                    const prodName = String(cdata.product_name || '').trim();
+                    return {
+                        id: oidStr,
+                        option_name: optLabel,
+                        product_name: prodName,
+                        stock: parseInt(cdata.stock || 0, 10) || 0,
+                        sales_7d: parseInt(cdata.sales_7d || 0, 10) || 0,
+                        guessedBundle: guessCoupangBundle(optLabel || prodName),
+                        owners: (idxData.coupangOwners[oidStr] || []).filter(o => o.seller_code !== cmState.seller_code),
+                        searchBlob: `${oidStr} ${optLabel} ${prodName}`.toLowerCase()
+                    };
+                })
+                .filter(it => !q || it.searchBlob.includes(q))
+                .sort((a, b) => {
+                    const aSel = cmState.options.some(o => o.id === a.id) ? 0 : 1;
+                    const bSel = cmState.options.some(o => o.id === b.id) ? 0 : 1;
+                    return aSel !== bSel ? aSel - bSel : a.id.localeCompare(b.id);
+                });
+
+            if (cmCoupangCsvItems.length === 0) {
+                box.innerHTML = '<div class="py-3 text-center text-[11px] text-slate-400">검색어와 일치하는 쿠팡 옵션이 없습니다.</div>';
+                return;
+            }
+
+            box.innerHTML = cmCoupangCsvItems.slice(0, 120).map((it, idx) => {
+                const isSelected = cmState.options.some(o => o.id === it.id);
+                let ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px]">미매핑</span>';
+                if (isSelected) {
+                    ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[10px]">연결됨</span>';
+                } else if (it.owners.length > 0) {
+                    ownerBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px]">타상품: ${escapeHtml(it.owners.map(o => o.seller_code).join(', '))}</span>`;
+                }
+                const btnHtml = isSelected
+                    ? `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[10px]">해제</button>`
+                    : `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-bold text-[10px]">+ 연결 (${it.guessedBundle}개입)</button>`;
+                return `
+                    <div class="py-1.5 px-1 flex items-center justify-between gap-2 hover:bg-slate-50">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex flex-wrap items-center gap-1.5">
+                                <span class="font-mono font-bold text-slate-900">${escapeHtml(it.id)}</span>
+                                <span class="font-bold text-blue-950 bg-blue-100/70 px-1.5 rounded text-[10px]">${escapeHtml(it.option_name || '옵션명 없음')}</span>
+                                ${ownerBadge}
+                                <span class="text-[10px] text-slate-500 font-mono">재고 ${it.stock}세트 · 7일출고 ${it.sales_7d}</span>
+                            </div>
+                            <div class="text-[10px] text-slate-500 truncate">${escapeHtml(it.product_name || '상품명 미기재')}</div>
+                        </div>
+                        <div class="shrink-0">${btnHtml}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleCmCoupangCsvItem(idx) {
+            const it = cmCoupangCsvItems[idx];
+            if (!it) return;
+            const pos = cmState.options.findIndex(o => o.id === it.id);
+            if (pos >= 0) {
+                cmState.options.splice(pos, 1);
+            } else {
+                cmState.options.push({
+                    id: it.id,
+                    bundle: it.guessedBundle || 1,
+                    name: it.option_name || `${it.guessedBundle || 1}개`
+                });
+            }
+            renderCmCoupangRows();
+            renderCmCoupangCsvList();
+        }
+
+        async function saveCodeMappingModal() {
+            const payload = {
+                id: cmState.id,
+                seller_code: cmState.seller_code,
+                sales_codes: cmState.sales_is_custom ? cmState.sales_codes : null,
+                gaemi_mappings: cmState.gaemi_mappings,
+                clear_legacy_gaemi: cmState.clear_legacy_gaemi,
+                options: cmState.options.filter(o => o.id).map(o => ({
+                    id: o.id,
+                    bundle: Math.max(1, parseInt(o.bundle || 1, 10) || 1),
+                    name: String(o.name || '').trim() || `${o.bundle || 1}개`
+                }))
+            };
+
+            try {
+                const res = await adminFetch('/api/admin/product/mappings/save', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    alert(json.message || '코드 매핑 저장 실패');
+                    return;
+                }
+                closeCodeMappingModal();
+                await ensureAdminConfig();
+                await fetchSummary();
+                syncEditModalFromSavedProduct(json.product);
+                const centerOpen = !document.getElementById('adminCenterModal').classList.contains('hidden');
+                if (centerOpen) {
+                    renderAdminCenterTabs();
+                    if (activeAdminTab === 'mapping') {
+                        showAcMapToast('✅ ' + json.message);
+                    }
+                } else {
+                    alert('✅ ' + json.message);
+                }
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('코드 매핑 저장 오류: ' + err.message);
             }
         }
 

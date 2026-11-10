@@ -128,6 +128,7 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         for ep, method in [
             ("/api/admin/config", "GET"),
             ("/api/admin/product/save", "POST"),
+            ("/api/admin/product/mappings/save", "POST"),
             ("/api/admin/product/delete", "POST"),
             ("/api/admin/products/bulk-save", "POST"),
             ("/api/admin/b2b-mappings/save", "POST"),
@@ -507,6 +508,222 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         self.assertEqual(imp_res.status_code, 200)
         self.assertNotEqual(app_module.app_state["master_products"][0].get("note", ""), "부팅 시 Drive 자동 복원 성공!")
         print("OK: [Admin Test 7] Google Drive 브리지 동기화/복원/부팅복원(Mock) 및 JSON 백업 내보내기/복원 검증 완료")
+
+    def test_08_code_mapping_gaemi_exact_option_and_fifo(self):
+        """개미창고 상품코드+옵션명 수동 정확 매핑(부분일치 배제, 다중 로트 합산, 대소문자/와일드카드, FIFO 차감) 검증"""
+        headers = self._login("1500")
+        with open("개미창고_샘플.csv", encoding="utf-8") as f:
+            gaemi_rows = list(csv.reader(f))
+        self.client.post("/api/upload-file-data", json={"source": "gaemi", "rows": gaemi_rows})
+
+        # 1. PJ1491144 '정제 1L' 단독 매핑 -> '정제 1L-1'(1080개)가 섞이지 않고 정확히 982개만 매칭되어야 함
+        r1 = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20EK02",
+            "gaemi_mappings": [
+                {"gaemi_code": "PJ1491144", "option_name": "정제 1L"}
+            ]
+        })
+        self.assertEqual(r1.status_code, 200)
+        s1 = json.loads(self.client.get("/api/summary").data)
+        m_ek02 = next(m for m in s1["masters"] if m["seller_code"] == "20EK02")
+        self.assertEqual(m_ek02["gaemi_total"], 982)
+        self.assertEqual(len(m_ek02["csv_gaemi_lots"]), 1)
+        self.assertEqual(m_ek02["csv_gaemi_lots"][0]["option_name"], "정제 1L")
+
+        # 2. PJ1489544 '허니 500ml' 단독 매핑 vs '허니 크랜베리 500ml' 분리 확인
+        r2 = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20DC02",
+            "gaemi_mappings": [
+                {"gaemi_code": "PJ1489544", "option_name": "허니 500ml"}
+            ]
+        })
+        self.assertEqual(r2.status_code, 200)
+        s2 = json.loads(self.client.get("/api/summary").data)
+        m_dc02 = next(m for m in s2["masters"] if m["seller_code"] == "20DC02")
+        self.assertEqual(m_dc02["gaemi_total"], 16)
+        self.assertEqual(len(m_dc02["csv_gaemi_lots"]), 1)
+
+        # 3. 다중 등록일 로트 (PJ1489503 + '500ml' 2건) 대소문자 무시 매핑 및 수동 FIFO 자동 차감 연계
+        r3 = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20EO02",
+            "gaemi_mappings": [
+                {"gaemi_code": "pj1489503", "option_name": "500ml"}
+            ]
+        })
+        self.assertEqual(r3.status_code, 200)
+        s3 = json.loads(self.client.get("/api/summary").data)
+        m_eo02 = next(m for m in s3["masters"] if m["seller_code"] == "20EO02")
+        self.assertEqual(m_eo02["gaemi_total"], 1208)
+        self.assertEqual(len(m_eo02["csv_gaemi_lots"]), 2)
+
+        # 수동 로트(L1:500, L2:708) 등록 후 새 개미 CSV(1208 -> 908) 업로드 시 L1 FIFO -300 차감 확인
+        self.client.post("/api/admin/product/save", headers=headers, json={
+            "id": m_eo02["id"],
+            "seller_code": "20EO02",
+            "name": m_eo02["name"],
+            "manual_lots": [
+                {"lot_id": "ML1", "label": "선입분", "expiry_date": "2026-12-01", "qty": 500},
+                {"lot_id": "ML2", "label": "후입분", "expiry_date": "2027-08-01", "qty": 708}
+            ]
+        })
+        rows_reduced = [
+            ["번호", "상품코드", "상품명", "옵션명", "상태", "입고량", "출고량", "재고량", "등록일"],
+            ["1", "PJ1489503", "엘레올로지 500ml", "500ml", "입고완료", "2160", "1252", "908", "2026-09-15 16:31:50"]
+        ]
+        self.client.post("/api/upload-file-data", json={"source": "gaemi", "rows": rows_reduced})
+        s4 = json.loads(self.client.get("/api/summary").data)
+        m_eo02_after = next(m for m in s4["masters"] if m["seller_code"] == "20EO02")
+        lmap = {l["lot_id"]: l["stock"] for l in m_eo02_after["gaemi_lots"]}
+        self.assertEqual(lmap["ML1"], 200)
+        self.assertEqual(lmap["ML2"], 708)
+
+        # 4. 와일드카드 '*' 매핑: PJ1491144 전체 옵션(982+1080+0+1788 = 3850)
+        r4 = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20EK02",
+            "gaemi_mappings": [
+                {"gaemi_code": "PJ1491144", "option_name": "*"}
+            ]
+        })
+        self.assertEqual(r4.status_code, 200)
+        # Re-upload full gaemi CSV first since rows_reduced replaced gaemi_inventory
+        self.client.post("/api/upload-file-data", json={"source": "gaemi", "rows": gaemi_rows})
+        s5 = json.loads(self.client.get("/api/summary").data)
+        m_ek02_wild = next(m for m in s5["masters"] if m["seller_code"] == "20EK02")
+        self.assertEqual(m_ek02_wild["gaemi_total"], 3850)
+        print("OK: [Admin Test 8] 개미창고 상품코드+옵션명 정확 매핑(부분일치 배제, 다중로트, FIFO 차감, 와일드카드) 검증 완료")
+
+    def test_09_code_mapping_sales_codes_and_header_variants(self):
+        """쿠팡외 매출정보 상품관리코드 수동 다중매핑, '상품관리코드' 헤더 인식, 빈 목록/복원, B2B S코드 비중복 검증"""
+        headers = self._login("1500")
+        now_day1 = (datetime.now()).strftime("%Y-%m-%d 10:00:00")
+        now_day2 = (datetime.now()).strftime("%Y-%m-%d 09:00:00")
+
+        # '상품관리코드' 헤더명 변형 지원 확인
+        sales_rows = [
+            ["주문일", "묶음번호", "쇼핑몰", "온라인상품명", "주문수량", "상품관리코드"],
+            [now_day2, "B10", "스마트스토어", "데체코 올리브오일(구)", 4, "ALT_DC02_A"],
+            [now_day1, "B11", "자사몰", "데체코 올리브오일(신)", 6, "alt_dc02_b"],
+            [now_day1, "B12", "카카오", "데체코 기본코드", 10, "20DC02"],
+            [now_day1, "B13", "스마트스토어", "B2B 세트", 2, "S100005"]
+        ]
+        up_res = self.client.post("/api/upload-file-data", json={"source": "sales", "rows": sales_rows})
+        self.assertEqual(up_res.status_code, 200)
+
+        # 1. 커스텀 sales_codes = ['ALT_DC02_A', 'ALT_DC02_B'] (기본 20DC02 제외)
+        r1 = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20DC02",
+            "sales_codes": ["alt_dc02_a", "ALT_DC02_B"]
+        })
+        self.assertEqual(r1.status_code, 200)
+        s1 = json.loads(self.client.get("/api/summary").data)
+        m1 = next(m for m in s1["masters"] if m["seller_code"] == "20DC02")
+        self.assertEqual(m1["sales_codes"], ["ALT_DC02_A", "ALT_DC02_B"])
+        self.assertTrue(m1["has_custom_sales_codes"])
+        self.assertEqual(m1["other_sales_7d"], 10)  # 4 + 6 (20DC02 10개 미포함)
+        self.assertEqual(m1["recent_orders"][0]["date"], now_day1)
+
+        # 2. 명시적 빈 목록([]) 설정 시 매출 0건
+        r2 = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20DC02",
+            "sales_codes": []
+        })
+        self.assertEqual(r2.status_code, 200)
+        s2 = json.loads(self.client.get("/api/summary").data)
+        m2 = next(m for m in s2["masters"] if m["seller_code"] == "20DC02")
+        self.assertEqual(m2["sales_codes"], [])
+        self.assertTrue(m2["has_custom_sales_codes"])
+        self.assertEqual(m2["other_sales_7d"], 0)
+
+        # 3. 기본 복원(sales_codes: None) 시 대표코드 20DC02 자동 복원
+        r3 = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20DC02",
+            "sales_codes": None
+        })
+        self.assertEqual(r3.status_code, 200)
+        s3 = json.loads(self.client.get("/api/summary").data)
+        m3 = next(m for m in s3["masters"] if m["seller_code"] == "20DC02")
+        self.assertFalse(m3["has_custom_sales_codes"])
+        self.assertEqual(m3["sales_codes"], ["20DC02"])
+        self.assertEqual(m3["other_sales_7d"], 10)
+
+        # 4. B2B 매핑 S100005(-> 10GL02, x12)가 이미 있는 상태에서 10GL02의 sales_codes에 S100005를 넣어도 중복 합산되지 않음
+        self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "10GL02",
+            "sales_codes": ["10GL02", "S100005"]
+        })
+        s4 = json.loads(self.client.get("/api/summary").data)
+        m_gl02 = next(m for m in s4["masters"] if m["seller_code"] == "10GL02")
+        self.assertEqual(m_gl02["other_sales_7d"], 24)  # S100005 2 * 12 = 24 (not 26!)
+        print("OK: [Admin Test 9] 쿠팡외 매출 상품관리코드 다중매핑/해제/기본복원/헤더인식/B2B 비중복 검증 완료")
+
+    def test_10_mappings_save_isolates_other_fields_and_config_sales_inventory(self):
+        """코드매핑 전용 저장 시 상품명·리드타임·입고예정·수동로트 보존, 구방식 초기화, admin/config sales_inventory 요약 확인"""
+        headers = self._login("1500")
+
+        # 1. 기준정보 선저장
+        self.client.post("/api/admin/product/save", headers=headers, json={
+            "seller_code": "20TZ03",
+            "name": "[고정명] 테라찌노 유기농 250ml",
+            "product_type": "수입",
+            "note": "유지되어야 할 메모",
+            "lead_time_days": 88,
+            "in_transit_qty": 321,
+            "expected_arrival_date": "2026-12-31",
+            "gaemi_codes": ["PJ1489272"],
+            "gaemi_filter": "250",
+            "manual_lots": [
+                {"lot_id": "TZ_L1", "label": "1차", "expiry_date": "2027-05-01", "qty": 50}
+            ]
+        })
+
+        # 2. 코드매핑만 수정 (쿠팡 옵션 + 매출코드 + 개미 매핑)
+        res = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20TZ03",
+            "sales_codes": ["20TZ03", "TZ03_EVENT"],
+            "gaemi_mappings": [
+                {"gaemi_code": "PJ1489272", "option_name": "라노 500ml"}
+            ],
+            "options": [
+                {"id": "OPT_TZ_250_1", "bundle": 2, "name": "2개 세트"}
+            ]
+        })
+        self.assertEqual(res.status_code, 200)
+        saved = json.loads(res.data)["product"]
+        self.assertEqual(saved["name"], "[고정명] 테라찌노 유기농 250ml")
+        self.assertEqual(saved["note"], "유지되어야 할 메모")
+        self.assertEqual(saved["lead_time_days"], 88)
+        self.assertEqual(saved["in_transit_qty"], 321)
+        self.assertEqual(saved["expected_arrival_date"], "2026-12-31")
+        self.assertEqual(len(saved["manual_lots"]), 1)
+        self.assertEqual(saved["sales_codes"], ["20TZ03", "TZ03_EVENT"])
+        self.assertEqual(saved["gaemi_mappings"], [{"gaemi_code": "PJ1489272", "option_name": "라노 500ml"}])
+        self.assertEqual(saved["gaemi_filter"], "")
+        self.assertEqual(saved["options"], [{"id": "OPT_TZ_250_1", "bundle": 2, "name": "2개 세트"}])
+
+        # 3. clear_legacy_gaemi: True 로 개미 매핑 완전 비우기 시 구방식 Fallback 부활 안 함 확인
+        with open("개미창고_샘플.csv", encoding="utf-8") as f:
+            self.client.post("/api/upload-file-data", json={"source": "gaemi", "rows": list(csv.reader(f))})
+        res_clear = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20TZ03",
+            "gaemi_mappings": [],
+            "clear_legacy_gaemi": True
+        })
+        self.assertEqual(res_clear.status_code, 200)
+        cleared_prod = json.loads(res_clear.data)["product"]
+        self.assertEqual(cleared_prod["gaemi_codes"], [])
+        self.assertEqual(cleared_prod["gaemi_filter"], "")
+        self.assertEqual(cleared_prod["gaemi_mappings"], [])
+
+        # 4. /api/admin/config 에 sales_inventory 요약 필드 반환 검증
+        with open("매출정보_샘플.csv", encoding="utf-8") as f:
+            self.client.post("/api/upload-file-data", json={"source": "sales", "rows": list(csv.reader(f))})
+        cfg = json.loads(self.client.get("/api/admin/config", headers=headers).data)
+        self.assertIn("sales_inventory", cfg)
+        self.assertGreater(len(cfg["sales_inventory"]), 0)
+        first_sc = next(iter(cfg["sales_inventory"].values()))
+        for key in ("total_7d", "total_30d", "orders_count", "sample_names", "malls"):
+            self.assertIn(key, first_sc)
+        print("OK: [Admin Test 10] 코드매핑 단독저장 격리(기타 기준 보존), 구방식 초기화, config sales_inventory 요약 검증 완료")
 
 
 if __name__ == '__main__':
