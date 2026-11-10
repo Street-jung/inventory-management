@@ -26,8 +26,16 @@ import urllib.request
 import urllib.error
 import http.cookiejar
 from functools import wraps
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from flask import Flask, render_template_string, request, jsonify, Response, send_file
+
+KST = timezone(timedelta(hours=9))
+
+def now_kst():
+    return datetime.now(KST)
+
+def today_kst():
+    return now_kst().date()
 
 app = Flask(__name__)
 
@@ -122,8 +130,10 @@ app_state = {
     "gaemi_inventory": {},     # { code: [ { option_name, stock, reg_date, status, expiry_date, days_left }, ... ] }
     "coupang_inventory": {},   # { option_id: { stock, inbound, sales_7d, sales_30d, doc, name, opt_name } }
     "sales_inventory": {},     # { seller_code: { total_7d, orders: [ { date, qty, mall, name } ] } }
-    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-    "logs": [f"[{datetime.now().strftime('%H:%M:%S')}] 일쩜오도 재고 관리 시스템이 준비되었습니다."],
+    "last_updated": "",
+    "data_uploaded_at": "",
+    "upload_timestamps": {},   # { "gaemi": "YYYY-MM-DD HH:MM", "coupang": "...", "sales": "..." }
+    "logs": [f"[{now_kst().strftime('%H:%M:%S')}] 일쩜오도 재고 관리 시스템이 준비되었습니다."],
     "public_url": os.environ.get("RENDER_EXTERNAL_URL", "https://inventory-management-q7bp.onrender.com")
 }
 
@@ -220,7 +230,7 @@ def make_gaemi_lot_keys(g_code, item):
     return exact_key, opt_key
 
 def add_log(msg):
-    timestamp = datetime.now().strftime("%H:%M:%S")
+    timestamp = now_kst().strftime("%H:%M:%S")
     entry = f"[{timestamp}] {msg}"
     with data_lock:
         app_state["logs"].append(entry)
@@ -339,8 +349,10 @@ def build_state_snapshot():
             "gaemi_inventory": copy.deepcopy(app_state["gaemi_inventory"]),
             "coupang_inventory": copy.deepcopy(app_state["coupang_inventory"]),
             "sales_inventory": copy.deepcopy(app_state["sales_inventory"]),
-            "last_updated": app_state.get("last_updated", ""),
-            "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "last_updated": app_state.get("data_uploaded_at", ""),
+            "data_uploaded_at": app_state.get("data_uploaded_at", ""),
+            "upload_timestamps": copy.deepcopy(app_state.get("upload_timestamps", {})),
+            "saved_at": now_kst().strftime("%Y-%m-%d %H:%M:%S")
         }
 
 def _write_local_snapshot(snapshot):
@@ -369,10 +381,17 @@ def _apply_loaded_state(saved):
             app_state["coupang_inventory"] = saved["coupang_inventory"]
         if "sales_inventory" in saved and isinstance(saved["sales_inventory"], dict):
             app_state["sales_inventory"] = saved["sales_inventory"]
-        if saved.get("last_updated"):
-            app_state["last_updated"] = saved["last_updated"]
-        elif saved.get("saved_at"):
-            app_state["last_updated"] = str(saved["saved_at"])[:16]
+        if "data_uploaded_at" in saved:
+            du = str(saved.get("data_uploaded_at") or "").strip()
+            app_state["data_uploaded_at"] = du
+            app_state["last_updated"] = du
+        else:
+            app_state["data_uploaded_at"] = ""
+            app_state["last_updated"] = ""
+        if isinstance(saved.get("upload_timestamps"), dict):
+            app_state["upload_timestamps"] = dict(saved["upload_timestamps"])
+        else:
+            app_state["upload_timestamps"] = {}
     return True
 
 def sync_to_drive(wait=False):
@@ -392,7 +411,7 @@ def sync_to_drive(wait=False):
                 res = _call_gas_bridge("save", payload=snap, timeout=15)
                 if res.get("success"):
                     drive_sync_state["status"] = "synced"
-                    drive_sync_state["last_synced_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    drive_sync_state["last_synced_at"] = now_kst().strftime("%Y-%m-%d %H:%M:%S")
                     drive_sync_state["last_error"] = ""
                     if res.get("fileId"):
                         drive_sync_state["file_id"] = res["fileId"]
@@ -432,7 +451,7 @@ def pull_from_drive():
         if res.get("exists") and isinstance(res.get("data"), dict):
             _apply_loaded_state(res["data"])
             _write_local_snapshot(build_state_snapshot())
-            now_s = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            now_s = now_kst().strftime("%Y-%m-%d %H:%M:%S")
             drive_sync_state["status"] = "synced"
             drive_sync_state["last_loaded_at"] = now_s
             drive_sync_state["last_synced_at"] = now_s
@@ -519,7 +538,7 @@ def health_check():
         "service": "iljeomodo-inventory",
         "drive_configured": get_gas_config()["configured"],
         "drive_status": drive_sync_state.get("status", "disabled"),
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "timestamp": now_kst().strftime("%Y-%m-%d %H:%M:%S")
     }), 200
 
 # -------------------------------------------------------------
@@ -551,7 +570,7 @@ def parse_gaemi_rows(rows):
     col_reg = next((i for i, h in enumerate(headers) if "등록일" in h), 8)
 
     gaemi_dict = {}
-    today = date.today()
+    today = today_kst()
 
     for r in rows[header_idx + 1:]:
         if len(r) <= max(col_code, col_stock):
@@ -654,7 +673,7 @@ def parse_coupang_rows(rows):
             "sales_7d": sales7,
             "sales_30d": sales30,
             "doc": doc,
-            "updated_at": datetime.now().strftime("%m-%d %H:%M")
+            "updated_at": now_kst().strftime("%m-%d %H:%M")
         }
 
     return coupang_dict
@@ -739,7 +758,7 @@ def parse_sales_rows(rows):
         })
 
     # 최신 주문일 기준 최근 7일 컷오프 (기준 시점)
-    max_dt = max(valid_dates) if valid_dates else datetime.now()
+    max_dt = max(valid_dates) if valid_dates else now_kst().replace(tzinfo=None)
     cutoff_7d = max_dt - timedelta(days=7)
 
     sales_dict = {}
@@ -795,7 +814,8 @@ def get_summary():
         settings = copy.deepcopy(app_state.get("settings", DEFAULT_SETTINGS))
         logs = list(app_state["logs"])
         public_url = app_state["public_url"]
-        last_updated = app_state.get("last_updated", datetime.now().strftime("%Y-%m-%d %H:%M"))
+        last_updated = app_state.get("data_uploaded_at", "") or ""
+        upload_timestamps = copy.deepcopy(app_state.get("upload_timestamps", {}))
 
     base_to_shared_map = get_base_to_shared_map(b2b_mappings)
     default_import_lt = int(settings.get("default_import_lead_time", 110) or 110)
@@ -806,7 +826,7 @@ def get_summary():
 
     # 1차 패스: 기본 품목들의 실물 재고, 소비기한 로트 및 쿠팡/타채널 직접 판매량 계산
     base_calc_map = {}
-    today = date.today()
+    today = today_kst()
 
     for m in master_list:
         seller_code = m.get("seller_code", m.get("id", "")).strip()
@@ -1388,6 +1408,8 @@ def get_summary():
             "danger_count": urgent_order_count,
             "warning_count": order_prepare_count,
             "last_updated": last_updated,
+            "data_uploaded_at": last_updated,
+            "upload_timestamps": upload_timestamps,
             "has_gaemi_data": len(app_state["gaemi_inventory"]) > 0,
             "has_coupang_data": len(app_state["coupang_inventory"]) > 0,
             "has_sales_data": len(app_state["sales_inventory"]) > 0
@@ -1409,7 +1431,7 @@ def apply_fifo_deduction_on_gaemi_upload(old_gaemi, new_gaemi):
     개미창고 CSV 재업로드 시, 관리자가 수동 분할한 소비기한 로트(manual_lots)가 있는 품목에 대해
     이전 CSV 재고 대비 감소한 출고 수량만큼 가장 빠른 소비기한 로트부터 선입선출(FIFO) 자동 차감
     """
-    now_label = datetime.now().strftime("%m-%d %H:%M")
+    now_label = now_kst().strftime("%m-%d %H:%M")
     deducted_products = []
     for m in app_state.get("master_products", []):
         manual_lots = m.get("manual_lots")
@@ -1465,11 +1487,14 @@ def upload_file_data():
         parsed = parse_gaemi_rows(rows)
         if not parsed:
             return jsonify({"success": False, "message": "개미창고 파일 형식(헤더: 상품코드, 재고량 등)을 인식하지 못했습니다."}), 400
+        uploaded_at = now_kst().strftime("%Y-%m-%d %H:%M")
         with data_lock:
             old_gaemi = copy.deepcopy(app_state["gaemi_inventory"])
             deducted = apply_fifo_deduction_on_gaemi_upload(old_gaemi, parsed)
             app_state["gaemi_inventory"] = parsed
-            app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            app_state["data_uploaded_at"] = uploaded_at
+            app_state["last_updated"] = uploaded_at
+            app_state.setdefault("upload_timestamps", {})["gaemi"] = uploaded_at
         sync_res = save_state(sync_drive=True, wait_drive=False)
         total_items = sum(len(v) for v in parsed.values())
         fifo_msg = f" · FIFO 차감: {', '.join(deducted)}" if deducted else ""
@@ -1477,6 +1502,7 @@ def upload_file_data():
         return jsonify({
             "success": True,
             "message": f"개미창고 {total_items}개 품목 재고가 반영되었습니다. (관리자 설정 보존)",
+            "uploaded_at": uploaded_at,
             "fifo_deducted": deducted,
             "drive_sync": sync_res
         })
@@ -1485,24 +1511,40 @@ def upload_file_data():
         parsed = parse_coupang_rows(rows)
         if not parsed:
             return jsonify({"success": False, "message": "쿠팡 윙 파일 형식(헤더: 옵션 ID, 판매가능재고 등)을 인식하지 못했습니다."}), 400
+        uploaded_at = now_kst().strftime("%Y-%m-%d %H:%M")
         with data_lock:
             app_state["coupang_inventory"].update(parsed)
-            app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            app_state["data_uploaded_at"] = uploaded_at
+            app_state["last_updated"] = uploaded_at
+            app_state.setdefault("upload_timestamps", {})["coupang"] = uploaded_at
         sync_res = save_state(sync_drive=True, wait_drive=False)
         add_log(f"🚀 [쿠팡 윙] {len(parsed)}개 옵션 ID의 실시간 재고 및 판매량 데이터가 업데이트되었습니다!")
-        return jsonify({"success": True, "message": f"쿠팡 윙 {len(parsed)}개 옵션 데이터가 반영되었습니다.", "drive_sync": sync_res})
+        return jsonify({
+            "success": True,
+            "message": f"쿠팡 윙 {len(parsed)}개 옵션 데이터가 반영되었습니다.",
+            "uploaded_at": uploaded_at,
+            "drive_sync": sync_res
+        })
 
     elif source == "sales":
         parsed = parse_sales_rows(rows)
         if not parsed:
             return jsonify({"success": False, "message": "매출정보 파일 형식(헤더: 판매자관리코드, 주문수량 등)을 인식하지 못했습니다."}), 400
+        uploaded_at = now_kst().strftime("%Y-%m-%d %H:%M")
         with data_lock:
             app_state["sales_inventory"] = parsed
-            app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            app_state["data_uploaded_at"] = uploaded_at
+            app_state["last_updated"] = uploaded_at
+            app_state.setdefault("upload_timestamps", {})["sales"] = uploaded_at
         sync_res = save_state(sync_drive=True, wait_drive=False)
         total_qty = sum(v["total_7d"] for v in parsed.values())
         add_log(f"📈 [쿠팡외 통합 매출] {len(parsed)}개 상품코드(총 {total_qty}개 주문 출고) 데이터가 반영되었습니다!")
-        return jsonify({"success": True, "message": f"쿠팡외 매출 {len(parsed)}개 품목({total_qty}개 출고)이 반영되었습니다.", "drive_sync": sync_res})
+        return jsonify({
+            "success": True,
+            "message": f"쿠팡외 매출 {len(parsed)}개 품목({total_qty}개 출고)이 반영되었습니다.",
+            "uploaded_at": uploaded_at,
+            "drive_sync": sync_res
+        })
 
     return jsonify({"success": False, "message": "유효하지 않은 데이터 소스입니다."}), 400
 
@@ -1511,8 +1553,7 @@ def upload_file_data():
 def load_sample():
     """원클릭 샘플 데이터 로드 (관리자 PIN 인증 필요)"""
     loaded = []
-    with data_lock:
-        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    loaded_sources = []
 
     gaemi_sample = os.path.join(BASE_DIR, "개미창고_샘플.csv")
     if os.path.exists(gaemi_sample):
@@ -1526,6 +1567,7 @@ def load_sample():
                         apply_fifo_deduction_on_gaemi_upload(old_gaemi, parsed)
                         app_state["gaemi_inventory"] = parsed
                     loaded.append("개미창고")
+                    loaded_sources.append("gaemi")
         except Exception as e:
             add_log(f"개미창고 샘플 로드 오류: {e}")
 
@@ -1539,6 +1581,7 @@ def load_sample():
                     with data_lock:
                         app_state["coupang_inventory"] = parsed
                     loaded.append("쿠팡윙")
+                    loaded_sources.append("coupang")
         except Exception as e:
             add_log(f"쿠팡 샘플 로드 오류: {e}")
 
@@ -1552,8 +1595,18 @@ def load_sample():
                     with data_lock:
                         app_state["sales_inventory"] = parsed
                     loaded.append("쿠팡외매출")
+                    loaded_sources.append("sales")
         except Exception as e:
             add_log(f"매출정보 샘플 로드 오류: {e}")
+
+    if loaded_sources:
+        uploaded_at = now_kst().strftime("%Y-%m-%d %H:%M")
+        with data_lock:
+            app_state["data_uploaded_at"] = uploaded_at
+            app_state["last_updated"] = uploaded_at
+            ts_map = app_state.setdefault("upload_timestamps", {})
+            for src in loaded_sources:
+                ts_map[src] = uploaded_at
 
     sync_res = save_state(sync_drive=True, wait_drive=False)
     add_log(f"✨ [샘플 데이터 로드 완료] {' / '.join(loaded)} 데이터가 반영되었습니다!")
@@ -1562,7 +1615,7 @@ def load_sample():
 @app.route("/api/clear-logs", methods=["POST"])
 def clear_logs():
     with data_lock:
-        app_state["logs"] = [f"[{datetime.now().strftime('%H:%M:%S')}] 콘솔 로그가 초기화되었습니다."]
+        app_state["logs"] = [f"[{now_kst().strftime('%H:%M:%S')}] 콘솔 로그가 초기화되었습니다."]
     return jsonify({"success": True})
 
 @app.route("/api/export-master-csv")
@@ -1978,7 +2031,7 @@ def admin_save_product():
                 oid_s = str(oid).strip()
                 if oid_s in coupang_inv:
                     coupang_inv[oid_s]["stock"] = max(0, int(st_val))
-                    coupang_inv[oid_s]["updated_at"] = datetime.now().strftime("%m-%d %H:%M")
+                    coupang_inv[oid_s]["updated_at"] = now_kst().strftime("%m-%d %H:%M")
                 else:
                     coupang_inv[oid_s] = {
                         "product_name": name,
@@ -1988,10 +2041,9 @@ def admin_save_product():
                         "sales_7d": 0,
                         "sales_30d": 0,
                         "doc": 0,
-                        "updated_at": datetime.now().strftime("%m-%d %H:%M")
+                        "updated_at": now_kst().strftime("%m-%d %H:%M")
                     }
 
-        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
         saved_copy = copy.deepcopy(record)
 
     sync_res = save_state(sync_drive=True, wait_drive=True)
@@ -2052,7 +2104,6 @@ def admin_save_product_mappings():
         if "options" in body:
             target["options"] = _parse_coupang_options_input(body.get("options") or [])
 
-        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
         saved_copy = copy.deepcopy(target)
         t_code = target.get("seller_code", "")
         t_name = target.get("name", "")
@@ -2096,7 +2147,6 @@ def admin_delete_product():
         else:
             target["is_active"] = False
             msg = f"[{target.get('seller_code')}] {t_name} 대시보드 숨김 처리 완료"
-        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     sync_res = save_state(sync_drive=True, wait_drive=True)
     add_log(f"🗂️ [관리자] {msg}")
@@ -2158,8 +2208,6 @@ def admin_bulk_save_products():
                     if nd:
                         overrides[key] = nd
 
-        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-
     sync_res = save_state(sync_drive=True, wait_drive=True)
     add_log(f"📊 [관리자 일괄 저장] {updated_count}개 품목 및 소비기한 기준이 저장되었습니다.")
     return jsonify({
@@ -2193,7 +2241,6 @@ def admin_save_b2b_mappings():
 
     with data_lock:
         app_state["b2b_mappings"] = new_map
-        app_state["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     sync_res = save_state(sync_drive=True, wait_drive=True)
     add_log(f"🔗 [관리자 B2B 매핑] {len(new_map)}개 세트(S코드) 연동 규칙이 업데이트되었습니다.")
@@ -2288,7 +2335,7 @@ def admin_backup_export():
     snap = build_state_snapshot()
     # 보안상 custom PIN 해시/원문은 제외하고 싶다면 settings에서 제외할지 여부 -> 백업 복원 호환성을 위해 포함하거나 그대로 백업
     payload = json.dumps(snap, ensure_ascii=False, indent=2).encode("utf-8")
-    fname = f"iljeomodo_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    fname = f"iljeomodo_backup_{now_kst().strftime('%Y%m%d_%H%M%S')}.json"
     return Response(
         payload,
         mimetype="application/json",
@@ -2362,7 +2409,7 @@ HTML_TEMPLATE = """
                     <div class="flex flex-wrap items-center gap-2 mt-0.5">
                         <p id="headerSubtitleText" class="text-[11px] text-slate-400">수입 리드타임 110일 발주 경보 · 창고 간 불균형 해소 · 소비기한 선입선출(FIFO) 관리</p>
                         <span class="text-slate-600 hidden sm:inline">|</span>
-                        <span class="inline-flex items-center text-[11px] text-emerald-400 font-semibold bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-md">
+                        <span class="inline-flex items-center text-[11px] text-emerald-400 font-semibold bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-md" title="데이터 파일(개미창고·쿠팡·매출) 최종 업로드 시간 (한국 시간 KST)">
                             <i class="fa-regular fa-clock mr-1 text-emerald-400"></i>
                             <span>재고 업데이트: </span>
                             <span id="headerLastUpdated" class="ml-1 font-mono text-white">확인 중...</span>
@@ -3958,9 +4005,12 @@ HTML_TEMPLATE = """
                 }
                 updateDriveSyncBadge(data.drive_sync);
 
-                // 1. 헤더 재고 업데이트 일시 표기
-                if (data.stats.last_updated) {
-                    document.getElementById('headerLastUpdated').innerText = data.stats.last_updated;
+                // 1. 헤더 재고 업데이트 일시 표기 (데이터 파일 업로드 시간 · KST)
+                const headerLastUpdatedEl = document.getElementById('headerLastUpdated');
+                if (headerLastUpdatedEl) {
+                    headerLastUpdatedEl.innerText = data.stats.last_updated
+                        ? `${data.stats.last_updated} (KST)`
+                        : '파일 업로드 대기 중';
                 }
 
                 // 2. 5대 Action KPI 통계 갱신
@@ -3998,16 +4048,17 @@ HTML_TEMPLATE = """
                 document.getElementById('statSalesSubtext').innerText = `(쿠팡 7일 ${c7} / 30일 ${c30} + 타채널 7일 ${o7} / 30일 ${o30})`;
 
                 // 4. 하단 소스 상태 배지
+                const ut = data.stats.upload_timestamps || {};
                 if (data.stats.has_gaemi_data) {
-                    document.getElementById('gaemiStatusText').innerText = "✅ 개미창고 소비기한 & 재고 로드됨";
+                    document.getElementById('gaemiStatusText').innerText = "✅ 개미창고 소비기한 & 재고 로드됨" + (ut.gaemi ? ` (${ut.gaemi})` : "");
                     document.getElementById('gaemiStatusText').className = "text-[10px] text-amber-700 font-semibold";
                 }
                 if (data.stats.has_coupang_data) {
-                    document.getElementById('coupangStatusText').innerText = "✅ 쿠팡 윙 재고 로드됨";
+                    document.getElementById('coupangStatusText').innerText = "✅ 쿠팡 윙 재고 로드됨" + (ut.coupang ? ` (${ut.coupang})` : "");
                     document.getElementById('coupangStatusText').className = "text-[10px] text-blue-700 font-semibold";
                 }
                 if (data.stats.has_sales_data) {
-                    document.getElementById('salesStatusText').innerText = "✅ 쿠팡외 통합 매출 로드됨";
+                    document.getElementById('salesStatusText').innerText = "✅ 쿠팡외 통합 매출 로드됨" + (ut.sales ? ` (${ut.sales})` : "");
                     document.getElementById('salesStatusText').className = "text-[10px] text-indigo-700 font-semibold";
                 }
 

@@ -14,7 +14,7 @@ import copy
 import shutil
 import tempfile
 from unittest.mock import patch
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import app as app_module
 from app import app
 
@@ -724,6 +724,84 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         for key in ("total_7d", "total_30d", "orders_count", "sample_names", "malls"):
             self.assertIn(key, first_sc)
         print("OK: [Admin Test 10] 코드매핑 단독저장 격리(기타 기준 보존), 구방식 초기화, config sales_inventory 요약 검증 완료")
+
+    def test_11_upload_timestamp_kst_and_non_upload_isolation(self):
+        """재고 업데이트 일시는 KST(+09:00) 데이터 파일 업로드 시각만 반영되고 서버부팅·관리자수정은 이를 덮어쓰지 않음"""
+        headers = self._login("1500")
+
+        # 1. KST 시간대(UTC+9) 검증
+        kst_now = app_module.now_kst()
+        self.assertEqual(kst_now.utcoffset(), timedelta(hours=9))
+
+        # 2. 구 스키마 백업(data_uploaded_at 없음, 레거시 last_updated: '2026-11-10 01:31') 로드 시 가짜 시각 승계 금지
+        app_module._apply_loaded_state({
+            "master_products": copy.deepcopy(app_module.app_state["master_products"]),
+            "last_updated": "2026-11-10 01:31",
+            "saved_at": "2026-11-10 01:31:00"
+        })
+        s0 = json.loads(self.client.get("/api/summary").data)
+        self.assertEqual(s0["stats"]["last_updated"], "")
+        self.assertEqual(s0["stats"]["upload_timestamps"], {})
+
+        # 3. 01:31 UTC = 10:31 KST 상황에서 개미창고 CSV 업로드 시 한국 시간 '2026-11-10 10:31' 기록 확인
+        fixed_kst_upload1 = datetime(2026, 11, 10, 10, 31, 0, tzinfo=timezone(timedelta(hours=9)))
+        with open("개미창고_샘플.csv", encoding="utf-8") as f:
+            gaemi_rows = list(csv.reader(f))
+        with patch.object(app_module, "now_kst", return_value=fixed_kst_upload1):
+            r_up1 = self.client.post("/api/upload-file-data", json={"source": "gaemi", "rows": gaemi_rows})
+        self.assertEqual(r_up1.status_code, 200)
+        self.assertEqual(json.loads(r_up1.data)["uploaded_at"], "2026-11-10 10:31")
+
+        s1 = json.loads(self.client.get("/api/summary").data)
+        self.assertEqual(s1["stats"]["last_updated"], "2026-11-10 10:31")
+        self.assertEqual(s1["stats"]["upload_timestamps"].get("gaemi"), "2026-11-10 10:31")
+
+        # 4. 다른 날/다른 시각에 관리자 수정, 코드 매핑 저장, 일괄 저장, B2B 저장, 재부팅(load_state)이 발생해도 last_updated 불변!
+        later_kst = datetime(2026, 11, 11, 16, 45, 0, tzinfo=timezone(timedelta(hours=9)))
+        with patch.object(app_module, "now_kst", return_value=later_kst):
+            self.client.post("/api/admin/product/save", headers=headers, json={
+                "seller_code": "20DC02",
+                "name": "시간불변 검증 상품",
+                "note": "관리자 수정은 업로드 일시를 변경하면 안 됨"
+            })
+            self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+                "seller_code": "20DC02",
+                "sales_codes": ["20DC02"]
+            })
+            self.client.post("/api/admin/products/bulk-save", headers=headers, json={
+                "products": [{"seller_code": "20DC02", "in_transit_qty": 10}]
+            })
+            self.client.post("/api/admin/b2b-mappings/save", headers=headers, json={
+                "mappings": [{"s_code": "S100005", "base_code": "10GL02", "multiplier": 12, "desc": "B2B"}]
+            })
+            self.client.post("/api/admin/product/delete", headers=headers, json={
+                "seller_code": "20DC02", "mode": "hide"
+            })
+            self.client.post("/api/admin/product/delete", headers=headers, json={
+                "seller_code": "20DC02", "mode": "restore"
+            })
+            # 잘못된 CSV 업로드(400)도 기존 업로드 시각 유지
+            bad_up = self.client.post("/api/upload-file-data", json={"source": "coupang", "rows": [["invalid"]]})
+            self.assertEqual(bad_up.status_code, 400)
+            # 로컬 스냅샷으로부터 서버 재시작(load_state) 시뮬레이션
+            app_module.load_state()
+
+        s2 = json.loads(self.client.get("/api/summary").data)
+        self.assertEqual(s2["stats"]["last_updated"], "2026-11-10 10:31")
+        self.assertEqual(s2["stats"]["upload_timestamps"], {"gaemi": "2026-11-10 10:31"})
+
+        # 5. 이후 쿠팡 CSV 업로드 시 새 업로드 시각(KST)으로만 갱신되고 채널별 업로드 시각 유지
+        fixed_kst_upload2 = datetime(2026, 11, 12, 9, 5, 0, tzinfo=timezone(timedelta(hours=9)))
+        with open("쿠팡_샘플.csv", encoding="utf-8") as f:
+            coupang_rows = list(csv.reader(f))
+        with patch.object(app_module, "now_kst", return_value=fixed_kst_upload2):
+            r_up2 = self.client.post("/api/upload-file-data", json={"source": "coupang", "rows": coupang_rows})
+        self.assertEqual(r_up2.status_code, 200)
+        s3 = json.loads(self.client.get("/api/summary").data)
+        self.assertEqual(s3["stats"]["last_updated"], "2026-11-12 09:05")
+        self.assertEqual(s3["stats"]["upload_timestamps"]["gaemi"], "2026-11-10 10:31")
+        self.assertEqual(s3["stats"]["upload_timestamps"]["coupang"], "2026-11-12 09:05")
+        print("OK: [Admin Test 11] KST(UTC+9) 파일 업로드 전용 타임스탬프 및 관리자수정/재부팅 격리 검증 완료")
 
 
 if __name__ == '__main__':
