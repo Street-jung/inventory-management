@@ -1115,6 +1115,7 @@ def get_summary():
     order_prepare_count = 0      # 🟡 발주 준비 (안전재고 버퍼 구간)
     coupang_transfer_count = 0   # 🔵 쿠팡 채우기 필요 (창고 간 불균형)
     expiry_warning_count = 0     # ⏳ 소비기한 주의
+    no_sales_count = 0           # 🟠 판매 정체 (소진무: 재고 보유 · 최근 7/30일 판매 0)
     safe_count = 0               # 🟢 정상 안전
 
     for m in single_master_list:
@@ -1247,6 +1248,7 @@ def get_summary():
         is_order_prepare = False
         is_coupang_transfer = False
         is_exp_warn = False
+        is_no_sales = False
         is_safe = False
 
         if master_physical_total == 0:
@@ -1256,7 +1258,7 @@ def get_summary():
             action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
             risk_score = 1000
             is_urgent = True
-        elif total_runway < eff_lead_time:
+        elif daily_sales > 0 and total_runway < eff_lead_time:
             status = f"🔴 긴급 발주 (D-{int(total_runway)}일)"
             status_color = "red"
             action_cta = "🚨 수입 발주 기안" if product_type == "수입" else "🚨 사입 긴급 발주"
@@ -1270,7 +1272,7 @@ def get_summary():
             action_cta_class = "bg-blue-600 hover:bg-blue-700 text-white"
             risk_score = 700 - coupang_runway
             is_coupang_transfer = True
-        elif total_runway <= eff_prepare_limit:
+        elif daily_sales > 0 and total_runway <= eff_prepare_limit:
             status = f"🟡 발주 준비 (D-{int(total_runway)}일)" if product_type == "수입" else f"🟡 사입 주의 (D-{int(total_runway)}일)"
             status_color = "amber"
             action_cta = "📝 발주서 작성" if product_type == "수입" else "📝 사입 발주 검토"
@@ -1284,8 +1286,15 @@ def get_summary():
             action_cta_class = "bg-purple-600 hover:bg-purple-700 text-white"
             risk_score = 350
             is_exp_warn = True
+        elif master_physical_total > 0 and daily_sales <= 0:
+            status = "🟠 판매 정체 (소진무)"
+            status_color = "orange"
+            action_cta = "🔔 미판매 점검 알람"
+            action_cta_class = "bg-orange-500 hover:bg-orange-600 text-white"
+            risk_score = 250 + min(round(master_physical_total / 1000.0, 2), 49)
+            is_no_sales = True
         else:
-            safe_d = f"D-{int(total_runway)}일" if total_runway < 900 else "안전(소진무)"
+            safe_d = f"D-{int(total_runway)}일"
             status = f"✅ 정상 안전 ({safe_d})"
             status_color = "green"
             action_cta = "✅ 정상 유지"
@@ -1301,6 +1310,8 @@ def get_summary():
             order_prepare_count += 1
         elif is_exp_warn:
             expiry_warning_count += 1
+        elif is_no_sales:
+            no_sales_count += 1
         elif is_safe:
             safe_count += 1
 
@@ -1366,6 +1377,8 @@ def get_summary():
             "gaemi_runway_str": gaemi_runway_str,
             "coupang_runway": coupang_runway,
             "coupang_runway_str": coupang_runway_str,
+            "is_no_sales": bool(master_physical_total > 0 and daily_sales <= 0),
+            "is_coupang_no_sales": bool(c_physical_total > 0 and coupang_daily <= 0),
             "doc": total_runway,
             "doc_str": total_runway_str,
             "status": status,
@@ -1401,6 +1414,7 @@ def get_summary():
             "order_prepare_count": order_prepare_count,
             "coupang_transfer_count": coupang_transfer_count,
             "expiry_warning_count": expiry_warning_count,
+            "no_sales_count": no_sales_count,
             "safe_count": safe_count,
             "leadtime_count": legacy_leadtime_count,
             "urgent_count": urgent_order_count,
@@ -2387,6 +2401,43 @@ HTML_TEMPLATE = """
         .log-box::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
         .drag-col-over { border-left: 3px solid #059669 !important; background-color: #d1fae5 !important; }
         .drag-row-over { border-top: 3px solid #059669 !important; }
+        #masterTable { table-layout: fixed; }
+        #masterTable th, #masterTable td { box-sizing: border-box; }
+        #masterTable th { position: relative; }
+        .col-resizer {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 10px;
+            height: 100%;
+            cursor: col-resize;
+            z-index: 15;
+            touch-action: none;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 1px;
+        }
+        .col-resizer::after {
+            content: "";
+            width: 2px;
+            height: 56%;
+            border-radius: 2px;
+            background-color: #cbd5e1;
+            transition: background-color 0.15s ease, width 0.15s ease, height 0.15s ease;
+        }
+        .col-resizer:hover::after,
+        .col-resizer.resizing::after {
+            background-color: #4f46e5;
+            width: 3px;
+            height: 82%;
+        }
+        .subrow-cell { overflow: visible !important; }
+        .subrow-sticky-shell {
+            position: sticky;
+            left: 0;
+            box-sizing: border-box;
+        }
         :fullscreen body { background-color: #f1f5f9; }
         :-webkit-full-screen body { background-color: #f1f5f9; }
     </style>
@@ -2505,16 +2556,16 @@ HTML_TEMPLATE = """
     <!-- 메인 대시보드 컨테이너 -->
     <main class="max-w-7xl mx-auto px-4 py-4 flex-1 w-full space-y-4">
 
-        <!-- 1. 핵심 5대 신호등 Action KPI 위젯 (상단 배치) -->
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <!-- 1. 핵심 6대 신호등 Action KPI 위젯 (상단 배치) -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             
             <!-- 🔴 긴급 발주 요망 (통합 D-Day < 리드타임) -->
             <div onclick="setStatusFilter('urgent')" class="bg-rose-50/70 rounded-xl shadow-sm border-2 border-rose-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-rose-100/80 transition relative overflow-hidden group">
-                <div class="flex items-center justify-between">
+                <div class="flex items-center justify-between gap-1">
                     <span class="text-[11px] font-bold text-rose-900 flex items-center">
                         <i class="fa-solid fa-triangle-exclamation text-rose-600 mr-1.5 animate-bounce"></i>긴급 발주 요망
                     </span>
-                    <span id="kpiBadgeUrgent" class="text-[9px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded font-bold">110일 미만/결품</span>
+                    <span id="kpiBadgeUrgent" class="text-[9px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded font-bold shrink-0">110일 미만/결품</span>
                 </div>
                 <div class="flex items-baseline justify-between mt-2">
                     <div>
@@ -2525,17 +2576,17 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="mt-1 flex items-center justify-between text-[10px] text-rose-700 font-semibold border-t border-rose-200/60 pt-1">
                     <span>수입 리드타임 결품 초읽기</span>
-                    <span class="text-rose-900 group-hover:underline">클릭 시 필터</span>
+                    <span class="text-rose-900 group-hover:underline shrink-0">클릭 필터</span>
                 </div>
             </div>
 
             <!-- 🟡 발주 준비 (리드타임 ~ 리드타임+버퍼) -->
             <div onclick="setStatusFilter('prepare')" class="bg-amber-50/70 rounded-xl shadow-sm border-2 border-amber-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-amber-100/80 transition relative overflow-hidden group">
-                <div class="flex items-center justify-between">
+                <div class="flex items-center justify-between gap-1">
                     <span class="text-[11px] font-bold text-amber-900 flex items-center">
                         <i class="fa-solid fa-clipboard-list text-amber-600 mr-1.5"></i>발주 준비
                     </span>
-                    <span id="kpiBadgePrepare" class="text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">110~130일</span>
+                    <span id="kpiBadgePrepare" class="text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold shrink-0">110~130일</span>
                 </div>
                 <div class="flex items-baseline justify-between mt-2">
                     <div>
@@ -2546,17 +2597,17 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="mt-1 flex items-center justify-between text-[10px] text-amber-700 font-semibold border-t border-amber-200/60 pt-1">
                     <span>안전재고 구간 (기안 준비)</span>
-                    <span class="text-amber-900 group-hover:underline">클릭 시 필터</span>
+                    <span class="text-amber-900 group-hover:underline shrink-0">클릭 필터</span>
                 </div>
             </div>
 
             <!-- 🔵 쿠팡 채우기 필요 (창고 간 불균형) -->
             <div onclick="setStatusFilter('transfer')" class="bg-blue-50/70 rounded-xl shadow-sm border-2 border-blue-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-blue-100/80 transition relative overflow-hidden group">
-                <div class="flex items-center justify-between">
+                <div class="flex items-center justify-between gap-1">
                     <span class="text-[11px] font-bold text-blue-900 flex items-center">
                         <i class="fa-solid fa-truck-arrow-right text-blue-600 mr-1.5"></i>쿠팡 채우기 필요
                     </span>
-                    <span class="text-[9px] bg-blue-200 text-blue-900 px-1.5 py-0.5 rounded font-bold">창고 불균형</span>
+                    <span class="text-[9px] bg-blue-200 text-blue-900 px-1.5 py-0.5 rounded font-bold shrink-0">창고 불균형</span>
                 </div>
                 <div class="flex items-baseline justify-between mt-2">
                     <div>
@@ -2567,17 +2618,17 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="mt-1 flex items-center justify-between text-[10px] text-blue-700 font-semibold border-t border-blue-200/60 pt-1">
                     <span>개미 실물 有 · 쿠팡 D-14 이하</span>
-                    <span class="text-blue-900 group-hover:underline">클릭 시 필터</span>
+                    <span class="text-blue-900 group-hover:underline shrink-0">클릭 필터</span>
                 </div>
             </div>
 
             <!-- ⏳ 소비기한 주의 (기준일 미만 or 미소진 위험) -->
             <div onclick="setStatusFilter('expiry')" class="bg-purple-50/70 rounded-xl shadow-sm border-2 border-purple-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-purple-100/80 transition relative overflow-hidden group">
-                <div class="flex items-center justify-between">
+                <div class="flex items-center justify-between gap-1">
                     <span class="text-[11px] font-bold text-purple-900 flex items-center">
                         <i class="fa-solid fa-hourglass-half text-purple-600 mr-1.5"></i>소비기한 주의
                     </span>
-                    <span class="text-[9px] bg-purple-200 text-purple-900 px-1.5 py-0.5 rounded font-bold">선입선출</span>
+                    <span class="text-[9px] bg-purple-200 text-purple-900 px-1.5 py-0.5 rounded font-bold shrink-0">선입선출</span>
                 </div>
                 <div class="flex items-baseline justify-between mt-2">
                     <div>
@@ -2588,17 +2639,38 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="mt-1 flex items-center justify-between text-[10px] text-purple-700 font-semibold border-t border-purple-200/60 pt-1">
                     <span id="kpiSubExpiry">잔여 120일 미만 or 미소진 위험</span>
-                    <span class="text-purple-900 group-hover:underline">클릭 시 필터</span>
+                    <span class="text-purple-900 group-hover:underline shrink-0">클릭 필터</span>
+                </div>
+            </div>
+
+            <!-- 🟠 판매 정체 (소진무: 재고 보유 · 최근 7/30일 판매 0) -->
+            <div onclick="setStatusFilter('no_sales')" class="bg-orange-50/70 rounded-xl shadow-sm border-2 border-orange-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-orange-100/80 transition relative overflow-hidden group">
+                <div class="flex items-center justify-between gap-1">
+                    <span class="text-[11px] font-bold text-orange-950 flex items-center">
+                        <i class="fa-solid fa-bell text-orange-600 mr-1.5 animate-pulse"></i>판매 정체 (소진무)
+                    </span>
+                    <span class="text-[9px] bg-orange-200 text-orange-950 px-1.5 py-0.5 rounded font-bold shrink-0">미판매 알람</span>
+                </div>
+                <div class="flex items-baseline justify-between mt-2">
+                    <div>
+                        <span id="statNoSales" class="text-3xl font-black text-orange-700">0</span>
+                        <span class="text-xs text-orange-700 font-bold ml-1">개 품목</span>
+                    </div>
+                    <i class="fa-solid fa-circle-pause text-orange-400 text-2xl group-hover:scale-110 transition"></i>
+                </div>
+                <div class="mt-1 flex items-center justify-between text-[10px] text-orange-800 font-semibold border-t border-orange-200/60 pt-1">
+                    <span>재고 有 · 7/30일 판매 0</span>
+                    <span class="text-orange-950 group-hover:underline shrink-0">클릭 필터</span>
                 </div>
             </div>
 
             <!-- 🟢 정상 안전 -->
-            <div onclick="setStatusFilter('safe')" class="bg-emerald-50/70 rounded-xl shadow-sm border-2 border-emerald-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-emerald-100/80 transition relative overflow-hidden group col-span-2 sm:col-span-1">
-                <div class="flex items-center justify-between">
+            <div onclick="setStatusFilter('safe')" class="bg-emerald-50/70 rounded-xl shadow-sm border-2 border-emerald-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-emerald-100/80 transition relative overflow-hidden group">
+                <div class="flex items-center justify-between gap-1">
                     <span class="text-[11px] font-bold text-emerald-900 flex items-center">
                         <i class="fa-solid fa-circle-check text-emerald-600 mr-1.5"></i>정상 안전
                     </span>
-                    <span id="kpiBadgeSafe" class="text-[9px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">130일 이상</span>
+                    <span id="kpiBadgeSafe" class="text-[9px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold shrink-0">130일 이상</span>
                 </div>
                 <div class="flex items-baseline justify-between mt-2">
                     <div>
@@ -2609,7 +2681,7 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="mt-1 flex items-center justify-between text-[10px] text-emerald-700 font-semibold border-t border-emerald-200/60 pt-1">
                     <span>안정적 재고 유지 상태</span>
-                    <span class="text-emerald-900 group-hover:underline">클릭 시 필터</span>
+                    <span class="text-emerald-900 group-hover:underline shrink-0">클릭 필터</span>
                 </div>
             </div>
 
@@ -2652,35 +2724,59 @@ HTML_TEMPLATE = """
             
             <!-- 필터 & 검색 툴바 -->
             <div class="p-3 border-b border-slate-200 space-y-2">
-                <div class="flex flex-wrap items-center justify-between gap-3">
-                    <div class="flex items-center space-x-2">
+                <div class="flex flex-wrap items-center justify-between gap-2.5">
+                    <div class="flex flex-wrap items-center gap-2">
                         <span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block animate-ping"></span>
                         <h2 class="font-bold text-slate-900 text-sm">일쩜오도 단품 재고 & 발주 의사결정 보드</h2>
                         <span id="filteredCountText" class="text-xs text-slate-400 font-normal">| 총 38개 단품</span>
                         <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono border border-slate-200">
-                            <i class="fa-solid fa-grip mr-1 text-slate-400"></i>열 헤더 드래그로 순서 변경 가능
+                            <i class="fa-solid fa-grip mr-1 text-slate-400"></i>드래그: 순서 변경 · 경계선 드래그: 열 너비 조정
                         </span>
                     </div>
 
-                    <div class="flex items-center space-x-2">
+                    <div class="flex flex-wrap items-center gap-1.5">
                         <!-- 검색창 -->
                         <div class="relative">
                             <i class="fa-solid fa-search absolute left-2.5 top-2.5 text-slate-400 text-xs"></i>
-                            <input type="text" id="searchInput" oninput="applyFilters()" placeholder="상품명 또는 관리코드 검색..." class="text-xs pl-7 pr-3 py-1.5 border border-slate-200 rounded-lg w-48 sm:w-60 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                            <input type="text" id="searchInput" oninput="applyFilters()" placeholder="상품명 또는 관리코드 검색..." class="text-xs pl-7 pr-3 py-1.5 border border-slate-200 rounded-lg w-44 sm:w-56 focus:outline-none focus:ring-1 focus:ring-emerald-500">
                         </div>
 
-                        <!-- 열 순서 리셋 버튼 -->
-                        <button onclick="resetColumnOrder()" title="열 순서를 기본값으로 초기화" class="text-xs px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold transition flex items-center space-x-1">
+                        <!-- 열 너비 조정 패널 토글 -->
+                        <button type="button" onclick="toggleColWidthPanel()" id="btnColWidthToggle" title="각 열의 가로 너비를 직접 조정합니다 (헤더 경계선 드래그도 가능)" class="text-xs px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg font-semibold transition flex items-center space-x-1">
+                            <i class="fa-solid fa-arrows-left-right"></i>
+                            <span>열 너비</span>
+                        </button>
+
+                        <!-- 열 순서/너비 리셋 버튼 -->
+                        <button type="button" onclick="resetColumnOrder()" title="열 순서와 가로 너비를 기본값으로 초기화" class="text-xs px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold transition flex items-center space-x-1">
                             <i class="fa-solid fa-rotate-left"></i>
-                            <span>열 순서 초기화</span>
+                            <span>열 초기화</span>
                         </button>
 
                         <!-- 전체 펼치기/접기 -->
-                        <button onclick="toggleAllOptionDetails()" class="text-xs px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold transition flex items-center space-x-1">
+                        <button type="button" onclick="toggleAllOptionDetails()" class="text-xs px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold transition flex items-center space-x-1">
                             <i class="fa-solid fa-list-ul"></i>
                             <span id="expandBtnText">소비기한 세부내역</span>
                         </button>
                     </div>
+                </div>
+
+                <!-- 열 너비 세부 조정 패널 (모바일/PC 공통 프리셋 + 슬라이더) -->
+                <div id="colWidthAdjustPanel" class="hidden bg-indigo-50/50 border border-indigo-200 rounded-xl p-2.5 space-y-2 text-xs">
+                    <div class="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-indigo-200/70">
+                        <div class="flex items-center gap-1.5 text-[11px] font-bold text-indigo-950">
+                            <i class="fa-solid fa-sliders text-indigo-600"></i>
+                            <span>열 가로 너비 조정</span>
+                            <span class="text-[10px] font-normal text-indigo-700 hidden sm:inline">(표 상단 헤더 경계선을 마우스/터치로 끌어 직접 조절하거나 더블클릭 시 초기화됩니다)</span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-1">
+                            <button type="button" onclick="applyColWidthPreset('compact')" class="px-2 py-0.5 rounded bg-white hover:bg-indigo-100 border border-indigo-200 text-[10px] font-bold text-indigo-800">좁게(모바일)</button>
+                            <button type="button" onclick="applyColWidthPreset('default')" class="px-2 py-0.5 rounded bg-white hover:bg-indigo-100 border border-indigo-200 text-[10px] font-bold text-indigo-800">기본 너비</button>
+                            <button type="button" onclick="applyColWidthPreset('wide')" class="px-2 py-0.5 rounded bg-white hover:bg-indigo-100 border border-indigo-200 text-[10px] font-bold text-indigo-800">넓게(PC)</button>
+                            <button type="button" onclick="toggleColWidthPanel()" class="px-2 py-0.5 rounded bg-slate-200 hover:bg-slate-300 text-[10px] font-bold text-slate-700 ml-1">닫기</button>
+                        </div>
+                    </div>
+                    <div id="colWidthSlidersGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2"></div>
                 </div>
 
                 <!-- 카테고리 및 상태 필터 탭 -->
@@ -2696,20 +2792,22 @@ HTML_TEMPLATE = """
                         <button onclick="setCategoryFilter('쿠키/스낵')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">쿠키/스낵</button>
                     </div>
 
-                    <div class="flex items-center space-x-1.5" id="statusFilterPills">
+                    <div class="flex flex-wrap items-center gap-1.5" id="statusFilterPills">
                         <button onclick="setStatusFilter('all')" class="status-pill active px-2 py-0.5 rounded text-[11px] font-bold bg-slate-800 text-white">전체보기</button>
                         <button onclick="setStatusFilter('urgent')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200">🔴 긴급 발주</button>
                         <button onclick="setStatusFilter('prepare')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200">🟡 발주 준비</button>
                         <button onclick="setStatusFilter('transfer')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-300 hover:bg-blue-200">🔵 쿠팡 이동</button>
                         <button onclick="setStatusFilter('expiry')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-purple-100 text-purple-900 border border-purple-300 hover:bg-purple-200">⏳ 소비기한 주의</button>
+                        <button onclick="setStatusFilter('no_sales')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-orange-100 text-orange-900 border border-orange-300 hover:bg-orange-200">🟠 판매 정체</button>
                         <button onclick="setStatusFilter('safe')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200">🟢 정상 안전</button>
                     </div>
                 </div>
             </div>
 
-            <!-- 이동 가능한 액션보드 테이블 (13개 열) -->
-            <div class="overflow-x-auto">
-                <table id="masterTable" class="w-full text-left text-xs border-collapse">
+            <!-- 이동 및 너비 조정 가능한 액션보드 테이블 (13개 열) -->
+            <div id="masterTableScrollWrap" class="overflow-x-auto relative">
+                <table id="masterTable" class="text-left text-xs border-collapse">
+                    <colgroup id="masterTableColGroup"></colgroup>
                     <thead id="masterTableHead" class="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200 select-none">
                         <!-- 동적 열 헤더 -->
                     </thead>
@@ -3520,19 +3618,19 @@ HTML_TEMPLATE = """
     <script>
         // 열 정의 (13개 열): 개미창고와 쿠팡창고 각각의 재고량, 런웨이, 소비기한 미니태그, 추천 조치 버튼 포함
         const COLUMN_DEFS = {
-            'no': { id: 'no', label: 'No', thClass: 'text-center w-10 text-[11px]', tdClass: 'text-center font-mono text-slate-400 text-[11px]' },
-            'status': { id: 'status', label: '발주 권고 상태', thClass: 'text-center w-36', tdClass: 'text-center' },
-            'type': { id: 'type', label: '구분', thClass: 'text-center w-14', tdClass: 'text-center' },
-            'code': { id: 'code', label: '관리코드', thClass: 'text-center w-20 font-mono text-[11px]', tdClass: 'text-center font-mono font-semibold text-slate-600 text-[11px]' },
-            'name': { id: 'name', label: '마스터 상품명', thClass: 'text-left min-w-[210px]', tdClass: 'text-left' },
-            'total_stock': { id: 'total_stock', label: '총 가용재고', thClass: 'text-right w-24 font-black bg-emerald-50/60 text-emerald-950 text-xs', tdClass: 'text-right font-mono font-black text-xs bg-emerald-50/30 text-emerald-950' },
-            'gaemi_stock': { id: 'gaemi_stock', label: '개미창고(3PL)', thClass: 'text-right w-28 font-bold bg-amber-50/60 text-amber-900', tdClass: 'text-right bg-amber-50/20 text-amber-900' },
-            'gaemi_runway': { id: 'gaemi_runway', label: '개미 런웨이', thClass: 'text-center w-20 text-amber-800 text-[11px] font-bold', tdClass: 'text-center font-mono font-semibold text-amber-800 text-[11px]' },
-            'coupang_stock': { id: 'coupang_stock', label: '쿠팡창고(실물)', thClass: 'text-right w-24 font-bold bg-blue-50/60 text-blue-900', tdClass: 'text-right bg-blue-50/20 text-blue-900' },
-            'coupang_runway': { id: 'coupang_runway', label: '쿠팡 런웨이', thClass: 'text-center w-20 text-blue-800 text-[11px] font-bold', tdClass: 'text-center font-mono font-semibold text-blue-800 text-[11px]' },
-            'total_sales': { id: 'total_sales', label: '출고량 (7일/30일)', thClass: 'text-right w-28 font-black bg-indigo-50/60 text-indigo-950', tdClass: 'text-right font-mono font-bold text-indigo-900 bg-indigo-50/20' },
-            'total_runway': { id: 'total_runway', label: '통합 런웨이(D-Day)', thClass: 'text-center w-28 font-black text-slate-800', tdClass: 'text-center' },
-            'action_cta': { id: 'action_cta', label: '추천 조치 (Action)', thClass: 'text-center w-32 font-bold', tdClass: 'text-center' }
+            'no':            { id: 'no',            label: 'No',               width: 52,  minWidth: 42,  thClass: 'text-center text-[11px]', tdClass: 'py-2 px-1.5 text-center font-mono text-slate-400 text-[11px]' },
+            'status':        { id: 'status',        label: '발주 권고 상태',    width: 170, minWidth: 96,  thClass: 'text-center', tdClass: 'py-2 px-1.5 text-center' },
+            'type':          { id: 'type',          label: '구분',             width: 58,  minWidth: 46,  thClass: 'text-center', tdClass: 'py-2 px-1.5 text-center' },
+            'code':          { id: 'code',          label: '관리코드',          width: 96,  minWidth: 68,  thClass: 'text-center font-mono text-[11px]', tdClass: 'py-2 px-1.5 text-center font-mono font-semibold text-slate-600 text-[11px]' },
+            'name':          { id: 'name',          label: '마스터 상품명',     width: 230, minWidth: 110, thClass: 'text-left', tdClass: 'py-2 px-2 text-left' },
+            'total_stock':   { id: 'total_stock',   label: '총 가용재고',       width: 96,  minWidth: 68,  thClass: 'text-right font-black bg-emerald-50/60 text-emerald-950 text-xs', tdClass: 'py-2 px-2 text-right font-mono font-black text-xs bg-emerald-50/30 text-emerald-950' },
+            'gaemi_stock':   { id: 'gaemi_stock',   label: '개미창고(3PL)',     width: 140, minWidth: 85,  thClass: 'text-right font-bold bg-amber-50/60 text-amber-900', tdClass: 'py-2 px-2 text-right bg-amber-50/20 text-amber-900' },
+            'gaemi_runway':  { id: 'gaemi_runway',  label: '개미 런웨이',       width: 84,  minWidth: 62,  thClass: 'text-center text-amber-800 text-[11px] font-bold', tdClass: 'py-2 px-1.5 text-center font-mono font-semibold text-amber-800 text-[11px]' },
+            'coupang_stock': { id: 'coupang_stock', label: '쿠팡창고(실물)',    width: 98,  minWidth: 68,  thClass: 'text-right font-bold bg-blue-50/60 text-blue-900', tdClass: 'py-2 px-2 text-right bg-blue-50/20 text-blue-900' },
+            'coupang_runway':{ id: 'coupang_runway',label: '쿠팡 런웨이',       width: 88,  minWidth: 62,  thClass: 'text-center text-blue-800 text-[11px] font-bold', tdClass: 'py-2 px-1.5 text-center font-mono font-semibold text-blue-800 text-[11px]' },
+            'total_sales':   { id: 'total_sales',   label: '출고량 (7일/30일)', width: 152, minWidth: 96,  thClass: 'text-right font-black bg-indigo-50/60 text-indigo-950', tdClass: 'py-2 px-2 text-right font-mono font-bold text-indigo-900 bg-indigo-50/20' },
+            'total_runway':  { id: 'total_runway',  label: '통합 런웨이(D-Day)',width: 112, minWidth: 78,  thClass: 'text-center font-black text-slate-800', tdClass: 'py-2 px-1.5 text-center' },
+            'action_cta':    { id: 'action_cta',    label: '추천 조치 (Action)',width: 150, minWidth: 96,  thClass: 'text-center font-bold', tdClass: 'py-2 px-1.5 text-center' }
         };
 
         const DEFAULT_COLUMN_ORDER = [
@@ -3542,9 +3640,11 @@ HTML_TEMPLATE = """
             'total_sales', 'total_runway', 'action_cta'
         ];
 
+        const COL_WIDTHS_STORAGE_KEY = 'iljeomodo_col_widths_v1';
         let currentColumnOrder = [...DEFAULT_COLUMN_ORDER];
+        let customColWidths = {};
         
-        // localStorage에서 저장된 열 순서 불러오기 (v6 액션보드 전용)
+        // localStorage에서 저장된 열 순서 & 너비 불러오기 (v6 액션보드 전용)
         try {
             const savedOrder = localStorage.getItem('iljeomodo_col_order_v6');
             if (savedOrder) {
@@ -3554,6 +3654,136 @@ HTML_TEMPLATE = """
                 }
             }
         } catch (e) {}
+        try {
+            const savedWidths = localStorage.getItem(COL_WIDTHS_STORAGE_KEY);
+            if (savedWidths) {
+                const parsedW = JSON.parse(savedWidths);
+                if (parsedW && typeof parsedW === 'object' && !Array.isArray(parsedW)) {
+                    customColWidths = parsedW;
+                }
+            }
+        } catch (e) {}
+
+        function getColWidth(colId) {
+            const col = COLUMN_DEFS[colId];
+            if (!col) return 100;
+            const w = parseInt(customColWidths[colId], 10);
+            const minW = col.minWidth || 42;
+            if (!isNaN(w) && w >= minW) {
+                return Math.min(w, 600);
+            }
+            return col.width || 100;
+        }
+
+        function saveCustomColWidths() {
+            try {
+                localStorage.setItem(COL_WIDTHS_STORAGE_KEY, JSON.stringify(customColWidths));
+            } catch (e) {}
+        }
+
+        function applyColumnWidths() {
+            const colGroup = document.getElementById('masterTableColGroup');
+            const table = document.getElementById('masterTable');
+            if (!colGroup || !table) return;
+            let totalW = 0;
+            colGroup.innerHTML = currentColumnOrder.map(colId => {
+                const w = getColWidth(colId);
+                totalW += w;
+                return `<col data-col-width="${colId}" style="width: ${w}px;">`;
+            }).join('');
+            table.style.width = totalW + 'px';
+            syncSubrowViewportWidth();
+        }
+
+        function updateSingleColWidthInDom(colId, newW) {
+            const colGroup = document.getElementById('masterTableColGroup');
+            const table = document.getElementById('masterTable');
+            if (!colGroup || !table) return;
+            const colEl = colGroup.querySelector(`col[data-col-width="${colId}"]`);
+            if (colEl) colEl.style.width = newW + 'px';
+            let totalW = 0;
+            currentColumnOrder.forEach(cid => {
+                totalW += getColWidth(cid);
+            });
+            table.style.width = totalW + 'px';
+            const badgeEl = document.getElementById(`colWidthVal_${colId}`);
+            if (badgeEl) badgeEl.innerText = `${newW}px`;
+            const sliderEl = document.getElementById(`colWidthSlider_${colId}`);
+            if (sliderEl && String(sliderEl.value) !== String(newW)) sliderEl.value = newW;
+        }
+
+        function syncSubrowViewportWidth() {
+            const wrap = document.getElementById('masterTableScrollWrap');
+            if (!wrap) return;
+            const w = wrap.clientWidth || Math.max(300, window.innerWidth - 32);
+            wrap.style.setProperty('--subrow-view-w', w + 'px');
+        }
+
+        function toggleColWidthPanel() {
+            const panel = document.getElementById('colWidthAdjustPanel');
+            if (!panel) return;
+            const willOpen = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden');
+            if (willOpen) renderColWidthSliders();
+        }
+
+        function renderColWidthSliders() {
+            const grid = document.getElementById('colWidthSlidersGrid');
+            if (!grid) return;
+            grid.innerHTML = currentColumnOrder.map(colId => {
+                const col = COLUMN_DEFS[colId];
+                if (!col) return '';
+                const curW = getColWidth(colId);
+                const minW = col.minWidth || 42;
+                return `
+                    <div class="bg-white rounded-lg border border-indigo-100 px-2.5 py-1.5 flex flex-col gap-1">
+                        <div class="flex items-center justify-between text-[10px]">
+                            <span class="font-bold text-slate-700 truncate pr-2">${escapeHtml(col.label)}</span>
+                            <span id="colWidthVal_${colId}" class="font-mono font-bold text-indigo-700 shrink-0">${curW}px</span>
+                        </div>
+                        <input id="colWidthSlider_${colId}" type="range" min="${minW}" max="480" step="2" value="${curW}"
+                            oninput="onColWidthSliderInput('${colId}', this.value)"
+                            class="w-full h-1.5 accent-indigo-600 cursor-pointer">
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function onColWidthSliderInput(colId, val) {
+            const col = COLUMN_DEFS[colId];
+            if (!col) return;
+            const w = Math.max(col.minWidth || 42, Math.min(480, parseInt(val, 10) || col.width));
+            customColWidths[colId] = w;
+            updateSingleColWidthInDom(colId, w);
+            saveCustomColWidths();
+            syncSubrowViewportWidth();
+        }
+
+        function applyColWidthPreset(mode) {
+            if (mode === 'default') {
+                customColWidths = {};
+            } else {
+                const factor = mode === 'compact' ? 0.82 : 1.22;
+                const next = {};
+                currentColumnOrder.forEach(colId => {
+                    const col = COLUMN_DEFS[colId];
+                    if (!col) return;
+                    const minW = col.minWidth || 42;
+                    next[colId] = Math.max(minW, Math.min(520, Math.round(col.width * factor)));
+                });
+                customColWidths = next;
+            }
+            saveCustomColWidths();
+            applyColumnWidths();
+            renderColWidthSliders();
+        }
+
+        function resetSingleColWidth(colId) {
+            delete customColWidths[colId];
+            saveCustomColWidths();
+            applyColumnWidths();
+            renderColWidthSliders();
+        }
 
         const ADMIN_TOKEN_KEY = 'iljeomodo_admin_token';
         let allMasterData = [];
@@ -3810,8 +4040,18 @@ HTML_TEMPLATE = """
             if (!row) return;
             const willOpen = row.classList.contains('hidden');
             row.classList.toggle('hidden');
-            if (willOpen) expandedRowIds.add(prodId);
-            else expandedRowIds.delete(prodId);
+            const chev = document.getElementById(`chev_${prodId}`);
+            if (chev) {
+                chev.classList.toggle('rotate-90', willOpen);
+                chev.classList.toggle('text-indigo-600', willOpen);
+                chev.classList.toggle('text-slate-400', !willOpen);
+            }
+            if (willOpen) {
+                expandedRowIds.add(prodId);
+                syncSubrowViewportWidth();
+            } else {
+                expandedRowIds.delete(prodId);
+            }
         }
 
         function setCategoryFilter(cat) {
@@ -3835,7 +4075,10 @@ HTML_TEMPLATE = """
             document.querySelectorAll('#statusFilterPills .status-pill').forEach(btn => {
                 btn.classList.remove('bg-slate-800', 'text-white');
             });
-            const targetBtn = Array.from(document.querySelectorAll('#statusFilterPills .status-pill')).find(b => b.getAttribute('onclick').includes(stat));
+            const targetBtn = Array.from(document.querySelectorAll('#statusFilterPills .status-pill')).find(b => {
+                const oc = b.getAttribute('onclick') || '';
+                return oc.includes(`'${stat}'`);
+            });
             if (targetBtn) targetBtn.classList.add('bg-slate-800', 'text-white');
             applyFilters();
         }
@@ -3846,8 +4089,13 @@ HTML_TEMPLATE = """
 
         function resetColumnOrder() {
             currentColumnOrder = [...DEFAULT_COLUMN_ORDER];
-            localStorage.removeItem('iljeomodo_col_order_v6');
+            customColWidths = {};
+            try {
+                localStorage.removeItem('iljeomodo_col_order_v6');
+                localStorage.removeItem(COL_WIDTHS_STORAGE_KEY);
+            } catch (e) {}
             renderTableHeader();
+            renderColWidthSliders();
             renderMasterTable();
         }
 
@@ -3857,11 +4105,53 @@ HTML_TEMPLATE = """
         }
 
         // -------------------------------------------------------------
-        // 열(Column) 드래그 앤 드롭 구현
+        // 열(Column) 순서 드래그 앤 드롭 & 경계선 드래그 너비 조정
         // -------------------------------------------------------------
         let draggedColId = null;
+        let activeResizeState = null;
+
+        function startColumnResize(e, colId, th, resizerEl) {
+            e.preventDefault();
+            e.stopPropagation();
+            th.setAttribute('draggable', 'false');
+            const startX = e.clientX;
+            const startWidth = getColWidth(colId);
+            const minW = (COLUMN_DEFS[colId] && COLUMN_DEFS[colId].minWidth) || 42;
+            const maxW = 600;
+            resizerEl.classList.add('resizing');
+            document.body.style.cursor = 'col-resize';
+            document.body.classList.add('select-none');
+            activeResizeState = { colId, th, resizerEl, startX, startWidth, minW, maxW };
+
+            const onMove = (ev) => {
+                if (!activeResizeState) return;
+                const delta = ev.clientX - activeResizeState.startX;
+                const nextW = Math.max(activeResizeState.minW, Math.min(activeResizeState.maxW, Math.round(activeResizeState.startWidth + delta)));
+                customColWidths[activeResizeState.colId] = nextW;
+                updateSingleColWidthInDom(activeResizeState.colId, nextW);
+            };
+
+            const onUp = () => {
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                window.removeEventListener('pointercancel', onUp);
+                if (!activeResizeState) return;
+                activeResizeState.resizerEl.classList.remove('resizing');
+                activeResizeState.th.setAttribute('draggable', 'true');
+                document.body.style.cursor = '';
+                document.body.classList.remove('select-none');
+                saveCustomColWidths();
+                syncSubrowViewportWidth();
+                activeResizeState = null;
+            };
+
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+            window.addEventListener('pointercancel', onUp);
+        }
 
         function renderTableHeader() {
+            applyColumnWidths();
             const thead = document.getElementById('masterTableHead');
             let trHtml = "<tr class='select-none'>";
             currentColumnOrder.forEach(colId => {
@@ -3869,21 +4159,39 @@ HTML_TEMPLATE = """
                 trHtml += `
                     <th draggable="true" 
                         data-col="${colId}" 
-                        class="py-2.5 px-3 cursor-move hover:bg-slate-200 transition ${col.thClass}"
-                        title="드래그하여 열 순서를 자유롭게 변경할 수 있습니다">
-                        <div class="flex items-center justify-between gap-1">
+                        class="py-2.5 px-2 cursor-move hover:bg-slate-200 transition ${col.thClass}"
+                        title="드래그: 열 순서 변경 · 우측 경계선 드래그: 너비 조정">
+                        <div class="flex items-center justify-between gap-1 pr-2 min-w-0 overflow-hidden">
                             <span class="truncate">${col.label}</span>
-                            <i class="fa-solid fa-grip text-[9px] text-slate-400"></i>
+                            <i class="fa-solid fa-grip text-[9px] text-slate-400 shrink-0"></i>
                         </div>
+                        <div class="col-resizer" data-resize-col="${colId}" title="좌우로 드래그해 열 너비 조정 (더블클릭: 기본 너비)"></div>
                     </th>
                 `;
             });
             trHtml += "</tr>";
             thead.innerHTML = trHtml;
 
-            // 이벤트 바인딩
+            // 이벤트 바인딩 (열 순서 이동 + 열 경계선 너비 조정)
             thead.querySelectorAll('th').forEach(th => {
+                const colId = th.getAttribute('data-col');
+                const resizer = th.querySelector('.col-resizer');
+                if (resizer) {
+                    resizer.addEventListener('pointerdown', (e) => startColumnResize(e, colId, th, resizer));
+                    resizer.addEventListener('mousedown', (e) => e.stopPropagation());
+                    resizer.addEventListener('click', (e) => e.stopPropagation());
+                    resizer.addEventListener('dblclick', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        resetSingleColWidth(colId);
+                    });
+                }
+
                 th.addEventListener('dragstart', (e) => {
+                    if (activeResizeState || (e.target && e.target.closest && e.target.closest('.col-resizer'))) {
+                        e.preventDefault();
+                        return;
+                    }
                     draggedColId = th.getAttribute('data-col');
                     e.dataTransfer.effectAllowed = 'move';
                     th.classList.add('opacity-50');
@@ -3893,6 +4201,7 @@ HTML_TEMPLATE = """
                     thead.querySelectorAll('th').forEach(h => h.classList.remove('drag-col-over'));
                 });
                 th.addEventListener('dragover', (e) => {
+                    if (activeResizeState) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
                     th.classList.add('drag-col-over');
@@ -3901,6 +4210,7 @@ HTML_TEMPLATE = """
                     th.classList.remove('drag-col-over');
                 });
                 th.addEventListener('drop', (e) => {
+                    if (activeResizeState) return;
                     e.preventDefault();
                     th.classList.remove('drag-col-over');
                     const targetColId = th.getAttribute('data-col');
@@ -3911,6 +4221,7 @@ HTML_TEMPLATE = """
                         currentColumnOrder.splice(toIdx, 0, draggedColId);
                         localStorage.setItem('iljeomodo_col_order_v6', JSON.stringify(currentColumnOrder));
                         renderTableHeader();
+                        renderColWidthSliders();
                         renderMasterTable();
                     }
                 });
@@ -4012,11 +4323,13 @@ HTML_TEMPLATE = """
                         : '파일 업로드 대기 중';
                 }
 
-                // 2. 5대 Action KPI 통계 갱신
+                // 2. 6대 Action KPI 통계 갱신
                 document.getElementById('statUrgentOrders').innerText = (data.stats.urgent_order_count || 0);
                 document.getElementById('statOrderPrepare').innerText = (data.stats.order_prepare_count || 0);
                 document.getElementById('statCoupangTransfer').innerText = (data.stats.coupang_transfer_count || 0);
                 document.getElementById('statExpiryWarning').innerText = (data.stats.expiry_warning_count || 0);
+                const elNoSales = document.getElementById('statNoSales');
+                if (elNoSales) elNoSales.innerText = (data.stats.no_sales_count || 0);
                 document.getElementById('statSafeStock').innerText = (data.stats.safe_count || 0);
 
                 // 3. 재고 요약 바 및 카테고리별 단품 수 갱신
@@ -4072,7 +4385,7 @@ HTML_TEMPLATE = """
                 logBox.innerHTML = (data.logs || []).map(l => `<div>${escapeHtml(l)}</div>`).join('');
                 logBox.scrollTop = logBox.scrollHeight;
 
-                if (!isAnyModalOpen()) {
+                if (!isAnyModalOpen() && !activeResizeState) {
                     renderMasterTable();
                 }
             } catch (err) {
@@ -4081,6 +4394,7 @@ HTML_TEMPLATE = """
         }
 
         function renderMasterTable() {
+            syncSubrowViewportWidth();
             const tbody = document.getElementById('masterTableBody');
             const tfoot = document.getElementById('masterTableFoot');
             const query = (document.getElementById('searchInput').value || '').toLowerCase().trim();
@@ -4109,6 +4423,8 @@ HTML_TEMPLATE = """
                     if (m.status_color !== 'blue') return false;
                 } else if (activeStatus === 'expiry') {
                     if (m.status_color !== 'purple') return false;
+                } else if (activeStatus === 'no_sales') {
+                    if (m.status_color !== 'orange') return false;
                 } else if (activeStatus === 'safe') {
                     if (m.status_color !== 'green') return false;
                 }
@@ -4153,14 +4469,15 @@ HTML_TEMPLATE = """
                 else if (m.status_color === 'blue') badgeClass = "bg-blue-100 text-blue-900 font-bold border border-blue-300";
                 else if (m.status_color === 'amber') badgeClass = "bg-amber-100 text-amber-900 font-bold border border-amber-300";
                 else if (m.status_color === 'purple') badgeClass = "bg-purple-100 text-purple-900 font-bold border border-purple-300";
+                else if (m.status_color === 'orange') badgeClass = "bg-orange-100 text-orange-950 font-bold border border-orange-300";
                 else if (m.status_color === 'green') badgeClass = "bg-emerald-100 text-emerald-800 font-semibold border border-emerald-200";
 
                 let ptypeBadge = m.product_type === '수입'
-                    ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-200">수입</span>'
-                    : '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">사입</span>';
+                    ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-200 whitespace-nowrap">수입</span>'
+                    : '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap">사입</span>';
 
                 let b2bBadge = (m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0)
-                    ? `<span class="px-1 py-0.2 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 ml-1" title="B2B/세트 출고 연동: ${escapeHtml(m.b2b_linked_codes.map(b => b.s_code + ' (x' + b.multiplier + ')').join(', '))}">B2B연동</span>`
+                    ? `<span class="px-1 py-0.2 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap" title="B2B/세트 출고 연동: ${escapeHtml(m.b2b_linked_codes.map(b => b.s_code + ' (x' + b.multiplier + ')').join(', '))}">B2B연동</span>`
                     : '';
 
                 // 개미 소비기한 미니 태그
@@ -4177,37 +4494,46 @@ HTML_TEMPLATE = """
                         const expShort = m.nearest_expiry_date.length >= 10 ? m.nearest_expiry_date.slice(2) : m.nearest_expiry_date;
                         const adminMark = m.has_admin_expiry ? '✏️ ' : '';
                         tags += `
-                            <span class="inline-flex items-center text-[9px] px-1.5 py-0.2 rounded border ${dDayColor}" title="최단 소비기한: ${escapeHtml(m.nearest_expiry_date)}">
+                            <span class="inline-flex items-center text-[9px] px-1.5 py-0.2 rounded border whitespace-nowrap ${dDayColor}" title="최단 소비기한: ${escapeHtml(m.nearest_expiry_date)}">
                                 <i class="fa-regular fa-clock mr-1 text-[8px]"></i>${adminMark}${escapeHtml(expShort)} (D-${m.nearest_days_left})
                             </span>
                         `;
                     }
                     if (m.is_mixed_lots) {
-                        tags += `<span class="text-[9px] bg-slate-100 text-slate-600 border border-slate-200 px-1 rounded font-mono" title="${m.lot_count}개 로트/기한 혼합">${m.lot_count}개 기한</span>`;
+                        tags += `<span class="text-[9px] bg-slate-100 text-slate-600 border border-slate-200 px-1 rounded font-mono whitespace-nowrap" title="${m.lot_count}개 로트/기한 혼합">${m.lot_count}개 기한</span>`;
                     }
                     if (m.has_unassigned_stock) {
-                        tags += `<span class="text-[9px] bg-rose-100 text-rose-800 border border-rose-300 px-1 rounded font-bold" title="신규 입고분의 소비기한 지정 필요">⚠️ 기한미지정</span>`;
+                        tags += `<span class="text-[9px] bg-rose-100 text-rose-800 border border-rose-300 px-1 rounded font-bold whitespace-nowrap" title="신규 입고분의 소비기한 지정 필요">⚠️ 기한미지정</span>`;
                     }
                     expBadgeHtml = `<div class="mt-0.5 flex flex-wrap justify-end gap-1">${tags}</div>`;
                 }
 
-                // 쿠팡 런웨이 경고
-                let coupangRunwayHtml = m.coupang_runway_str;
+                // 개미 & 쿠팡 런웨이 경고 / 소진무 알람
+                let gaemiRunwayHtml = m.gaemi_runway_str === '소진무'
+                    ? `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-50 text-orange-800 border border-orange-200 font-bold text-[10px] whitespace-nowrap" title="개미창고 재고가 있으나 출고량 0건">소진무</span>`
+                    : escapeHtml(m.gaemi_runway_str);
+
+                let coupangRunwayHtml = escapeHtml(m.coupang_runway_str);
                 if (m.coupang_runway <= 7 && m.coupang_physical_total > 0) {
-                    coupangRunwayHtml = `<span class="text-rose-600 font-bold animate-pulse">🚨 ${m.coupang_runway_str}</span>`;
+                    coupangRunwayHtml = `<span class="text-rose-600 font-bold animate-pulse whitespace-nowrap">🚨 ${m.coupang_runway_str}</span>`;
+                } else if (m.coupang_runway_str === '소진무') {
+                    coupangRunwayHtml = `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-100 text-orange-900 border border-orange-300 font-bold text-[10px] whitespace-nowrap" title="쿠팡 창고 실물이 있으나 최근 7/30일 쿠팡 판매가 0건입니다">🔕 소진무</span>`;
                 }
 
                 // 통합 런웨이 프로그레스 바 시각화 (품목별/전역 기준 반영)
                 const effLt = m.effective_lead_time || 110;
                 const effPrep = m.effective_prepare_limit || 130;
+                const isStagnantTotal = (m.total_runway_str === '소진무');
+                const isOutOfStockTotal = (m.total_runway_str === '재고없음');
                 let runwayBarColor = "bg-emerald-500";
-                if (m.total_runway < effLt) runwayBarColor = "bg-rose-500";
+                if (isOutOfStockTotal || (!isStagnantTotal && m.total_runway < effLt)) runwayBarColor = "bg-rose-500";
+                else if (isStagnantTotal) runwayBarColor = "bg-orange-500";
                 else if (m.total_runway <= effPrep) runwayBarColor = "bg-amber-500";
                 const barBase = Math.max(180, effPrep + 30);
-                const barPercent = Math.min(100, Math.max(8, (m.total_runway / barBase) * 100));
+                const barPercent = isOutOfStockTotal ? 8 : (isStagnantTotal ? 100 : Math.min(100, Math.max(8, (m.total_runway / barBase) * 100)));
 
                 const inTransitHtml = (m.in_transit_qty && m.in_transit_qty > 0)
-                    ? `<div class="text-[9px] font-bold text-blue-700 mt-0.5" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 입고예정 +${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
+                    ? `<div class="text-[9px] font-bold text-blue-700 mt-0.5 whitespace-nowrap" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 +${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
                     : '';
 
                 const isSubExpanded = expandAllOptions || expandedRowIds.has(m.id);
@@ -4220,83 +4546,86 @@ HTML_TEMPLATE = """
                 currentColumnOrder.forEach(colId => {
                     const col = COLUMN_DEFS[colId];
                     if (colId === 'no') {
-                        html += `<td class="${col.tdClass}"><i class="fa-solid fa-grip-vertical text-slate-300 mr-1 text-[9px]"></i>${idx + 1}</td>`;
+                        html += `<td class="${col.tdClass} overflow-hidden"><i class="fa-solid fa-grip-vertical text-slate-300 mr-1 text-[9px]"></i>${idx + 1}</td>`;
                     } else if (colId === 'status') {
-                        html += `<td class="${col.tdClass}"><span class="inline-block px-2 py-0.5 rounded-full text-[10px] ${badgeClass}">${escapeHtml(m.status)}</span></td>`;
+                        html += `<td class="${col.tdClass} overflow-hidden"><span class="inline-block max-w-full truncate align-middle px-2 py-0.5 rounded-full text-[10px] break-keep ${badgeClass}" title="${escapeHtml(m.status)}">${escapeHtml(m.status)}</span></td>`;
                     } else if (colId === 'type') {
-                        html += `<td class="${col.tdClass}">${ptypeBadge}</td>`;
+                        html += `<td class="${col.tdClass} overflow-hidden">${ptypeBadge}</td>`;
                     } else if (colId === 'code') {
-                        html += `<td class="${col.tdClass}">${escapeHtml(m.seller_code)}${b2bBadge}</td>`;
+                        html += `<td class="${col.tdClass} overflow-hidden"><div class="flex flex-wrap items-center justify-center gap-0.5 min-w-0"><span class="truncate">${escapeHtml(m.seller_code)}</span>${b2bBadge}</div></td>`;
                     } else if (colId === 'name') {
                         const customLtBadge = (m.lead_time_days !== null && m.lead_time_days !== undefined)
-                            ? `<span class="text-[9px] bg-blue-50 text-blue-700 border border-blue-200 px-1 rounded font-mono ml-1" title="품목 개별 리드타임">LT ${m.lead_time_days}일</span>`
+                            ? `<span class="text-[9px] bg-blue-50 text-blue-700 border border-blue-200 px-1 rounded font-mono shrink-0" title="품목 개별 리드타임">LT ${m.lead_time_days}일</span>`
                             : '';
                         html += `
-                            <td class="${col.tdClass}">
-                                <div class="font-bold text-slate-800 flex items-center space-x-1">
-                                    <i class="fa-solid fa-angle-right text-[10px] text-slate-400"></i>
-                                    <span>${escapeHtml(m.name)}</span>
+                            <td class="${col.tdClass} overflow-hidden">
+                                <div class="font-bold text-slate-800 flex items-center gap-1 min-w-0">
+                                    <i id="chev_${escapeHtml(m.id)}" class="fa-solid fa-angle-right text-[10px] shrink-0 transition-transform ${isSubExpanded ? 'rotate-90 text-indigo-600' : 'text-slate-400'}"></i>
+                                    <span class="truncate" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</span>
                                     ${customLtBadge}
                                 </div>
-                                <div class="text-[10px] text-slate-400 mt-0.5 truncate max-w-xs">
+                                <div class="text-[10px] text-slate-400 mt-0.5 truncate">
                                     ${escapeHtml(m.category)} | ${escapeHtml(m.gaemi_details)}
                                 </div>
                             </td>
                         `;
                     } else if (colId === 'total_stock') {
                         html += `
-                            <td class="${col.tdClass}">
+                            <td class="${col.tdClass} overflow-hidden">
                                 <div>${m.master_physical_total.toLocaleString()}</div>
                                 ${inTransitHtml}
                             </td>
                         `;
                     } else if (colId === 'gaemi_stock') {
                         html += `
-                            <td class="${col.tdClass}">
+                            <td class="${col.tdClass} overflow-hidden">
                                 <div class="font-bold font-mono">${m.gaemi_total.toLocaleString()}</div>
                                 ${expBadgeHtml}
                             </td>
                         `;
                     } else if (colId === 'gaemi_runway') {
-                        html += `<td class="${col.tdClass}">${m.gaemi_runway_str}</td>`;
+                        html += `<td class="${col.tdClass} overflow-hidden">${gaemiRunwayHtml}</td>`;
                     } else if (colId === 'coupang_stock') {
                         html += `
-                            <td class="${col.tdClass}">
+                            <td class="${col.tdClass} overflow-hidden">
                                 <div class="font-bold font-mono">${m.coupang_physical_total.toLocaleString()}</div>
                                 ${m.coupang_package_total > 0 ? `<div class="text-[9px] text-slate-400 font-normal">(${m.coupang_package_total}세트)</div>` : ''}
                             </td>
                         `;
                     } else if (colId === 'coupang_runway') {
-                        html += `<td class="${col.tdClass}">${coupangRunwayHtml}</td>`;
+                        html += `<td class="${col.tdClass} overflow-hidden">${coupangRunwayHtml}</td>`;
                     } else if (colId === 'total_sales') {
                         const s7 = (m.total_sales_7d || 0).toLocaleString();
                         const s30 = (m.total_sales_30d || 0).toLocaleString();
                         html += `
-                            <td class="${col.tdClass}">
-                                <div class="font-bold font-mono text-indigo-950">${s7}개 <span class="text-slate-400 font-normal text-[10px]">/ 30일 ${s30}개</span></div>
-                                <div class="text-[9px] text-slate-500 font-normal mt-0.5">가중 일평균 ${m.daily_sales}개</div>
+                            <td class="${col.tdClass} overflow-hidden">
+                                <div class="font-bold font-mono text-indigo-950 truncate">${s7}개 <span class="text-slate-400 font-normal text-[10px]">/ 30일 ${s30}개</span></div>
+                                <div class="text-[9px] text-slate-500 font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
                             </td>
                         `;
                     } else if (colId === 'total_runway') {
+                        const totalRunwayBadge = isStagnantTotal
+                            ? `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-100 text-orange-950 border border-orange-300 font-bold font-mono text-[10px] whitespace-nowrap" title="재고 보유 중 최근 7/30일 출고량 0">🔕 소진무</span>`
+                            : `<div class="font-bold font-mono text-[11px] ${isOutOfStockTotal ? 'text-rose-700' : 'text-slate-800'} truncate">${escapeHtml(m.total_runway_str)}</div>`;
                         html += `
-                            <td class="${col.tdClass}">
-                                <div class="font-bold font-mono text-[11px] text-slate-800">${m.total_runway_str}</div>
-                                <div class="w-16 h-1.5 bg-slate-200 rounded-full mx-auto mt-1 overflow-hidden">
+                            <td class="${col.tdClass} overflow-hidden">
+                                ${totalRunwayBadge}
+                                <div class="w-full max-w-[68px] h-1.5 bg-slate-200 rounded-full mx-auto mt-1 overflow-hidden">
                                     <div class="${runwayBarColor} h-full rounded-full" style="width: ${barPercent}%"></div>
                                 </div>
                             </td>
                         `;
                     } else if (colId === 'action_cta') {
                         const mapBtn = isAdminMode
-                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="ml-1 px-2 py-1 rounded-md text-[10px] font-extrabold bg-indigo-100 hover:bg-indigo-200 text-indigo-900 border border-indigo-300 shadow-xs transition" title="3채널 코드 매핑 수동 지정">🔗 매핑</button>`
+                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="px-2 py-1 rounded-md text-[10px] font-extrabold bg-indigo-100 hover:bg-indigo-200 text-indigo-900 border border-indigo-300 shadow-xs transition whitespace-nowrap" title="3채널 코드 매핑 수동 지정">🔗 매핑</button>`
                             : '';
                         const editBtn = isAdminMode
-                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="ml-1 px-2 py-1 rounded-md text-[10px] font-extrabold bg-amber-400 hover:bg-amber-500 text-slate-950 shadow-xs transition" title="관리자 수정">✏️ 수정</button>`
+                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="px-2 py-1 rounded-md text-[10px] font-extrabold bg-amber-400 hover:bg-amber-500 text-slate-950 shadow-xs transition whitespace-nowrap" title="관리자 수정">✏️ 수정</button>`
                             : '';
                         html += `
-                            <td class="${col.tdClass}">
-                                <div class="inline-flex items-center justify-center flex-wrap gap-1">
-                                    <button type="button" class="px-2.5 py-1 rounded-md text-[10px] font-bold transition shadow-xs ${m.action_cta_class}">
+                            <td class="${col.tdClass} overflow-hidden">
+                                <div class="inline-flex items-center justify-center flex-wrap gap-1 max-w-full">
+                                    <button type="button" class="px-2.5 py-1 rounded-md text-[10px] font-bold transition shadow-xs whitespace-nowrap break-keep ${m.action_cta_class}">
                                         ${escapeHtml(m.action_cta)}
                                     </button>
                                     ${mapBtn}
@@ -4309,178 +4638,245 @@ HTML_TEMPLATE = """
 
                 html += `</tr>`;
 
-                // 세부 확장 행 (소비기한 로트 목록, 선입선출 우선순위, 소진 시뮬레이션 및 쿠팡 번들 내역)
+                // 세부 확장 행 (컴팩트 sticky 폭 · 모바일/PC 한눈 보기 UI)
                 html += `
-                    <tr id="subrow_${escapeHtml(m.id)}" class="${isSubExpanded ? '' : 'hidden'} bg-slate-50 border-b border-slate-200">
-                        <td colspan="${currentColumnOrder.length}" class="py-3 px-5">
-                            <div class="space-y-3">
+                    <tr id="subrow_${escapeHtml(m.id)}" class="subrow-tr ${isSubExpanded ? '' : 'hidden'} bg-slate-100/70 border-b border-slate-200">
+                        <td colspan="${currentColumnOrder.length}" class="subrow-cell p-0 align-top">
+                            <div class="subrow-sticky-shell px-2 sm:px-3.5 py-2.5" style="width: min(var(--subrow-view-w, 100%), 680px); max-width: 100%;">
+                                <div class="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden divide-y divide-slate-100">
 
-                                ${isAdminMode ? `
-                                    <div class="flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px]">
-                                        <span class="font-bold text-amber-950">⚙️ 관리자 빠른 작업 — 기준 리드타임: ${effLt}일 (안전버퍼 +${effPrep - effLt}일) · 기한경고: ${m.effective_expiry_warn || 120}일${m.in_transit_qty > 0 ? ` · 입고예정 +${m.in_transit_qty}개 (${escapeHtml(m.expected_arrival_date || '예정일 미정')})` : ''}</span>
-                                        <div class="flex items-center gap-1.5">
-                                            <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="openCodeMappingModal(this.dataset.prodId)" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-extrabold shadow-xs">
-                                                🔗 코드 매핑만 지정
-                                            </button>
-                                            <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="openEditProductModal(this.dataset.prodId)" class="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md font-extrabold shadow-xs">
-                                                ✏️ 이 상품 기준정보 · 소비기한 수정
-                                            </button>
-                                        </div>
-                                    </div>
-                                ` : (m.in_transit_qty > 0 ? `
-                                    <div class="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-[11px] text-blue-900 font-semibold">
-                                        🚢 입고 예정(선적/발주중): <strong>+${m.in_transit_qty.toLocaleString()}개</strong>${m.expected_arrival_date ? ` (예상 입고일: <strong>${escapeHtml(m.expected_arrival_date)}</strong>)` : ''}
-                                    </div>
-                                ` : '')}
-
-                                ${m.lot_sync_note ? `
-                                    <div class="bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 text-[11px] text-indigo-900 font-semibold">
-                                        🔄 <strong>로트 자동 동기화 메모:</strong> ${escapeHtml(m.lot_sync_note)}
-                                    </div>
-                                ` : ''}
-                                
-                                <!-- 1. 개미창고 소비기한 & 로트별 선입선출(FIFO) 현황판 -->
-                                ${activeGaemiLots.length > 0 ? `
-                                    <div class="bg-white rounded-lg border border-amber-200 p-3 shadow-xs">
-                                        <div class="flex items-center justify-between mb-2">
-                                            <div class="flex items-center space-x-1.5 text-xs font-bold text-amber-900">
-                                                <i class="fa-solid fa-clock-rotate-left text-amber-600"></i>
-                                                <span>개미창고 옵션별 소비기한 및 선입선출(FIFO) 출고 관리</span>
-                                            </div>
-                                            <span class="text-[10px] bg-amber-100 text-amber-900 font-semibold px-2 py-0.5 rounded">
-                                                총 ${activeGaemiLots.length}개 로트/옵션
-                                            </span>
-                                        </div>
-
-                                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-                                            ${activeGaemiLots.map((lot) => {
-                                                const isNearest = (lot.expiry_date && lot.expiry_date === m.nearest_expiry_date);
-                                                let fifoBadge = '<span class="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.2 rounded font-medium">출고 대기</span>';
-                                                let cardBorder = 'border-slate-200 bg-slate-50/50';
-
-                                                if (lot.source === 'unassigned') {
-                                                    fifoBadge = '<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-2 py-0.5 rounded-full border border-rose-200">⚠️ 기한 지정 필요</span>';
-                                                    cardBorder = 'border-rose-300 bg-rose-50/40';
-                                                } else if (isNearest && lot.stock > 0) {
-                                                    fifoBadge = '<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-2 py-0.5 rounded-full border border-rose-200 animate-pulse">🥇 1순위 우선 출고</span>';
-                                                    cardBorder = 'border-rose-300 bg-rose-50/40 ring-1 ring-rose-200';
-                                                }
-
-                                                const expText = lot.expiry_date ? `${lot.expiry_date} (D-${lot.days_left}일)` : '미기재/로트명';
-                                                const adminLotBadge = lot.is_admin_expiry ? ' <span class="text-[9px] bg-amber-100 text-amber-900 px-1 rounded font-bold">관리자</span>' : '';
-
-                                                return `
-                                                    <div class="p-2.5 rounded-lg border ${cardBorder} flex justify-between items-center">
-                                                        <div class="min-w-0 pr-2">
-                                                            <div class="font-bold text-slate-800 truncate">${escapeHtml(lot.option_name)}${adminLotBadge}</div>
-                                                            <div class="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center">
-                                                                <i class="fa-regular fa-calendar-check mr-1 text-slate-400"></i>
-                                                                <span>${escapeHtml(expText)}</span>
-                                                            </div>
-                                                        </div>
-                                                        <div class="text-right shrink-0">
-                                                            <div class="font-bold font-mono text-slate-800">${lot.stock.toLocaleString()}개</div>
-                                                            <div class="mt-1">${fifoBadge}</div>
-                                                        </div>
-                                                    </div>
-                                                `;
-                                            }).join('')}
-                                        </div>
-
-                                        <!-- 소비기한 vs 판매속도 소진 시뮬레이션 카드 -->
-                                        ${m.nearest_expiry_date ? `
-                                            <div class="mt-2.5 p-2.5 rounded-lg bg-amber-50/70 border border-amber-200 text-xs text-amber-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                                                <div class="flex items-center space-x-2">
-                                                    <i class="fa-solid fa-chart-pie text-amber-600 text-sm"></i>
-                                                    <div>
-                                                        <span class="font-bold">판매속도 대비 소진 시뮬레이션:</span>
-                                                        <span>7일(60%)+30일(40%) 가중 일평균 <strong>${m.daily_sales}개</strong> 판매 기준, 최단 소비기한(<strong>${escapeHtml(m.nearest_expiry_date)}</strong>, D-${m.nearest_days_left}일)까지 <strong>${m.projected_sales_to_exp}개</strong> 소진 예상 (로트 재고 ${m.nearest_lot_stock}개)</span>
-                                                    </div>
+                                    <!-- 0. 한눈에 보는 상단 품목/수량 요약 Strip -->
+                                    <div class="p-2.5 sm:p-3 bg-slate-50/90 space-y-2">
+                                        <div class="flex items-start justify-between gap-2">
+                                            <div class="min-w-0 flex-1">
+                                                <div class="flex flex-wrap items-center gap-1.5">
+                                                    ${ptypeBadge}
+                                                    <span class="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">${escapeHtml(m.seller_code)}</span>
+                                                    <span class="px-2 py-0.5 rounded-full text-[10px] break-keep ${badgeClass}">${escapeHtml(m.status)}</span>
                                                 </div>
-                                                <div>
-                                                    ${m.expiry_risk_qty > 0 ? `
-                                                        <span class="inline-block bg-rose-600 text-white font-bold px-2.5 py-1 rounded text-[11px] shadow-xs">
-                                                            🚨 기한 내 약 ${m.expiry_risk_qty}개 미소진 위험 (특가/번들 할인 필요)
-                                                        </span>
-                                                    ` : `
-                                                        <span class="inline-block bg-emerald-600 text-white font-bold px-2.5 py-1 rounded text-[11px] shadow-xs">
-                                                            ✅ 기한 내 100% 정상 소진 예상
-                                                        </span>
-                                                    `}
+                                                <div class="font-extrabold text-slate-900 text-xs sm:text-sm mt-1 break-words">${escapeHtml(m.name)}</div>
+                                            </div>
+                                            <button type="button" onclick="event.stopPropagation(); toggleSingleOption('${escapeHtml(m.id)}')" class="shrink-0 px-2 py-1 rounded-lg bg-white hover:bg-slate-200 border border-slate-200 text-slate-600 text-[10px] font-bold flex items-center gap-1 shadow-xs">
+                                                <i class="fa-solid fa-xmark"></i>
+                                                <span>접기</span>
+                                            </button>
+                                        </div>
+
+                                        ${m.is_no_sales ? `
+                                            <div class="bg-orange-50 border border-orange-300 rounded-lg px-2.5 py-2 text-[11px] text-orange-950 flex items-start gap-2">
+                                                <i class="fa-solid fa-bell text-orange-600 mt-0.5 shrink-0"></i>
+                                                <div class="min-w-0 break-words">
+                                                    <span class="font-extrabold">판매 정체(소진무) 알람:</span>
+                                                    <span>현재 재고 <strong>${m.master_physical_total.toLocaleString()}개</strong> 보유 중이나 최근 7일·30일 출고량이 <strong>0개</strong>입니다. 상품 노출·프로모션 또는 채널 코드 매핑을 점검하세요.</span>
                                                 </div>
                                             </div>
                                         ` : ''}
-                                    </div>
-                                ` : ''}
 
-                                <!-- 2. B2B/세트(S코드) 출고 연동 안내 바 -->
-                                ${m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0 ? `
-                                    <div class="bg-indigo-50/70 rounded-lg border border-indigo-200 p-2.5 text-[11px] text-indigo-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                                        <div class="flex items-center space-x-1.5">
-                                            <i class="fa-solid fa-boxes-stacked text-indigo-600"></i>
-                                            <span class="font-bold">B2B/세트(S코드) 출고 연동:</span>
-                                            <span>이 단품은 <strong>${escapeHtml(m.b2b_linked_codes.map(b => `${b.s_code} (${b.desc})`).join(', '))}</strong> 주문 시 개미창고 실물 재고에서 차감되며, 출고량(7일/30일) 및 런웨이에 자동 환산 합산되어 있습니다.</span>
+                                        <!-- 핵심 수량 4칸 그리드 (모바일 2x2 / PC 4열: 스크롤 없이 즉시 확인) -->
+                                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[11px]">
+                                            <div class="bg-emerald-50/70 border border-emerald-200 rounded-lg px-2.5 py-1.5">
+                                                <div class="text-[10px] font-bold text-emerald-800">총 가용재고</div>
+                                                <div class="font-black font-mono text-sm text-emerald-950">${m.master_physical_total.toLocaleString()}개</div>
+                                                ${m.in_transit_qty > 0
+                                                    ? `<div class="text-[9px] font-bold text-blue-700 truncate">🚢 예정 +${m.in_transit_qty.toLocaleString()}개</div>`
+                                                    : `<div class="text-[9px] text-emerald-700/80">전체 창고 합산</div>`}
+                                            </div>
+                                            <div class="bg-amber-50/70 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                                                <div class="text-[10px] font-bold text-amber-800">개미창고(3PL)</div>
+                                                <div class="font-black font-mono text-sm text-amber-950">${m.gaemi_total.toLocaleString()}개</div>
+                                                <div class="text-[9px] font-semibold text-amber-800 truncate">런웨이 ${escapeHtml(m.gaemi_runway_str)}</div>
+                                            </div>
+                                            <div class="bg-blue-50/70 border border-blue-200 rounded-lg px-2.5 py-1.5">
+                                                <div class="text-[10px] font-bold text-blue-800">쿠팡(실물)</div>
+                                                <div class="font-black font-mono text-sm text-blue-950">${m.coupang_physical_total.toLocaleString()}개</div>
+                                                <div class="text-[9px] font-semibold text-blue-800 truncate">${m.coupang_package_total}세트 · ${escapeHtml(m.coupang_runway_str)}</div>
+                                            </div>
+                                            <div class="${m.is_no_sales ? 'bg-orange-50/80 border-orange-300' : 'bg-indigo-50/70 border-indigo-200'} border rounded-lg px-2.5 py-1.5">
+                                                <div class="text-[10px] font-bold ${m.is_no_sales ? 'text-orange-900' : 'text-indigo-800'}">출고 속도 · 통합</div>
+                                                <div class="font-black font-mono text-sm ${m.is_no_sales ? 'text-orange-950' : 'text-indigo-950'}">일 ${m.daily_sales}개</div>
+                                                <div class="text-[9px] font-semibold ${m.is_no_sales ? 'text-orange-800' : 'text-indigo-700'} truncate">7일 ${m.total_sales_7d} · 30일 ${m.total_sales_30d || 0}</div>
+                                            </div>
                                         </div>
-                                        ${m.b2b_shared_sales && m.b2b_shared_sales.length > 0 ? `
-                                            <span class="text-[10px] bg-indigo-100 text-indigo-800 font-semibold px-2 py-0.5 rounded border border-indigo-200 whitespace-nowrap">
-                                                B2B 출고량: 7일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_7d, 0)}개 / 30일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_30d, 0)}개
-                                            </span>
-                                        ` : `
-                                            <span class="text-[10px] text-slate-400 font-normal whitespace-nowrap">최근 S코드 주문 없음</span>
-                                        `}
                                     </div>
-                                ` : ''}
 
-                                ${m.note ? `
-                                    <div class="bg-purple-50/50 rounded border border-purple-200 p-2 text-[11px] text-purple-900">
-                                        <i class="fa-solid fa-circle-info mr-1 text-purple-600"></i>
-                                        <span class="font-bold">제품 참고사항:</span> ${escapeHtml(m.note)}
-                                    </div>
-                                ` : ''}
-
-                                <!-- 3. 쿠팡 옵션 번들 내역 -->
-                                ${m.options && m.options.length > 0 ? `
-                                    <div class="bg-white rounded-lg border border-slate-200 p-2.5 shadow-sm">
-                                        <div class="text-[11px] font-bold text-blue-700 mb-1 flex items-center space-x-1">
-                                            <i class="fa-solid fa-cubes"></i>
-                                            <span>쿠팡 윙 등록 옵션 ID별 번들 현황</span>
-                                        </div>
-                                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
-                                            ${m.options.map(opt => `
-                                                <div class="bg-blue-50/40 p-2 rounded border border-blue-100 flex justify-between items-center">
-                                                    <div>
-                                                        <span class="font-bold text-slate-800">${escapeHtml(opt.name)}</span>
-                                                        <span class="text-slate-400 font-mono block text-[10px]">${escapeHtml(opt.id)} (${opt.bundle}개입)</span>
-                                                    </div>
-                                                    <div class="text-right">
-                                                        <span class="font-bold text-blue-700 font-mono">${opt.coupang_stock}세트</span>
-                                                        <span class="text-[10px] text-slate-500 block">실물 ${opt.physical_stock}개 | 7일출고: ${opt.sales_7d_physical}개</span>
+                                    ${(isAdminMode || m.in_transit_qty > 0 || m.lot_sync_note) ? `
+                                        <div class="p-2.5 sm:p-3 space-y-1.5 text-[11px]">
+                                            ${isAdminMode ? `
+                                                <div class="flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+                                                    <span class="font-bold text-amber-950 break-words">⚙️ 리드타임 ${effLt}일 (안전 +${effPrep - effLt}일) · 기한경고 ${m.effective_expiry_warn || 120}일${m.in_transit_qty > 0 ? ` · 입고예정 +${m.in_transit_qty}개 (${escapeHtml(m.expected_arrival_date || '미정')})` : ''}</span>
+                                                    <div class="flex flex-wrap items-center gap-1.5">
+                                                        <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-extrabold shadow-xs">
+                                                            🔗 코드 매핑
+                                                        </button>
+                                                        <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md font-extrabold shadow-xs">
+                                                            ✏️ 정보 · 소비기한 수정
+                                                        </button>
                                                     </div>
                                                 </div>
-                                            `).join('')}
+                                            ` : (m.in_transit_qty > 0 ? `
+                                                <div class="bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5 text-blue-900 font-semibold break-words">
+                                                    🚢 입고 예정: <strong>+${m.in_transit_qty.toLocaleString()}개</strong>${m.expected_arrival_date ? ` (예상일: <strong>${escapeHtml(m.expected_arrival_date)}</strong>)` : ''}
+                                                </div>
+                                            ` : '')}
+                                            ${m.lot_sync_note ? `
+                                                <div class="bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1.5 text-indigo-900 font-semibold break-words">
+                                                    🔄 <strong>로트 동기화:</strong> ${escapeHtml(m.lot_sync_note)}
+                                                </div>
+                                            ` : ''}
                                         </div>
-                                    </div>
-                                ` : ''}
+                                    ` : ''}
 
-                                <!-- 4. 타채널 주문 내역 -->
-                                ${m.recent_orders && m.recent_orders.length > 0 ? `
-                                    <div class="bg-white rounded-lg border border-slate-200 p-2.5 shadow-sm">
-                                        <div class="text-[11px] font-bold text-indigo-700 mb-1 flex items-center justify-between">
-                                            <div class="flex items-center space-x-1">
-                                                <i class="fa-solid fa-receipt"></i>
-                                                <span>쿠팡외 타채널 출고: 7일 <strong>${m.other_sales_7d}개</strong> / 30일 <strong>${m.other_sales_30d || m.other_sales_7d}개</strong></span>
-                                            </div>
-                                            <span class="text-[10px] text-slate-400 font-normal">최근 주문 5건 표시</span>
-                                        </div>
-                                        <div class="flex flex-wrap gap-1.5 text-[10px]">
-                                            ${m.recent_orders.map(ord => `
-                                                <span class="bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded text-slate-700">
-                                                    <span class="font-semibold text-indigo-800">${escapeHtml(ord.mall || '스마트스토어')}</span>: ${ord.qty}개 (${escapeHtml(ord.date)})
+                                    <!-- 1. 개미창고 소비기한 & 선입선출(FIFO) 현황판 -->
+                                    ${activeGaemiLots.length > 0 ? `
+                                        <div class="p-2.5 sm:p-3 space-y-2">
+                                            <div class="flex items-center justify-between gap-2">
+                                                <div class="flex items-center space-x-1.5 text-xs font-bold text-amber-900">
+                                                    <i class="fa-solid fa-clock-rotate-left text-amber-600"></i>
+                                                    <span>개미창고 소비기한 · FIFO</span>
+                                                </div>
+                                                <span class="text-[10px] bg-amber-100 text-amber-900 font-semibold px-2 py-0.5 rounded shrink-0">
+                                                    ${activeGaemiLots.length}개 로트
                                                 </span>
-                                            `).join('')}
+                                            </div>
+
+                                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
+                                                ${activeGaemiLots.map((lot) => {
+                                                    const isNearest = (lot.expiry_date && lot.expiry_date === m.nearest_expiry_date);
+                                                    let fifoBadge = '<span class="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.2 rounded font-medium">출고 대기</span>';
+                                                    let cardBorder = 'border-slate-200 bg-slate-50/50';
+
+                                                    if (lot.source === 'unassigned') {
+                                                        fifoBadge = '<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-2 py-0.5 rounded-full border border-rose-200">⚠️ 기한 필요</span>';
+                                                        cardBorder = 'border-rose-300 bg-rose-50/40';
+                                                    } else if (isNearest && lot.stock > 0) {
+                                                        fifoBadge = '<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-2 py-0.5 rounded-full border border-rose-200 animate-pulse">🥇 1순위 출고</span>';
+                                                        cardBorder = 'border-rose-300 bg-rose-50/40 ring-1 ring-rose-200';
+                                                    }
+
+                                                    const expText = lot.expiry_date ? `${lot.expiry_date} (D-${lot.days_left}일)` : '미기재/로트명';
+                                                    const adminLotBadge = lot.is_admin_expiry ? ' <span class="text-[9px] bg-amber-100 text-amber-900 px-1 rounded font-bold">관리자</span>' : '';
+
+                                                    return `
+                                                        <div class="p-2 rounded-lg border ${cardBorder} flex justify-between items-center gap-2">
+                                                            <div class="min-w-0 flex-1">
+                                                                <div class="font-bold text-slate-800 truncate">${escapeHtml(lot.option_name)}${adminLotBadge}</div>
+                                                                <div class="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center">
+                                                                    <i class="fa-regular fa-calendar-check mr-1 text-slate-400 shrink-0"></i>
+                                                                    <span class="truncate">${escapeHtml(expText)}</span>
+                                                                </div>
+                                                            </div>
+                                                            <div class="text-right shrink-0">
+                                                                <div class="font-bold font-mono text-slate-800">${lot.stock.toLocaleString()}개</div>
+                                                                <div class="mt-0.5">${fifoBadge}</div>
+                                                            </div>
+                                                        </div>
+                                                    `;
+                                                }).join('')}
+                                            </div>
+
+                                            <!-- 소비기한 vs 판매속도 소진 시뮬레이션 카드 -->
+                                            ${m.nearest_expiry_date ? `
+                                                <div class="p-2.5 rounded-lg bg-amber-50/70 border border-amber-200 text-[11px] text-amber-950 space-y-1.5">
+                                                    <div class="flex items-start gap-1.5">
+                                                        <i class="fa-solid fa-chart-pie text-amber-600 mt-0.5 shrink-0"></i>
+                                                        <div class="min-w-0 break-words leading-relaxed">
+                                                            <span class="font-bold">소진 시뮬레이션:</span>
+                                                            <span>일평균 <strong>${m.daily_sales}개</strong> 기준, 최단기한(<strong>${escapeHtml(m.nearest_expiry_date)}</strong>, D-${m.nearest_days_left}일)까지 <strong>${m.projected_sales_to_exp}개</strong> 소진 예상 (로트 ${m.nearest_lot_stock}개)</span>
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        ${m.expiry_risk_qty > 0 ? `
+                                                            <span class="inline-block w-full sm:w-auto text-center bg-rose-600 text-white font-bold px-2.5 py-1 rounded text-[11px] shadow-xs">
+                                                                🚨 기한 내 약 ${m.expiry_risk_qty}개 미소진 위험 (특가/번들 할인 필요)
+                                                            </span>
+                                                        ` : `
+                                                            <span class="inline-block w-full sm:w-auto text-center bg-emerald-600 text-white font-bold px-2.5 py-1 rounded text-[11px] shadow-xs">
+                                                                ✅ 기한 내 100% 정상 소진 예상
+                                                            </span>
+                                                        `}
+                                                    </div>
+                                                </div>
+                                            ` : ''}
                                         </div>
-                                    </div>
-                                ` : ''}
+                                    ` : ''}
+
+                                    <!-- 2. 쿠팡 옵션 번들 내역 (한눈에 비교 가능한 컴팩트 리스트) -->
+                                    ${m.options && m.options.length > 0 ? `
+                                        <div class="p-2.5 sm:p-3 space-y-1.5">
+                                            <div class="flex items-center justify-between text-[11px] font-bold text-blue-800">
+                                                <div class="flex items-center space-x-1">
+                                                    <i class="fa-solid fa-cubes"></i>
+                                                    <span>쿠팡 윙 옵션별 번들 · 실물 재고</span>
+                                                </div>
+                                                <span class="text-[10px] font-mono text-blue-600">총 ${m.options.length}개 옵션</span>
+                                            </div>
+                                            <div class="rounded-lg border border-blue-200 divide-y divide-blue-100 bg-blue-50/25 overflow-hidden">
+                                                ${m.options.map(opt => `
+                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px]">
+                                                        <div class="min-w-0 flex-1">
+                                                            <div class="font-bold text-slate-800 truncate">${escapeHtml(opt.name)}</div>
+                                                            <div class="text-[10px] text-slate-500 font-mono truncate">${escapeHtml(opt.id)} · ${opt.bundle}개입</div>
+                                                        </div>
+                                                        <div class="text-right shrink-0 font-mono">
+                                                            <div class="font-extrabold text-blue-700">${opt.coupang_stock}세트 <span class="text-slate-600 font-semibold">(실물 ${opt.physical_stock}개)</span></div>
+                                                            <div class="text-[10px] text-slate-500">7일 출고: <strong class="text-slate-700">${opt.sales_7d_physical}개</strong></div>
+                                                        </div>
+                                                    </div>
+                                                `).join('')}
+                                            </div>
+                                        </div>
+                                    ` : ''}
+
+                                    <!-- 3. B2B/세트(S코드) 연동, 제품 참고사항, 타채널 최근 주문 -->
+                                    ${((m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0) || m.note || (m.recent_orders && m.recent_orders.length > 0)) ? `
+                                        <div class="p-2.5 sm:p-3 space-y-2">
+                                            ${m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0 ? `
+                                                <div class="bg-indigo-50/70 rounded-lg border border-indigo-200 p-2 text-[11px] text-indigo-900 space-y-1">
+                                                    <div class="flex items-start gap-1.5 break-words">
+                                                        <i class="fa-solid fa-boxes-stacked text-indigo-600 mt-0.5 shrink-0"></i>
+                                                        <div>
+                                                            <span class="font-bold">B2B/세트 연동:</span>
+                                                            <span><strong>${escapeHtml(m.b2b_linked_codes.map(b => `${b.s_code} (${b.desc})`).join(', '))}</strong> 주문 시 실물 재고 차감 및 출고 합산</span>
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        ${m.b2b_shared_sales && m.b2b_shared_sales.length > 0 ? `
+                                                            <span class="inline-block text-[10px] bg-indigo-100 text-indigo-800 font-semibold px-2 py-0.5 rounded border border-indigo-200">
+                                                                B2B 출고량: 7일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_7d, 0)}개 / 30일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_30d, 0)}개
+                                                            </span>
+                                                        ` : `
+                                                            <span class="text-[10px] text-slate-400">최근 S코드 주문 없음</span>
+                                                        `}
+                                                    </div>
+                                                </div>
+                                            ` : ''}
+
+                                            ${m.note ? `
+                                                <div class="bg-purple-50/50 rounded-lg border border-purple-200 p-2 text-[11px] text-purple-900 break-words">
+                                                    <i class="fa-solid fa-circle-info mr-1 text-purple-600"></i>
+                                                    <span class="font-bold">참고사항:</span> ${escapeHtml(m.note)}
+                                                </div>
+                                            ` : ''}
+
+                                            ${m.recent_orders && m.recent_orders.length > 0 ? `
+                                                <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 space-y-1">
+                                                    <div class="text-[11px] font-bold text-indigo-700 flex flex-wrap items-center justify-between gap-1">
+                                                        <span><i class="fa-solid fa-receipt mr-1"></i>쿠팡외 출고: 7일 <strong>${m.other_sales_7d}개</strong> / 30일 <strong>${m.other_sales_30d || m.other_sales_7d}개</strong></span>
+                                                        <span class="text-[10px] text-slate-400 font-normal">최근 주문 5건</span>
+                                                    </div>
+                                                    <div class="flex flex-wrap gap-1 text-[10px]">
+                                                        ${m.recent_orders.map(ord => `
+                                                            <span class="bg-white border border-indigo-100 px-2 py-0.5 rounded text-slate-700">
+                                                                <span class="font-semibold text-indigo-800">${escapeHtml(ord.mall || '스마트스토어')}</span>: ${ord.qty}개 (${escapeHtml(ord.date)})
+                                                            </span>
+                                                        `).join('')}
+                                                    </div>
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    ` : ''}
+
+                                </div>
                             </div>
                         </td>
                     </tr>
@@ -4489,42 +4885,43 @@ HTML_TEMPLATE = """
 
             tbody.innerHTML = html;
             setupRowDragEvents();
+            syncSubrowViewportWidth();
 
             // 5. 하단 합계란(tfoot) 렌더링
             let footHtml = "<tr>";
             currentColumnOrder.forEach(colId => {
                 if (colId === 'no') {
-                    footHtml += `<td class="py-2.5 px-3 text-center text-[11px] font-bold">합계</td>`;
+                    footHtml += `<td class="py-2.5 px-1.5 text-center text-[11px] font-bold overflow-hidden">합계</td>`;
                 } else if (colId === 'status') {
-                    footHtml += `<td class="py-2.5 px-3 text-center text-[11px] font-bold text-slate-600">위험도 정렬</td>`;
+                    footHtml += `<td class="py-2.5 px-1.5 text-center text-[11px] font-bold text-slate-600 overflow-hidden">위험도 정렬</td>`;
                 } else if (colId === 'name') {
-                    footHtml += `<td class="py-2.5 px-3 text-left font-black text-slate-900">총 ${filtered.length}개 단품 (실물 합계)</td>`;
+                    footHtml += `<td class="py-2.5 px-2 text-left font-black text-slate-900 truncate overflow-hidden">총 ${filtered.length}개 단품 (실물 합계)</td>`;
                 } else if (colId === 'total_stock') {
-                    footHtml += `<td class="py-2.5 px-3 text-right font-black text-emerald-800 text-xs bg-emerald-100/60" title="단품 실물 기준 합계">${sumTotalStock.toLocaleString()}</td>`;
+                    footHtml += `<td class="py-2.5 px-2 text-right font-black text-emerald-800 text-xs bg-emerald-100/60 overflow-hidden" title="단품 실물 기준 합계">${sumTotalStock.toLocaleString()}</td>`;
                 } else if (colId === 'gaemi_stock') {
-                    footHtml += `<td class="py-2.5 px-3 text-right font-black text-amber-800 text-xs bg-amber-100/60">${sumGaemiStock.toLocaleString()}</td>`;
+                    footHtml += `<td class="py-2.5 px-2 text-right font-black text-amber-800 text-xs bg-amber-100/60 overflow-hidden">${sumGaemiStock.toLocaleString()}</td>`;
                 } else if (colId === 'gaemi_runway') {
-                    const avgGRunway = sumDailySales > 0 ? (sumGaemiStock / sumDailySales).toFixed(1) + '일' : '-';
-                    footHtml += `<td class="py-2.5 px-3 text-center font-bold text-amber-900 text-[11px]">${avgGRunway}</td>`;
+                    const avgGRunway = sumDailySales > 0 ? (sumGaemiStock / sumDailySales).toFixed(1) + '일' : (sumGaemiStock > 0 ? '소진무' : '-');
+                    footHtml += `<td class="py-2.5 px-1.5 text-center font-bold text-amber-900 text-[11px] overflow-hidden">${avgGRunway}</td>`;
                 } else if (colId === 'coupang_stock') {
-                    footHtml += `<td class="py-2.5 px-3 text-right font-black text-blue-800 text-xs bg-blue-100/60">${sumCoupangStock.toLocaleString()}</td>`;
+                    footHtml += `<td class="py-2.5 px-2 text-right font-black text-blue-800 text-xs bg-blue-100/60 overflow-hidden">${sumCoupangStock.toLocaleString()}</td>`;
                 } else if (colId === 'coupang_runway') {
-                    const avgCRunway = sumCoupangSales > 0 ? (sumCoupangStock / (sumCoupangSales / 7.0)).toFixed(1) + '일' : '-';
-                    footHtml += `<td class="py-2.5 px-3 text-center font-bold text-blue-900 text-[11px]">${avgCRunway}</td>`;
+                    const avgCRunway = sumCoupangSales > 0 ? (sumCoupangStock / (sumCoupangSales / 7.0)).toFixed(1) + '일' : (sumCoupangStock > 0 ? '소진무' : '-');
+                    footHtml += `<td class="py-2.5 px-1.5 text-center font-bold text-blue-900 text-[11px] overflow-hidden">${avgCRunway}</td>`;
                 } else if (colId === 'total_sales') {
                     footHtml += `
-                        <td class="py-2.5 px-3 text-right font-black text-indigo-950 text-xs bg-indigo-100/60">
-                            <div>7일 ${sumTotalSales.toLocaleString()}개</div>
-                            <div class="text-[10px] text-slate-500 font-normal">30일 ${sumTotalSales30d.toLocaleString()}개</div>
+                        <td class="py-2.5 px-2 text-right font-black text-indigo-950 text-xs bg-indigo-100/60 overflow-hidden">
+                            <div class="truncate">7일 ${sumTotalSales.toLocaleString()}개</div>
+                            <div class="text-[10px] text-slate-500 font-normal truncate">30일 ${sumTotalSales30d.toLocaleString()}개</div>
                         </td>
                     `;
                 } else if (colId === 'total_runway') {
-                    const avgDoc = sumDailySales > 0 ? (sumTotalStock / sumDailySales).toFixed(1) + '일' : '안전';
-                    footHtml += `<td class="py-2.5 px-3 text-center font-bold text-slate-800 text-[11px]">평균 ${avgDoc}</td>`;
+                    const avgDoc = sumDailySales > 0 ? (sumTotalStock / sumDailySales).toFixed(1) + '일' : (sumTotalStock > 0 ? '소진무' : '재고없음');
+                    footHtml += `<td class="py-2.5 px-1.5 text-center font-bold text-slate-800 text-[11px] overflow-hidden truncate">평균 ${avgDoc}</td>`;
                 } else if (colId === 'action_cta') {
-                    footHtml += `<td class="py-2.5 px-3 text-center text-slate-500 font-semibold text-[10px]">결품 0 목표</td>`;
+                    footHtml += `<td class="py-2.5 px-1.5 text-center text-slate-500 font-semibold text-[10px] overflow-hidden">결품 0 목표</td>`;
                 } else {
-                    footHtml += `<td class="py-2.5 px-3 text-center text-slate-400">-</td>`;
+                    footHtml += `<td class="py-2.5 px-1.5 text-center text-slate-400 overflow-hidden">-</td>`;
                 }
             });
             footHtml += "</tr>";
@@ -6942,7 +7339,13 @@ HTML_TEMPLATE = """
         }
 
         // 초기화
+        window.addEventListener('resize', syncSubrowViewportWidth);
+        const masterTableScrollWrapEl = document.getElementById('masterTableScrollWrap');
+        if (masterTableScrollWrapEl && typeof ResizeObserver !== 'undefined') {
+            new ResizeObserver(() => syncSubrowViewportWidth()).observe(masterTableScrollWrapEl);
+        }
         renderTableHeader();
+        syncSubrowViewportWidth();
         checkAdminSession();
         setInterval(fetchSummary, 3000);
         fetchSummary();

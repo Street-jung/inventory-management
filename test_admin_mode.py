@@ -874,6 +874,173 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         self.assertIn("if (rowStock > 0) entry.lot_count += 1", html)
         print("OK: [Admin Test 12] 개미창고 재고 0개 로트 소비기한 중복 노출/오탐 제거 검증 완료")
 
+    def test_13_no_sales_alarm_column_resizer_and_compact_subrow(self):
+        """소진무(재고 보유 · 판매 0) 알람 추천 조치, 열 너비 조정 UI/JS, 컴팩트 sticky 세부행 레이아웃 검증"""
+        headers = self._login("1500")
+
+        # 1. 재고·매출 초기화 후 3개 케이스 구성:
+        #    (A) 20EO02: 개미 재고 1208개, 판매 0건, 먼 소비기한(2028-12-31) -> 🟠 판매 정체 (소진무) / 🔔 미판매 점검 알람
+        #    (B) 20EK02: 개미 재고 982개, 판매 0건, 임박 소비기한(30일 남음) -> ⏳ 기한 주의 유지 + is_no_sales=True
+        #    (C) 20DC02: 개미 400개 + 쿠팡 실물 60개(쿠팡 판매 0), 쿠팡외 일평균 1개(7일 7개) -> 정상 안전 + is_coupang_no_sales=True
+        #    (D) 10GL04: 재고 0개, 판매 0건 -> 🔴 결품 (0개), is_no_sales=False
+        far_exp = (datetime.now() + timedelta(days=600)).strftime("%Y-%m-%d")
+        near_exp = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+        with app_module.data_lock:
+            app_module.app_state["gaemi_inventory"] = {
+                "PJ1489503": [
+                    {
+                        "lot_id": "PJ1489503::500ml::01",
+                        "gaemi_code": "PJ1489503",
+                        "option_name": "500ml",
+                        "stock": 1208,
+                        "expiry_date": far_exp,
+                        "reg_date": "2026-10-01",
+                    }
+                ],
+                "PJ1491144": [
+                    {
+                        "lot_id": "PJ1491144::정제 1L::01",
+                        "gaemi_code": "PJ1491144",
+                        "option_name": "정제 1L",
+                        "stock": 982,
+                        "expiry_date": near_exp,
+                        "reg_date": "2026-10-01",
+                    }
+                ],
+                "PJ_DC02_TEST": [
+                    {
+                        "lot_id": "PJ_DC02_TEST::500ml::01",
+                        "gaemi_code": "PJ_DC02_TEST",
+                        "option_name": "500ml",
+                        "stock": 400,
+                        "expiry_date": far_exp,
+                        "reg_date": "2026-10-01",
+                    }
+                ],
+            }
+            app_module.app_state["coupang_inventory"] = {
+                "OPT_DC02_COUPANG_ONLY": {
+                    "stock": 60,
+                    "sales_7d": 0,
+                    "sales_30d": 0,
+                    "option_name": "1개",
+                    "product_name": "데체코 올리브오일",
+                }
+            }
+            app_module.app_state["sales_inventory"] = {
+                "20DC02": {
+                    "total_7d": 7,
+                    "total_30d": 30,
+                    "orders": [{"date": "2026-11-09 10:00:00", "qty": 1, "mall": "스마트스토어", "name": "데체코"}],
+                }
+            }
+            app_module.app_state["lot_expiry_overrides"] = {}
+
+        # 매핑 지정: 20EO02, 20EK02, 20DC02
+        self.assertEqual(self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20EO02",
+            "gaemi_mappings": [{"gaemi_code": "PJ1489503", "option_name": "500ml"}],
+            "sales_codes": [],
+            "options": [],
+        }).status_code, 200)
+        self.assertEqual(self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20EK02",
+            "gaemi_mappings": [{"gaemi_code": "PJ1491144", "option_name": "정제 1L"}],
+            "sales_codes": [],
+            "options": [],
+        }).status_code, 200)
+        self.assertEqual(self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20DC02",
+            "gaemi_mappings": [{"gaemi_code": "PJ_DC02_TEST", "option_name": "500ml"}],
+            "sales_codes": ["20DC02"],
+            "options": [{"id": "OPT_DC02_COUPANG_ONLY", "bundle": 1, "name": "1개"}],
+        }).status_code, 200)
+
+        res = self.client.get("/api/summary")
+        self.assertEqual(res.status_code, 200)
+        summary = json.loads(res.data)
+        stats = summary["stats"]
+        masters_by_code = {m["seller_code"]: m for m in summary["masters"]}
+
+        # (A) 20EO02: 소진무 판매 정체 알람 판정 확인
+        eo02 = masters_by_code["20EO02"]
+        self.assertEqual(eo02["master_physical_total"], 1208)
+        self.assertEqual(eo02["daily_sales"], 0)
+        self.assertEqual(eo02["total_runway_str"], "소진무")
+        self.assertEqual(eo02["status"], "🟠 판매 정체 (소진무)")
+        self.assertEqual(eo02["status_color"], "orange")
+        self.assertEqual(eo02["action_cta"], "🔔 미판매 점검 알람")
+        self.assertTrue(eo02["is_no_sales"])
+        self.assertGreaterEqual(stats["no_sales_count"], 1)
+
+        # (B) 20EK02: 임박 소비기한 우선 -> purple 유지 + is_no_sales True
+        ek02 = masters_by_code["20EK02"]
+        self.assertEqual(ek02["status_color"], "purple")
+        self.assertIn("기한 주의", ek02["status"])
+        self.assertTrue(ek02["is_no_sales"])
+
+        # (C) 20DC02: 타채널 판매로 전체는 정상 안전(D-460일), 쿠팡만 실물 보유+미판매 -> is_coupang_no_sales=True
+        dc02 = masters_by_code["20DC02"]
+        self.assertEqual(dc02["status_color"], "green")
+        self.assertIn("정상 안전", dc02["status"])
+        self.assertFalse(dc02["is_no_sales"])
+        self.assertEqual(dc02["coupang_runway_str"], "소진무")
+        self.assertTrue(dc02["is_coupang_no_sales"])
+
+        # (D) 10GL04: 재고 0개 -> 결품 (orange 아님)
+        gl04 = masters_by_code["10GL04"]
+        self.assertEqual(gl04["master_physical_total"], 0)
+        self.assertEqual(gl04["status_color"], "red")
+        self.assertFalse(gl04["is_no_sales"])
+
+        # (E) risk_score 정렬 우선순위 확인: purple(350) > orange(250~299) > green(<100)
+        self.assertGreater(ek02["risk_score"], eo02["risk_score"])
+        self.assertGreater(eo02["risk_score"], dc02["risk_score"])
+
+        # 6대 KPI 상호배타 합계 == total_masters 확인
+        kpi_sum = (
+            stats["urgent_order_count"]
+            + stats["order_prepare_count"]
+            + stats["coupang_transfer_count"]
+            + stats["expiry_warning_count"]
+            + stats["no_sales_count"]
+            + stats["safe_count"]
+        )
+        self.assertEqual(kpi_sum, stats["total_masters"])
+
+        # CSV 다운로드에도 판매 정체(소진무) 및 미판매 점검 알람 반영 확인
+        csv_res = self.client.get("/api/export-master-csv")
+        self.assertEqual(csv_res.status_code, 200)
+        csv_text = csv_res.data.decode("utf-8-sig")
+        self.assertIn("🟠 판매 정체 (소진무)", csv_text)
+        self.assertIn("🔔 미판매 점검 알람", csv_text)
+
+        # 2. 프론트엔드 HTML/JS 검증 (소진무 KPI/필터, 열 너비 조정, 컴팩트 sticky 세부행 레이아웃, PIN 미노출)
+        html = self.client.get("/").data.decode("utf-8")
+        self.assertNotIn("1500", html)
+        for marker in (
+            'id="statNoSales"',
+            "setStatusFilter('no_sales')",
+            "판매 정체 (소진무)",
+            'id="masterTableColGroup"',
+            'id="colWidthAdjustPanel"',
+            "col-resizer",
+            "startColumnResize",
+            "iljeomodo_col_widths_v1",
+            "applyColWidthPreset",
+            "resetSingleColWidth",
+            "syncSubrowViewportWidth",
+            "ResizeObserver",
+            "subrow-sticky-shell",
+            "--subrow-view-w",
+            "680px",
+            "쿠팡 윙 옵션별 번들 · 실물 재고",
+            "판매 정체(소진무) 알람:",
+        ):
+            self.assertIn(marker, html, f"Missing UI/JS marker: {marker}")
+
+        print("OK: [Admin Test 13] 소진무 알람 판정/우선순위/CSV, 열 너비 조정, 컴팩트 sticky 세부행 UI 검증 완료")
+
 
 if __name__ == '__main__':
     unittest.main()
