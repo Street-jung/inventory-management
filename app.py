@@ -863,7 +863,8 @@ def get_summary():
             exp_d = extract_expiry_date(eff_exp)
             days_left = (exp_d - today).days if exp_d else None
 
-            csv_g_details.append(f"{opt_name}: {st}개")
+            if st > 0:
+                csv_g_details.append(f"{opt_name}: {st}개")
             csv_lots.append({
                 "gaemi_code": g_code,
                 "lot_key": exact_key,
@@ -919,21 +920,19 @@ def get_summary():
             g_details = [f"{l['option_name']}: {l['stock']}개" for l in gaemi_lots if l["stock"] > 0]
         else:
             g_total = csv_g_total
-            gaemi_lots = csv_lots
+            gaemi_lots = [l for l in csv_lots if l["stock"] > 0]
             g_details = csv_g_details
 
-        # 유효 재고(stock > 0)가 있는 로트들 우선 분석
+        # 유효 재고(stock > 0)가 있는 로트 기준 분석 (소진된 0개 로트 제외)
         active_lots = [l for l in gaemi_lots if l["stock"] > 0]
         lot_count = len(active_lots)
         is_mixed_lots = lot_count > 1
 
-        # 소비기한이 추출된 로트 선별 (선입선출: 가장 빠른 기한 우선)
+        # 소비기한이 추출된 실재고 로트 선별 (선입선출: 가장 빠른 기한 우선, 0개 소진 로트 제외)
         exp_lots = [l for l in active_lots if l.get("days_left") is not None]
-        if not exp_lots:
-            exp_lots = [l for l in gaemi_lots if l.get("days_left") is not None]
 
         default_exp = normalize_date_str(m.get("default_expiry_date", ""))
-        has_admin_expiry = any(l.get("is_admin_expiry") and l.get("expiry_date") for l in gaemi_lots)
+        has_admin_expiry = any(l.get("is_admin_expiry") and l.get("expiry_date") for l in active_lots)
 
         if exp_lots:
             exp_lots.sort(key=lambda x: x["days_left"])
@@ -1019,7 +1018,7 @@ def get_summary():
             "sales_codes": effective_sales_codes,
             "has_custom_sales_codes": has_explicit_sales,
             "gaemi_total": g_total,
-            "gaemi_details": ", ".join(g_details) if g_details else "등록 정보 없음",
+            "gaemi_details": ", ".join(g_details) if g_details else ("보유 재고 0개" if raw_gaemi_items else "등록 정보 없음"),
             "gaemi_lots": gaemi_lots,
             "csv_gaemi_lots": csv_lots,
             "has_manual_lots": has_manual_lots,
@@ -4212,6 +4211,7 @@ HTML_TEMPLATE = """
                     : '';
 
                 const isSubExpanded = expandAllOptions || expandedRowIds.has(m.id);
+                const activeGaemiLots = (m.gaemi_lots || []).filter(lot => (lot.stock || 0) > 0);
 
                 html += `
                     <tr draggable="true" data-row-idx="${allMasterData.indexOf(m)}" class="hover:bg-slate-50 transition cursor-pointer select-none" onclick="toggleSingleOption('${escapeHtml(m.id)}')">
@@ -4340,7 +4340,7 @@ HTML_TEMPLATE = """
                                 ` : ''}
                                 
                                 <!-- 1. 개미창고 소비기한 & 로트별 선입선출(FIFO) 현황판 -->
-                                ${m.gaemi_lots && m.gaemi_lots.length > 0 ? `
+                                ${activeGaemiLots.length > 0 ? `
                                     <div class="bg-white rounded-lg border border-amber-200 p-3 shadow-xs">
                                         <div class="flex items-center justify-between mb-2">
                                             <div class="flex items-center space-x-1.5 text-xs font-bold text-amber-900">
@@ -4348,12 +4348,12 @@ HTML_TEMPLATE = """
                                                 <span>개미창고 옵션별 소비기한 및 선입선출(FIFO) 출고 관리</span>
                                             </div>
                                             <span class="text-[10px] bg-amber-100 text-amber-900 font-semibold px-2 py-0.5 rounded">
-                                                총 ${m.gaemi_lots.length}개 로트/옵션
+                                                총 ${activeGaemiLots.length}개 로트/옵션
                                             </span>
                                         </div>
 
                                         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-                                            ${m.gaemi_lots.map((lot) => {
+                                            ${activeGaemiLots.map((lot) => {
                                                 const isNearest = (lot.expiry_date && lot.expiry_date === m.nearest_expiry_date);
                                                 let fifoBadge = '<span class="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.2 rounded font-medium">출고 대기</span>';
                                                 let cardBorder = 'border-slate-200 bg-slate-50/50';
@@ -4940,13 +4940,15 @@ HTML_TEMPLATE = """
                 box.innerHTML = '<div class="text-[11px] text-slate-400 bg-white border border-slate-200 rounded-lg p-2.5">연결된 개미창고 CSV 로트가 없습니다. (개미 상품코드 매핑 또는 아래 기본 소비기한을 사용하세요)</div>';
                 return;
             }
-            box.innerHTML = csvLots.map(lot => {
+            const activeLots = csvLots.filter(lot => (lot.stock || 0) > 0);
+            const emptyLots = csvLots.filter(lot => (lot.stock || 0) <= 0);
+            const renderLotCard = (lot, muted = false) => {
                 const initMode = (lot.is_admin_expiry && !lot.expiry_date) ? '__CLEAR__' : '';
                 const rawHint = lot.raw_expiry_date ? `CSV원본: ${escapeHtml(lot.raw_expiry_date)}` : 'CSV원본: 미기재';
                 return `
-                    <div class="flex flex-wrap items-center justify-between gap-2 bg-white border border-amber-200 rounded-lg p-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-white border ${muted ? 'border-slate-200 opacity-80' : 'border-amber-200'} rounded-lg p-2">
                         <div class="min-w-0 flex-1">
-                            <div class="font-bold text-slate-800 truncate">${escapeHtml(lot.option_name || '옵션명 없음')} <span class="text-amber-700 font-mono">(${(lot.stock || 0).toLocaleString()}개)</span></div>
+                            <div class="font-bold text-slate-800 truncate">${escapeHtml(lot.option_name || '옵션명 없음')} <span class="${muted ? 'text-slate-500' : 'text-amber-700'} font-mono">(${(lot.stock || 0).toLocaleString()}개)</span></div>
                             <div class="text-[10px] text-slate-400 font-mono">${escapeHtml(lot.gaemi_code)} · ${lot.reg_date ? '등록 ' + escapeHtml(lot.reg_date) + ' · ' : ''}${rawHint}</div>
                         </div>
                         <div class="flex items-center space-x-1.5 shrink-0">
@@ -4956,7 +4958,24 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                 `;
-            }).join('');
+            };
+            let html = '';
+            if (activeLots.length > 0) {
+                html += activeLots.map(lot => renderLotCard(lot, false)).join('');
+            } else {
+                html += '<div class="text-[11px] text-slate-400 bg-white border border-slate-200 rounded-lg p-2.5">현재 개미창고 보유 재고(1개 이상) 로트가 없습니다. 아래 기본 소비기한을 사용하세요.</div>';
+            }
+            if (emptyLots.length > 0) {
+                html += `
+                    <details class="pt-1">
+                        <summary class="cursor-pointer text-[10px] font-semibold text-slate-500 hover:text-slate-700 select-none">
+                            소진 완료(재고 0개) 과거 입고 이력 ${emptyLots.length}건 보기
+                        </summary>
+                        <div class="mt-1.5 space-y-1.5">${emptyLots.map(lot => renderLotCard(lot, true)).join('')}</div>
+                    </details>
+                `;
+            }
+            box.innerHTML = html;
         }
 
         function restoreCsvLotInput(btn) {
@@ -5359,21 +5378,31 @@ HTML_TEMPLATE = """
                 })
                 .map(m => {
                     const sItem = allMasterData.find(x => x.id === m.id || x.seller_code === m.seller_code) || {};
-                    const csvLots = sItem.csv_gaemi_lots || computeCsvLotsFromCache(m, adminConfigCache);
-                    const gTotal = sItem.gaemi_total !== undefined ? sItem.gaemi_total : csvLots.reduce((a, b) => a + (b.stock || 0), 0);
+                    const rawCsvLots = sItem.csv_gaemi_lots || computeCsvLotsFromCache(m, adminConfigCache);
+                    const activeCsvLots = rawCsvLots.filter(l => (l.stock || 0) > 0);
+                    const manLots = m.manual_lots || [];
+                    const activeManLots = manLots.filter(l => (l.qty || 0) > 0);
+                    const hasManualLots = manLots.length > 0;
+                    const gTotal = sItem.gaemi_total !== undefined ? sItem.gaemi_total : activeCsvLots.reduce((a, b) => a + (b.stock || 0), 0);
                     const nearestExp = sItem.nearest_expiry_date || m.default_expiry_date || '';
                     const nearestDays = sItem.nearest_days_left;
-                    return { m, csvLots, gTotal, nearestExp, nearestDays };
+                    const hasUnassigned = Boolean(sItem.has_unassigned_stock);
+                    return { m, rawCsvLots, activeCsvLots, manLots, activeManLots, hasManualLots, gTotal, nearestExp, nearestDays, hasUnassigned };
                 })
-                .filter(({ m, csvLots, nearestExp, nearestDays }) => {
+                .filter(({ m, activeCsvLots, activeManLots, hasManualLots, nearestExp, nearestDays, hasUnassigned }) => {
                     if (q) {
                         const mn = (m.name || '').toLowerCase();
                         const mc = (m.seller_code || '').toLowerCase();
                         if (!mn.includes(q) && !mc.includes(q)) return false;
                     }
                     if (mode === 'missing') {
-                        const hasAnyLotMissing = csvLots.some(l => !l.expiry_date);
-                        return !nearestExp || hasAnyLotMissing;
+                        if (hasManualLots) {
+                            return !nearestExp || activeManLots.some(l => !l.expiry_date) || hasUnassigned;
+                        }
+                        if (activeCsvLots.length > 0) {
+                            return activeCsvLots.some(l => !l.expiry_date);
+                        }
+                        return !nearestExp;
                     } else if (mode === 'soon') {
                         return nearestDays !== null && nearestDays !== undefined && nearestDays <= 180;
                     }
@@ -5385,20 +5414,35 @@ HTML_TEMPLATE = """
                 return;
             }
 
-            tbody.innerHTML = enriched.map(({ m, csvLots, gTotal, nearestExp, nearestDays }) => {
+            tbody.innerHTML = enriched.map(({ m, rawCsvLots, activeCsvLots, activeManLots, hasManualLots, gTotal, nearestExp, nearestDays }) => {
                 let lotSummaryHtml = '';
                 let inputColHtml = '';
-                if (csvLots.length > 0) {
-                    lotSummaryHtml = csvLots.map(l => `<div class="text-[11px] text-slate-600 truncate">• ${escapeHtml(l.option_name)} (${l.stock}개)</div>`).join('');
-                    inputColHtml = csvLots.map(l => `
+                if (!hasManualLots && activeCsvLots.length > 0) {
+                    const dupOptNames = {};
+                    activeCsvLots.forEach(l => {
+                        const k = String(l.option_name || '옵션명 없음').trim();
+                        dupOptNames[k] = (dupOptNames[k] || 0) + 1;
+                    });
+                    lotSummaryHtml = activeCsvLots.map(l => {
+                        const optTxt = String(l.option_name || '옵션명 없음').trim();
+                        const regHint = (dupOptNames[optTxt] > 1 && l.reg_date)
+                            ? ` <span class="text-[10px] text-slate-400 font-mono">(등록 ${escapeHtml(String(l.reg_date).slice(0, 10))})</span>`
+                            : '';
+                        return `<div class="text-[11px] text-slate-600 truncate">• ${escapeHtml(optTxt)} (${(l.stock || 0).toLocaleString()}개)${regHint}</div>`;
+                    }).join('');
+                    inputColHtml = activeCsvLots.map(l => `
                         <div class="mb-1 flex items-center gap-1">
                             <input type="date" class="ac-exp-lot-input w-full px-2 py-1 border border-slate-300 rounded font-mono text-[11px]" data-lot-key="${escapeHtml(l.lot_key)}" data-orig="${escapeHtml(l.expiry_date || '')}" value="${escapeHtml(l.expiry_date || '')}">
                         </div>
                     `).join('');
+                } else if (hasManualLots) {
+                    lotSummaryHtml = activeManLots.length > 0
+                        ? activeManLots.map(l => `<div class="text-[11px] text-amber-800">• ${escapeHtml(l.label)}: ${(l.qty || 0).toLocaleString()}개 (${escapeHtml(l.expiry_date || '미지정')})</div>`).join('')
+                        : '<span class="text-[11px] text-slate-400">수동 로트 보유 재고 0개</span>';
+                    inputColHtml = '<div class="text-[11px] text-amber-800 font-semibold py-1">우측 [상세 분할]에서 로트별 수정</div>';
                 } else {
-                    const manLots = m.manual_lots || [];
-                    lotSummaryHtml = manLots.length > 0
-                        ? manLots.map(l => `<div class="text-[11px] text-amber-800">• ${escapeHtml(l.label)}: ${l.qty}개 (${escapeHtml(l.expiry_date || '미지정')})</div>`).join('')
+                    lotSummaryHtml = rawCsvLots.length > 0
+                        ? '<span class="text-[11px] text-slate-400">개미 보유 재고 0개 (기본 소비기한 적용)</span>'
                         : '<span class="text-[11px] text-slate-400">개미 CSV 로트 없음 (기본 소비기한 적용)</span>';
                     inputColHtml = `
                         <input type="date" class="ac-exp-default-input w-full px-2 py-1 border border-slate-300 rounded font-mono text-[11px]" data-id="${escapeHtml(m.id || '')}" data-seller-code="${escapeHtml(m.seller_code)}" data-orig="${escapeHtml(m.default_expiry_date || '')}" value="${escapeHtml(m.default_expiry_date || '')}">
@@ -5760,8 +5804,9 @@ HTML_TEMPLATE = """
                         });
                     }
                     const entry = map.get(key);
-                    entry.stock += (parseInt(r.stock || 0, 10) || 0);
-                    entry.lot_count += 1;
+                    const rowStock = parseInt(r.stock || 0, 10) || 0;
+                    entry.stock += rowStock;
+                    if (rowStock > 0) entry.lot_count += 1;
                     if (!entry.product_name && r.product_name) {
                         entry.product_name = String(r.product_name).trim();
                     }

@@ -803,6 +803,77 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         self.assertEqual(s3["stats"]["upload_timestamps"]["coupang"], "2026-11-12 09:05")
         print("OK: [Admin Test 11] KST(UTC+9) 파일 업로드 전용 타임스탬프 및 관리자수정/재부팅 격리 검증 완료")
 
+    def test_12_zero_stock_gaemi_lot_excluded_from_expiry_ui_and_summary(self):
+        """개미창고 재고 0개 소진 이력(동일 옵션 PJ1489503·500ml)이 소비기한 표시 및 최단 기한 산출에 중복 노출되지 않음을 검증"""
+        headers = self._login("1500")
+        with open("개미창고_샘플.csv", encoding="utf-8") as f:
+            gaemi_rows = list(csv.reader(f))
+        self.client.post("/api/upload-file-data", json={"source": "gaemi", "rows": gaemi_rows})
+
+        # 20EO02에 PJ1489503 + '500ml' 단일 매핑 지정
+        res_map = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20EO02",
+            "gaemi_mappings": [{"gaemi_code": "PJ1489503", "option_name": "500ml"}]
+        })
+        self.assertEqual(res_map.status_code, 200)
+
+        # 1. 요약 API에서 gaemi_lots는 실재고(>0) 로트 1개만 노출되고, gaemi_details에도 0개 이력이 섞이지 않아야 함
+        s1 = json.loads(self.client.get("/api/summary").data)
+        eo02 = next(m for m in s1["masters"] if m["seller_code"] == "20EO02")
+        self.assertEqual(eo02["gaemi_total"], 1208)
+        self.assertEqual(len(eo02["csv_gaemi_lots"]), 2)  # raw CSV 로트 감사/매핑용 보존
+        self.assertEqual(len(eo02["gaemi_lots"]), 1, "소비기한/FIFO 표시에 재고 0개 로트가 노출되면 안 됨")
+        self.assertEqual(eo02["gaemi_lots"][0]["stock"], 1208)
+        self.assertEqual(eo02["gaemi_details"], "500ml: 1208개")
+        self.assertFalse(eo02["is_mixed_lots"])
+        self.assertEqual(eo02["lot_count"], 1)
+
+        # 2. 소진 완료(0개) 과거 로트에 소비기한이 있어도, 보유 재고(>0) 로트의 소비기한이 미지정이면 0개 로트를 최단 소비기한으로 오인하면 안 됨
+        empty_lot = next(l for l in eo02["csv_gaemi_lots"] if l["stock"] == 0)
+        active_lot = next(l for l in eo02["csv_gaemi_lots"] if l["stock"] > 0)
+        self.client.post("/api/admin/products/bulk-save", headers=headers, json={
+            "products": [],
+            "lot_expiry_overrides": {
+                empty_lot["lot_key"]: "2026-01-01"
+            }
+        })
+        s2 = json.loads(self.client.get("/api/summary").data)
+        eo02_2 = next(m for m in s2["masters"] if m["seller_code"] == "20EO02")
+        self.assertEqual(eo02_2["nearest_expiry_date"], "")
+        self.assertFalse(eo02_2["has_admin_expiry"])
+
+        # 3. 실재고 로트(1208개)에 2027-10-28 입력 시 해당 기한만 정확히 반영
+        self.client.post("/api/admin/products/bulk-save", headers=headers, json={
+            "products": [],
+            "lot_expiry_overrides": {
+                active_lot["lot_key"]: "2027-10-28"
+            }
+        })
+        s3 = json.loads(self.client.get("/api/summary").data)
+        eo02_3 = next(m for m in s3["masters"] if m["seller_code"] == "20EO02")
+        self.assertEqual(eo02_3["nearest_expiry_date"], "2027-10-28")
+        self.assertEqual(eo02_3["nearest_lot_stock"], 1208)
+        self.assertEqual(len(eo02_3["gaemi_lots"]), 1)
+
+        # 4. 전량 소진 품목(보유 재고 0개)은 gaemi_lots=[] 및 '보유 재고 0개'로 표시
+        rows_zero = [
+            ["번호", "상품코드", "상품명", "옵션명", "상태", "입고량", "출고량", "재고량", "등록일"],
+            ["1", "PJ1489503", "엘레올로지 500ml", "500ml", "입고완료", "528", "528", "0", "2026-02-25 11:24:56"]
+        ]
+        self.client.post("/api/upload-file-data", json={"source": "gaemi", "rows": rows_zero})
+        s4 = json.loads(self.client.get("/api/summary").data)
+        eo02_4 = next(m for m in s4["masters"] if m["seller_code"] == "20EO02")
+        self.assertEqual(eo02_4["gaemi_lots"], [])
+        self.assertEqual(eo02_4["gaemi_details"], "보유 재고 0개")
+        self.assertEqual(eo02_4["nearest_expiry_date"], "")
+
+        # 5. 프론트엔드 소비기한 일괄 입력·상세모달·코드매핑 집계 필터링 로직 포함 확인
+        html = self.client.get("/").data.decode("utf-8")
+        self.assertIn("activeCsvLots = rawCsvLots.filter(l => (l.stock || 0) > 0)", html)
+        self.assertIn("소진 완료(재고 0개) 과거 입고 이력", html)
+        self.assertIn("if (rowStock > 0) entry.lot_count += 1", html)
+        print("OK: [Admin Test 12] 개미창고 재고 0개 로트 소비기한 중복 노출/오탐 제거 검증 완료")
+
 
 if __name__ == '__main__':
     unittest.main()
