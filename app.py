@@ -2987,7 +2987,7 @@ HTML_TEMPLATE = """
                 <div class="flex items-center space-x-1.5">
                     <span class="text-slate-500">가용재고</span>
                     <span id="statTotalStock" class="font-bold font-mono text-slate-900 text-sm">0개</span>
-                    <span class="text-slate-400 text-[11px]">(개미 <span id="statGaemiStock" class="font-mono text-slate-700">0</span> + 쿠팡 <span id="statCoupangStock" class="font-mono text-slate-700">0</span><span id="statCoupangReturnWrap" class="hidden text-rose-600 font-semibold"> · 🔄 반품 <span id="statCoupangReturnStock">0개</span></span>)</span>
+                    <span class="text-slate-400 text-[11px]">(개미 <span id="statGaemiStock" class="font-mono text-slate-700">0</span> + 쿠팡 <span id="statCoupangStock" class="font-mono text-slate-700">0</span><span id="statCoupangReturnWrap" class="hidden text-slate-500 font-medium"> · 🔄 반품 <span id="statCoupangReturnStock">0개</span></span>)</span>
                 </div>
                 <span class="text-slate-200 hidden sm:inline">|</span>
                 <div class="flex items-center space-x-1.5">
@@ -3946,7 +3946,7 @@ HTML_TEMPLATE = """
                             <span class="text-[11px] text-slate-600 shrink-0">개입</span>
                         </div>
                         <input type="text" id="cm_coupang_name_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmCoupangManual();}" placeholder="옵션명 (예: 2개 500ml)" class="sm:col-span-3 px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-400">
-                        <label class="sm:col-span-2 inline-flex items-center justify-center space-x-1 px-2 py-1.5 rounded-lg border border-rose-200 bg-rose-50/70 cursor-pointer text-[11px] font-semibold text-rose-800" title="체크 시 정상 가용재고에서 제외되고 번들별 반품 재고로 관리됩니다">
+                        <label class="sm:col-span-2 inline-flex items-center justify-center space-x-1 px-2 py-1.5 rounded-lg border border-slate-300 bg-slate-100/80 cursor-pointer text-[11px] font-semibold text-slate-700" title="체크 시 정상 가용재고에서 제외되고 번들별 반품 재고로 관리됩니다">
                             <input type="checkbox" id="cm_coupang_return_input">
                             <span>🔄 반품</span>
                         </label>
@@ -5141,7 +5141,7 @@ HTML_TEMPLATE = """
                         const retPhys = m.coupang_return_physical_total || 0;
                         const retPkg = m.coupang_return_package_total || 0;
                         const retBadgeHtml = retPhys > 0
-                            ? `<div class="mt-0.5"><span class="inline-block text-[9px] px-1 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 font-semibold whitespace-nowrap" title="쿠팡 반품 재고 (정상 가용재고 합산 제외 · ${retPkg}세트)">🔄 반품 ${retPhys.toLocaleString()}</span></div>`
+                            ? `<div class="mt-0.5"><span class="inline-block text-[9px] px-1 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 font-medium whitespace-nowrap" title="쿠팡 반품 재고 (정상 가용재고 합산 제외 · ${retPkg}세트)">🔄 반품 ${retPhys.toLocaleString()}</span></div>`
                             : '';
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
@@ -5268,7 +5268,7 @@ HTML_TEMPLATE = """
                                                 <div class="font-bold font-mono text-sm text-slate-900">${m.coupang_physical_total.toLocaleString()}개</div>
                                                 <div class="text-[9px] text-slate-500 truncate">${m.coupang_package_total}세트 · ${escapeHtml(m.coupang_runway_str)}</div>
                                                 ${(m.coupang_return_physical_total || 0) > 0
-                                                    ? `<div class="text-[9px] font-semibold text-rose-600 truncate mt-0.5">🔄 반품 ${m.coupang_return_physical_total.toLocaleString()}개 (${m.coupang_return_package_total || 0}세트)</div>`
+                                                    ? `<div class="text-[9px] font-medium text-slate-500 truncate mt-0.5">🔄 반품 ${m.coupang_return_physical_total.toLocaleString()}개 (${m.coupang_return_package_total || 0}세트)</div>`
                                                     : ''}
                                             </div>
                                             <div class="${m.is_no_sales ? 'bg-orange-50/50 border-orange-200' : 'bg-white border-slate-200'} border rounded-lg px-2.5 py-1.5">
@@ -5389,7 +5389,7 @@ HTML_TEMPLATE = """
                                         const retPhysTot = m.coupang_return_physical_total || 0;
                                         const hasAnyReturn = retPhysTot > 0 || m.has_coupang_return || bundleGroups.some(g => (g.return_options || []).length > 0);
                                         const headerSummary = hasAnyReturn
-                                            ? `<span class="text-[10px] font-mono text-slate-600">정상 ${m.coupang_physical_total.toLocaleString()}개 · <span class="text-rose-700 font-bold">🔄 반품 ${retPhysTot.toLocaleString()}개 (${retPkgTot.toLocaleString()}세트)</span></span>`
+                                            ? `<span class="text-[10px] font-mono text-slate-600">정상 ${m.coupang_physical_total.toLocaleString()}개 · <span class="text-slate-500 font-medium">🔄 반품 ${retPhysTot.toLocaleString()}개 (${retPkgTot.toLocaleString()}세트)</span></span>`
                                             : `<span class="text-[10px] font-mono text-slate-500">총 ${opts.length}개 옵션</span>`;
 
                                         const groupsHtml = bundleGroups.map(grp => {
@@ -5407,7 +5407,7 @@ HTML_TEMPLATE = """
                                                     <div class="flex flex-wrap items-center gap-1 font-mono">
                                                         <span class="px-1.5 py-0.2 rounded bg-white border border-slate-200 text-slate-700 font-semibold">정상 ${nPkg.toLocaleString()}세트 (${nPhys.toLocaleString()}개)</span>
                                                         ${(rOpts.length > 0 || rPhys > 0)
-                                                            ? `<span class="px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 font-bold">🔄 반품 ${rPkg.toLocaleString()}세트 (${rPhys.toLocaleString()}개)</span>`
+                                                            ? `<span class="px-1.5 py-0.2 rounded bg-slate-100/80 text-slate-600 border border-slate-200 font-medium">🔄 반품 ${rPkg.toLocaleString()}세트 (${rPhys.toLocaleString()}개)</span>`
                                                             : `<span class="px-1.5 py-0.2 rounded bg-white text-slate-400 border border-slate-200">반품 0개</span>`}
                                                     </div>
                                                 </div>
@@ -5418,7 +5418,7 @@ HTML_TEMPLATE = """
                                                     ? `<span class="px-1 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[9px] shrink-0" title="기존 업로드 데이터에 상품등급(G열) 정보가 없어 정상으로 표시될 수 있습니다. 쿠팡 파일 재업로드 또는 관리자 반품 지정을 이용하세요.">등급미확인</span>`
                                                     : '';
                                                 const toggleBtnHtml = isAdminMode
-                                                    ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, true, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-rose-50 text-rose-700 border border-slate-200 hover:border-rose-200 text-[9px] font-semibold transition shrink-0" title="이 옵션 ID를 정상 재고에서 제외하고 반품 재고로 지정합니다">🔄 반품 지정</button>`
+                                                    ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, true, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 hover:border-slate-300 text-[9px] font-semibold transition shrink-0" title="이 옵션 ID를 정상 재고에서 제외하고 반품 재고로 지정합니다">🔄 반품 지정</button>`
                                                     : '';
                                                 return `
                                                     <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-white">
@@ -5442,27 +5442,26 @@ HTML_TEMPLATE = """
 
                                             const returnRowsHtml = rOpts.map(opt => {
                                                 let retActionHtml = '';
-                                                if (opt.csv_is_return) {
-                                                    retActionHtml = `<span class="px-1 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[9px] font-semibold shrink-0">CSV G열 반품 자동감지</span>`;
-                                                } else if (isAdminMode && opt.option_is_return_flag) {
-                                                    retActionHtml = `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, false, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-[9px] font-semibold transition shrink-0" title="수동 반품 지정을 해제하고 정상 재고로 복귀합니다">↩️ 정상 복귀</button>`;
+                                                if (!opt.csv_is_return && isAdminMode && opt.option_is_return_flag) {
+                                                    retActionHtml = `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, false, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 text-[9px] font-semibold transition shrink-0" title="수동 반품 지정을 해제하고 정상 재고로 복귀합니다">↩️ 정상 복귀</button>`;
                                                 }
                                                 return `
-                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-rose-50/40">
+                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-slate-50/70">
                                                         <div class="min-w-0 flex-1">
                                                             <div class="flex flex-wrap items-center gap-1">
-                                                                <span class="px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[9px] shrink-0">🔄 반품</span>
-                                                                ${opt.grade ? `<span class="px-1.5 py-0.2 rounded bg-white text-rose-800 border border-rose-200 font-mono font-semibold text-[9px] shrink-0">${escapeHtml(opt.grade)}</span>` : ''}
-                                                                <span class="font-bold text-rose-950 truncate">${escapeHtml(opt.name)}</span>
+                                                                <span class="px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 font-semibold text-[9px] shrink-0">🔄 반품</span>
+                                                                ${opt.grade ? `<span class="px-1.5 py-0.2 rounded bg-white text-slate-500 border border-slate-200 font-mono font-medium text-[9px] shrink-0">${escapeHtml(opt.grade)}</span>` : ''}
+                                                                <span class="font-semibold text-slate-600 truncate">${escapeHtml(opt.name)}</span>
                                                             </div>
+                                                            ${(opt.id || opt.bundle || retActionHtml) ? `
                                                             <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
-                                                                <span class="text-[10px] text-rose-700/80 font-mono truncate">${escapeHtml(opt.id)} · ${opt.bundle}개입</span>
+                                                                <span class="text-[10px] text-slate-400 font-mono truncate">${escapeHtml(opt.id)} · ${opt.bundle}개입</span>
                                                                 ${retActionHtml}
-                                                            </div>
+                                                            </div>` : ''}
                                                         </div>
                                                         <div class="text-right shrink-0 font-mono">
-                                                            <div class="font-bold text-rose-700">${opt.coupang_stock}세트 <span class="text-rose-950 font-semibold">(반품 실물 ${opt.physical_stock}개)</span></div>
-                                                            <div class="text-[10px] text-rose-700/80">7일 출고: <strong class="text-rose-900">${opt.sales_7d_physical}개</strong></div>
+                                                            <div class="font-semibold text-slate-600">${opt.coupang_stock}세트 <span class="text-slate-500 font-normal">(반품 실물 ${opt.physical_stock}개)</span></div>
+                                                            <div class="text-[10px] text-slate-400">7일 출고: <strong class="text-slate-600">${opt.sales_7d_physical}개</strong></div>
                                                         </div>
                                                     </div>
                                                 `;
@@ -5572,7 +5571,7 @@ HTML_TEMPLATE = """
                     const avgGRunway = sumDailySales > 0 ? (sumGaemiStock / sumDailySales).toFixed(1) + '일' : (sumGaemiStock > 0 ? '소진무' : '-');
                     footHtml += `<td class="py-2.5 px-1.5 text-center font-semibold font-mono text-slate-700 text-[11px] overflow-hidden">${avgGRunway}</td>`;
                 } else if (colId === 'coupang_stock') {
-                    footHtml += `<td class="py-2.5 px-2 text-right font-bold font-mono text-slate-800 text-xs overflow-hidden"><div>${sumCoupangStock.toLocaleString()}</div>${sumCoupangReturnStock > 0 ? `<div class="text-[9px] font-semibold text-rose-600">🔄 반품 ${sumCoupangReturnStock.toLocaleString()}</div>` : ''}</td>`;
+                    footHtml += `<td class="py-2.5 px-2 text-right font-bold font-mono text-slate-800 text-xs overflow-hidden"><div>${sumCoupangStock.toLocaleString()}</div>${sumCoupangReturnStock > 0 ? `<div class="text-[9px] font-medium text-slate-500">🔄 반품 ${sumCoupangReturnStock.toLocaleString()}</div>` : ''}</td>`;
                 } else if (colId === 'coupang_runway') {
                     const avgCRunway = sumCoupangSales > 0 ? (sumCoupangStock / (sumCoupangSales / 7.0)).toFixed(1) + '일' : (sumCoupangStock > 0 ? '소진무' : '-');
                     footHtml += `<td class="py-2.5 px-1.5 text-center font-semibold font-mono text-slate-700 text-[11px] overflow-hidden">${avgCRunway}</td>`;
@@ -6104,7 +6103,7 @@ HTML_TEMPLATE = """
             const cGrade = cd ? String(cd.grade || '').trim() : '';
             const csvIsRet = Boolean(cd && (cd.is_return || cGrade.includes('반품') || cGrade.toLowerCase().includes('return')));
             const isRet = Boolean(opt.is_return || csvIsRet);
-            row.className = `ep-opt-row flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-rose-300 bg-rose-50/40' : 'border-slate-200'} rounded-lg p-2`;
+            row.className = `ep-opt-row flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-slate-300 bg-slate-50/70' : 'border-slate-200'} rounded-lg p-2`;
             row.innerHTML = `
                 <input type="text" class="ep-opt-id w-36 px-2.5 py-1 border border-slate-300 rounded font-mono text-[11px]" placeholder="쿠팡 옵션 ID" value="${escapeHtml(opt.id || '')}">
                 <div class="flex items-center space-x-1">
@@ -6112,7 +6111,7 @@ HTML_TEMPLATE = """
                     <span class="text-[11px] text-slate-500">개입</span>
                 </div>
                 <input type="text" class="ep-opt-name flex-1 min-w-[100px] px-2.5 py-1 border border-slate-300 rounded text-[11px]" placeholder="옵션명 (예: 2개)" value="${escapeHtml(opt.name || '')}">
-                <label class="inline-flex items-center space-x-1 px-1.5 py-1 rounded border ${isRet ? 'bg-rose-100 border-rose-300 text-rose-900' : 'bg-slate-50 border-slate-200 text-slate-600'} text-[10px] font-bold cursor-pointer shrink-0" title="체크 시 반품 재고로 분리 관리됩니다">
+                <label class="inline-flex items-center space-x-1 px-1.5 py-1 rounded border ${isRet ? 'bg-slate-200/70 border-slate-300 text-slate-700' : 'bg-slate-50 border-slate-200 text-slate-600'} text-[10px] font-semibold cursor-pointer shrink-0" title="체크 시 반품 재고로 분리 관리됩니다">
                     <input type="checkbox" class="ep-opt-return" ${isRet ? 'checked' : ''}>
                     <span>🔄 반품${csvIsRet && cGrade ? ` (${escapeHtml(cGrade)})` : ''}</span>
                 </label>
@@ -6137,7 +6136,7 @@ HTML_TEMPLATE = """
                 html += `<div class="text-[11px] font-bold text-slate-800 mt-2">쿠팡 창고(세트 기준) 임시 재고 보정</div>`;
                 html += options.map(o => `
                     <div class="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded px-2.5 py-1.5">
-                        <span class="text-[11px] text-slate-700 truncate">${o.is_return ? '<span class="text-rose-700 font-bold mr-1">[반품]</span>' : ''}${escapeHtml(o.name)} [${escapeHtml(o.id)}] (현재 ${o.coupang_stock || 0}세트)</span>
+                        <span class="text-[11px] text-slate-700 truncate">${o.is_return ? '<span class="text-slate-500 font-semibold mr-1">[반품]</span>' : ''}${escapeHtml(o.name)} [${escapeHtml(o.id)}] (현재 ${o.coupang_stock || 0}세트)</span>
                         <input type="number" min="0" class="ep-temp-coupang w-24 px-2 py-1 border border-slate-300 rounded font-mono text-[11px] text-right" data-opt-id="${escapeHtml(o.id)}" placeholder="${o.coupang_stock || 0}">
                     </div>
                 `).join('');
@@ -7298,12 +7297,12 @@ HTML_TEMPLATE = """
                     infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock.toLocaleString()}개${row.lot_count > 1 ? ` (${row.lot_count}개 로트 합계)` : ''}</div>`;
                 } else {
                     const retBadge = row.isReturn
-                        ? `<div class="mt-0.5"><span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[9px]">🔄 반품</span></div>`
+                        ? `<div class="mt-0.5"><span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-semibold text-[9px]">🔄 반품</span></div>`
                         : '';
                     chBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-[10px]">쿠팡옵션</span>${retBadge}`;
                     let gradeChip = '';
                     if (row.grade && (row.isReturn || row.grade.toUpperCase() !== 'NEW')) {
-                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-rose-50 text-rose-800 border border-rose-200 font-mono font-semibold text-[9px]">${escapeHtml(row.grade)}</span></div>`;
+                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-white text-slate-500 border border-slate-200 font-mono font-medium text-[9px]">${escapeHtml(row.grade)}</span></div>`;
                     } else if (row.gradeMissing && !row.isReturn) {
                         gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[9px]" title="등급(G열) 업데이트 이전 업로드 데이터입니다">등급미확인</span></div>`;
                     }
@@ -7330,7 +7329,7 @@ HTML_TEMPLATE = """
                     ? `<input type="number" min="1" value="${row.guessedBundle}" class="ac-map-exp-bundle w-12 px-1 py-1 border border-slate-300 rounded font-mono text-[10px] text-right" title="개입(배수)">`
                     : '';
                 const returnCheckHtml = row.channel === 'coupang'
-                    ? `<label class="inline-flex items-center space-x-1 px-1.5 py-1 rounded border ${row.isReturn ? 'bg-rose-100 border-rose-300 text-rose-900' : 'bg-white border-slate-300 text-slate-600'} text-[10px] font-semibold cursor-pointer shrink-0" title="체크 시 반품 재고로 연결됩니다"><input type="checkbox" class="ac-map-exp-return" ${row.isReturn ? 'checked' : ''} onchange="this.closest('label').className='inline-flex items-center space-x-1 px-1.5 py-1 rounded border '+(this.checked?'bg-rose-100 border-rose-300 text-rose-900':'bg-white border-slate-300 text-slate-600')+' text-[10px] font-semibold cursor-pointer shrink-0'"><span>🔄 반품</span></label>`
+                    ? `<label class="inline-flex items-center space-x-1 px-1.5 py-1 rounded border ${row.isReturn ? 'bg-slate-200/70 border-slate-300 text-slate-700' : 'bg-white border-slate-300 text-slate-600'} text-[10px] font-semibold cursor-pointer shrink-0" title="체크 시 반품 재고로 연결됩니다"><input type="checkbox" class="ac-map-exp-return" ${row.isReturn ? 'checked' : ''} onchange="this.closest('label').className='inline-flex items-center space-x-1 px-1.5 py-1 rounded border '+(this.checked?'bg-slate-200/70 border-slate-300 text-slate-700':'bg-white border-slate-300 text-slate-600')+' text-[10px] font-semibold cursor-pointer shrink-0'"><span>🔄 반품</span></label>`
                     : '';
 
                 let hideBtnHtml = '';
@@ -7348,7 +7347,7 @@ HTML_TEMPLATE = """
                     : '';
                 const rowBgClass = row.isHidden
                     ? 'bg-slate-50/90 opacity-85 hover:bg-slate-100/80'
-                    : (row.isReturn ? 'bg-rose-50/35 hover:bg-rose-50/70' : 'hover:bg-slate-50');
+                    : (row.isReturn ? 'bg-slate-50/60 hover:bg-slate-100/70' : 'hover:bg-slate-50');
 
                 return `
                     <tr class="${rowBgClass}" data-exp-idx="${idx}">
@@ -7657,11 +7656,11 @@ HTML_TEMPLATE = """
                         const cGrade = cd ? String(cd.grade || '').trim() : '';
                         const isRet = Boolean(o.is_return) || Boolean(cd && cd.is_return) || cGrade.includes('반품') || cGrade.toLowerCase().includes('return');
                         const stTxt = cd ? ` · ${cd.stock}세트` : '';
-                        const retTag = isRet ? '<span class="px-1 rounded bg-rose-200 text-rose-900 font-bold mr-1">반품</span>' : '';
+                        const retTag = isRet ? '<span class="px-1 rounded bg-slate-200/80 text-slate-600 font-semibold mr-1">반품</span>' : '';
                         const cls = isRet
-                            ? 'bg-rose-50 text-rose-900 border-rose-200'
+                            ? 'bg-slate-100/70 text-slate-600 border-slate-200'
                             : 'bg-slate-50 text-slate-800 border-slate-200';
-                        const subCls = isRet ? 'text-rose-700' : 'text-slate-500';
+                        const subCls = isRet ? 'text-slate-500' : 'text-slate-500';
                         return `<span class="inline-block px-1.5 py-0.5 rounded border font-mono text-[10px] mr-1 mb-1 ${cls}">${retTag}${escapeHtml(o.id)} <span class="${subCls}">(${o.bundle || 1}개입${stTxt})</span></span>`;
                     }).join('');
                 }
@@ -8156,14 +8155,14 @@ HTML_TEMPLATE = """
                     ? `현재 ${cd.stock || 0}세트 · 7일출고 ${cd.sales_7d || 0}세트${gradeMissing && !isRet ? ' (등급미확인)' : ''}`
                     : 'CSV 미등록';
                 return `
-                    <div class="flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-rose-300 bg-rose-50/35' : 'border-slate-200'} rounded-lg p-2">
-                        <span class="font-mono font-bold ${isRet ? 'text-rose-950' : 'text-slate-900'} w-32 truncate" title="${escapeHtml(opt.id)}">${escapeHtml(opt.id)}</span>
+                    <div class="flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-slate-300 bg-slate-50/70' : 'border-slate-200'} rounded-lg p-2">
+                        <span class="font-mono font-bold ${isRet ? 'text-slate-700' : 'text-slate-900'} w-32 truncate" title="${escapeHtml(opt.id)}">${escapeHtml(opt.id)}</span>
                         <div class="flex items-center space-x-1">
                             <input type="number" min="1" value="${opt.bundle || 1}" oninput="cmState.options[${idx}].bundle = Math.max(1, parseInt(this.value || '1', 10) || 1)" class="w-16 px-2 py-1 border border-slate-300 rounded font-mono text-[11px] text-right font-bold">
                             <span class="text-[11px] text-slate-500">개입</span>
                         </div>
                         <input type="text" value="${escapeHtml(opt.name || '')}" oninput="cmState.options[${idx}].name = this.value" placeholder="옵션명" class="flex-1 min-w-[120px] px-2.5 py-1 border border-slate-300 rounded text-[11px]">
-                        <label class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded border ${isRet ? 'bg-rose-100 border-rose-300 text-rose-900' : 'bg-slate-50 border-slate-200 text-slate-600'} text-[10px] font-semibold cursor-pointer shrink-0" title="${csvIsRet ? 'CSV G열(상품등급)에 반품이 포함되어 자동 반품 처리됩니다' : '체크 시 정상 재고에서 제외하고 반품 재고로 관리합니다'}">
+                        <label class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded border ${isRet ? 'bg-slate-200/70 border-slate-300 text-slate-700' : 'bg-slate-50 border-slate-200 text-slate-600'} text-[10px] font-semibold cursor-pointer shrink-0" title="${csvIsRet ? 'CSV 상품등급에 반품이 포함되어 자동 반품 처리됩니다' : '체크 시 정상 재고에서 제외하고 반품 재고로 관리합니다'}">
                             <input type="checkbox" ${isRet ? 'checked' : ''} ${csvIsRet ? 'disabled' : ''} onchange="cmState.options[${idx}].is_return = this.checked; renderCmCoupangRows();">
                             <span>🔄 반품${csvIsRet && cGrade ? ` (${escapeHtml(cGrade)})` : ''}</span>
                         </label>
@@ -8279,16 +8278,16 @@ HTML_TEMPLATE = """
                     ownerBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px]">타상품: ${escapeHtml(it.owners.map(o => o.seller_code).join(', '))}</span>`;
                 }
                 const retBadge = it.is_return
-                    ? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[10px]">🔄 반품${it.grade ? ` (${escapeHtml(it.grade)})` : ''}</span>`
+                    ? `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-semibold text-[10px]">🔄 반품${it.grade ? ` (${escapeHtml(it.grade)})` : ''}</span>`
                     : '';
                 const pidBadge = !isSelected && it.samePid
                     ? '<span class="px-1 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold text-[9px]">🔗 동일 등록ID</span>'
                     : '';
                 const btnHtml = isSelected
                     ? `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 font-semibold text-[10px]">해제</button>`
-                    : `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded ${it.is_return ? 'bg-rose-700 hover:bg-rose-800' : 'bg-slate-900 hover:bg-slate-800'} text-white font-semibold text-[10px]">+ 연결 (${it.guessedBundle}개입)</button>`;
+                    : `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded ${it.is_return ? 'bg-slate-700 hover:bg-slate-800' : 'bg-slate-900 hover:bg-slate-800'} text-white font-semibold text-[10px]">+ 연결 (${it.guessedBundle}개입)</button>`;
                 return `
-                    <div class="py-1.5 px-1 flex items-center justify-between gap-2 ${it.is_return ? 'bg-rose-50/35 hover:bg-rose-50/70' : 'hover:bg-slate-50'}">
+                    <div class="py-1.5 px-1 flex items-center justify-between gap-2 ${it.is_return ? 'bg-slate-50/60 hover:bg-slate-100/70' : 'hover:bg-slate-50'}">
                         <div class="min-w-0 flex-1">
                             <div class="flex flex-wrap items-center gap-1.5">
                                 <span class="font-mono font-bold text-slate-900">${escapeHtml(it.id)}</span>
