@@ -76,12 +76,36 @@ function doPost(e) {
     }
 
     if (action === "save") {
-      var jsonStr = JSON.stringify(body.payload || {}, null, 2);
+      if (
+        !body.payload ||
+        typeof body.payload !== "object" ||
+        Array.isArray(body.payload) ||
+        !Array.isArray(body.payload.master_products) ||
+        (body.payload.master_products.length === 0 && !body.force)
+      ) {
+        return jsonResponse({ success: false, error: "Invalid or empty payload object (master_products missing)" });
+      }
+      var jsonStr = JSON.stringify(body.payload, null, 2);
+      var targetFolder = null;
       if (!file) {
-        var folder = findOrCreateFolder();
+        targetFolder = findOrCreateFolder();
         var blob = Utilities.newBlob(jsonStr, "application/json", DB_FILE_NAME);
-        file = folder.createFile(blob);
+        file = targetFolder.createFile(blob);
       } else {
+        // 일일 1회(KST 기준) 덮어쓰기 전 안전 백업 스냅샷 생성 (최근 30일 보관)
+        try {
+          var prevContent = file.getBlob().getDataAsString("UTF-8");
+          if (prevContent && prevContent.length > 2) {
+            var kstToday = Utilities.formatDate(new Date(), "GMT+9", "yyyy-MM-dd");
+            var backupName = "iljeomodo_backup_" + kstToday + ".json";
+            var parents = file.getParents();
+            targetFolder = parents.hasNext() ? parents.next() : findOrCreateFolder();
+            if (!targetFolder.getFilesByName(backupName).hasNext()) {
+              targetFolder.createFile(Utilities.newBlob(prevContent, "application/json", backupName));
+              pruneOldDailyBackups(targetFolder, 30);
+            }
+          }
+        } catch (bakErr) {}
         file.setContent(jsonStr);
       }
       return jsonResponse({
@@ -125,6 +149,28 @@ function findDbFile() {
     return rootFiles.next();
   }
   return null;
+}
+
+function pruneOldDailyBackups(folder, maxKeep) {
+  var backups = [];
+  var files = folder.getFiles();
+  while (files.hasNext()) {
+    var f = files.next();
+    if (/^iljeomodo_backup_\d{4}-\d{2}-\d{2}\.json$/.test(f.getName())) {
+      backups.push(f);
+    }
+  }
+  if (backups.length <= maxKeep) {
+    return;
+  }
+  backups.sort(function(a, b) {
+    return a.getName() < b.getName() ? 1 : (a.getName() > b.getName() ? -1 : 0);
+  });
+  for (var i = maxKeep; i < backups.length; i++) {
+    try {
+      backups[i].setTrashed(true);
+    } catch (ignore) {}
+  }
 }
 
 function jsonResponse(obj) {

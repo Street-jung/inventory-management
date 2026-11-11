@@ -80,10 +80,12 @@ class TestIljeomodoAdminMode(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        app_module._cancel_boot_recovery()
         app_module.DATA_FILE = cls._orig_data_file
         with app_module.data_lock:
             app_module.app_state.clear()
             app_module.app_state.update(copy.deepcopy(cls._orig_state))
+            app_module._reset_blocked_flags_locked()
         app_module.drive_sync_state.clear()
         app_module.drive_sync_state.update(copy.deepcopy(cls._orig_drive_state))
         for k, v in [
@@ -98,6 +100,7 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self):
+        app_module._cancel_boot_recovery()
         os.environ.pop("ADMIN_PIN", None)
         os.environ.pop("GOOGLE_APPS_SCRIPT_URL", None)
         os.environ.pop("GOOGLE_APPS_SCRIPT_TOKEN", None)
@@ -105,11 +108,14 @@ class TestIljeomodoAdminMode(unittest.TestCase):
             app_module.app_state.clear()
             app_module.app_state.update(copy.deepcopy(self._orig_state))
             app_module.app_state["settings"]["admin_pin_custom"] = ""
+            app_module._reset_blocked_flags_locked()
         app_module._admin_revoked_before = 0
         app_module.drive_sync_state.clear()
         app_module.drive_sync_state.update(copy.deepcopy(self._orig_drive_state))
         app_module.drive_sync_state["configured"] = False
         app_module.drive_sync_state["status"] = "disabled"
+        app_module.drive_sync_state["sync_blocked"] = False
+        app_module.drive_sync_state["boot_restore_failed"] = False
         self.client = app.test_client()
 
     def _login(self, pin="1500"):
@@ -1616,6 +1622,205 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         ):
             self.assertIn(marker, html, f"Missing marker: {marker}")
         print("OK: [Admin Test 17] 쿠팡 파서 edge-case·인코딩·등급누락 경고·즉시반품지정·자동분리 검증 완료")
+
+    def test_18_drive_boot_failure_overwrite_protection_and_recovery(self):
+        """부팅 시 Google Drive 복원 실패 시 자동 덮어쓰기 차단, 수동 강제백업 가드, 자동복구+임시업로드 병합 검증"""
+        headers = self._login("1500")
+        exp_res = self.client.get("/api/admin/backup/export", headers=headers)
+        remote_snap = json.loads(exp_res.data)
+        remote_snap["master_products"][0]["note"] = "원격 Drive 최신 메모(절대 보존)"
+        remote_snap["lot_expiry_overrides"] = {
+            "PJ1489503||500ml||2026-09-15 16:31:50": "2028-04-30"
+        }
+
+        os.environ["GOOGLE_APPS_SCRIPT_URL"] = "https://script.google.com/macros/s/fake-id/exec"
+        os.environ["GOOGLE_APPS_SCRIPT_TOKEN"] = "fake-secret-token"
+        store_box = {"save_calls": 0, "load_calls": 0, "saved_payload": None, "remote_data": remote_snap}
+
+        # 1. 부팅 시 Drive 통신 실패 시뮬레이션 -> sync_blocked=True, status='blocked'
+        with patch("app.time.sleep", return_value=None), patch.dict(os.environ, {"ILJEOMODO_SKIP_BG_RECOVERY": "1"}):
+            with patch("urllib.request.build_opener", side_effect=lambda *a, **kw: FakeOpener(store_box, fail_mode=True)):
+                app_module.load_state()
+            self.assertTrue(app_module.drive_sync_state["sync_blocked"])
+            self.assertTrue(app_module.drive_sync_state["boot_restore_failed"])
+            self.assertEqual(app_module.drive_sync_state["status"], "blocked")
+
+            # 2. Drive가 아직 잠긴 상태에서 개미 CSV 업로드 발생 -> 로컬만 반영, Drive 덮어쓰기 차단!
+            with open("개미창고_샘플.csv", encoding="utf-8") as f:
+                gaemi_rows = list(csv.reader(f))
+            with patch("urllib.request.build_opener", side_effect=lambda *a, **kw: FakeOpener(store_box, fail_mode=False)):
+                up_res = self.client.post("/api/upload-file-data", json={"source": "gaemi", "rows": gaemi_rows})
+                self.assertEqual(up_res.status_code, 200)
+                up_data = json.loads(up_res.data)
+                self.assertTrue(up_data["drive_sync"]["sync_blocked"])
+                self.assertEqual(up_data["drive_sync"]["status"], "blocked")
+                self.assertEqual(store_box["save_calls"], 0, "잠금 상태에서 Drive 자동 덮어쓰기가 실행되면 안 됨")
+
+                # 3. sync-now는 force=True 없이 409 require_force 반환해야 함
+                sync_res = self.client.post("/api/admin/drive/sync-now", headers=headers, json={})
+                self.assertEqual(sync_res.status_code, 409)
+                sync_json = json.loads(sync_res.data)
+                self.assertTrue(sync_json.get("require_force"))
+                self.assertEqual(store_box["save_calls"], 0)
+
+                # 4. 백그라운드 복구 1회 실행 -> 원격 메모 + 소비기한 오버라이드 복원 + 차단 중 업로드된 개미 CSV 유지 + 안전 동기화
+                ok = app_module._attempt_boot_drive_recovery_once()
+                self.assertTrue(ok)
+                self.assertFalse(app_module.drive_sync_state["sync_blocked"])
+                self.assertFalse(app_module.drive_sync_state["boot_restore_failed"])
+                self.assertEqual(app_module.drive_sync_state["status"], "synced")
+                self.assertEqual(app_module.app_state["master_products"][0]["note"], "원격 Drive 최신 메모(절대 보존)")
+                self.assertEqual(
+                    app_module.app_state["lot_expiry_overrides"].get("PJ1489503||500ml||2026-09-15 16:31:50"),
+                    "2028-04-30"
+                )
+                self.assertGreater(len(app_module.app_state["gaemi_inventory"]), 0)
+                self.assertEqual(store_box["save_calls"], 1)
+                self.assertEqual(
+                    store_box["saved_payload"]["master_products"][0]["note"],
+                    "원격 Drive 최신 메모(절대 보존)"
+                )
+
+                # 5. 빈 master_products를 가진 원격 응답은 복원 거부(기존 데이터 보호)
+                store_box["remote_data"] = {"master_products": []}
+                pull_bad = self.client.post("/api/admin/drive/pull-now", headers=headers)
+                self.assertEqual(pull_bad.status_code, 500)
+                self.assertEqual(app_module.app_state["master_products"][0]["note"], "원격 Drive 최신 메모(절대 보존)")
+
+                # 6. 잠금 상태에서 force=True 로 명시적 덮어쓰기 시 잠금 해제 검증
+                app_module.drive_sync_state["sync_blocked"] = True
+                app_module.drive_sync_state["status"] = "blocked"
+                force_res = self.client.post("/api/admin/drive/sync-now", headers=headers, json={"force": True})
+                self.assertEqual(force_res.status_code, 200)
+                self.assertFalse(json.loads(force_res.data)["drive_sync"]["sync_blocked"])
+
+        print("OK: [Admin Test 18] Google Drive 부팅 복원 실패 시 덮어쓰기 차단 및 자동 복구·병합 검증 완료")
+
+    def test_19_excel_serial_lot_key_normalization_case_nfc_and_clear(self):
+        """Excel 시리얼 등록일·소수점 수량·NFD/대소문자 매칭·오버라이드 Alias 정리 및 동일 일자 다른 로트 격리 검증"""
+        import unicodedata
+        headers = self._login("1500")
+
+        # 1. 기존 Drive 데이터에 Excel 시리얼 float(46280.68877314815 == 2026-09-15 16:31:50) 로 저장된 오버라이드 재현
+        with app_module.data_lock:
+            app_module.app_state["lot_expiry_overrides"] = {
+                "PJ1489503||500ml||46280.68877314815": "2027-09-20",
+                # 동일 일자 다른 시각 로트 (10:00:00 vs 16:31:50) 격리 테스트
+                "PJ1489503||500ml||2026-09-15 10:00:00": "2027-04-01",
+            }
+            app_module.app_state["gaemi_inventory"] = {
+                "PJ1489503": [
+                    {
+                        "product_name": "데체코 엑스트라버진 올리브오일",
+                        "option_name": "500ml",
+                        "stock": 500,
+                        "reg_date": 46280.68877314815,
+                        "expiry_date": "",
+                        "days_left": None,
+                    },
+                    {
+                        "product_name": "데체코 엑스트라버진 올리브오일",
+                        "option_name": "500ml",
+                        "stock": 100,
+                        "reg_date": "2026-09-15 10:00:00",
+                        "expiry_date": "",
+                        "days_left": None,
+                    },
+                ]
+            }
+
+        s_old = json.loads(self.client.get("/api/summary").data)
+        m_eo02 = next(m for m in s_old["masters"] if m["seller_code"] == "20EO02")
+        lots_map = {l["lot_key"]: l for l in m_eo02["csv_gaemi_lots"]}
+        self.assertIn("PJ1489503||500ml||2026-09-15 16:31:50", lots_map)
+        self.assertEqual(lots_map["PJ1489503||500ml||2026-09-15 16:31:50"]["expiry_date"], "2027-09-20")
+        self.assertEqual(lots_map["PJ1489503||500ml||2026-09-15 10:00:00"]["expiry_date"], "2027-04-01")
+
+        # 2. Excel (.xlsx) Raw Serial + float string('500.0') + NFD 옵션명 + 소문자 레거시/명시 코드 업로드 테스트
+        nfd_opt = unicodedata.normalize("NFD", "구욘 다크초코")
+        gaemi_xlsx_rows = [
+            ["번호", "상품코드", "상품명", "옵션명", "상태", "입고량", "출고량", "재고량", "등록일"],
+            [1, "PJ1489503", "데체코 EV 올리브오일", "500ml", "정상", "1000", "500", "500.0", 46280.68877314815],
+            [2, "20EK03", "엘레올로지", nfd_opt, "정상", 10, 0, "10.0", "2026-10-01 09:00:00"],
+            [3, "10GL02", "구욘", unicodedata.normalize("NFD", "구욘 오렌지 265g"), "정상", 20, 0, "20.0", "2026-10-02 09:00:00"],
+        ]
+        # 20EK03 는 소문자 명시 매핑 + NFC 옵션, 10GL02 는 소문자 레거시 gaemi_codes 로 매핑하여 대소문자/NFC 정규화 동시 검증
+        with app_module.data_lock:
+            for m in app_module.app_state["master_products"]:
+                if m["seller_code"] == "20EK03":
+                    m["gaemi_codes"] = ["20ek03"]
+                    m["gaemi_mappings"] = [{"gaemi_code": "20ek03", "option_name": unicodedata.normalize("NFC", "구욘 다크초코")}]
+                elif m["seller_code"] == "10GL02":
+                    m["gaemi_mappings"] = []
+                    m["gaemi_codes"] = ["10gl02"]
+
+        up_xlsx = self.client.post("/api/upload-file-data", json={"source": "gaemi", "rows": gaemi_xlsx_rows})
+        self.assertEqual(up_xlsx.status_code, 200)
+
+        # reg_date가 '2026-09-15 16:31:50' 으로 정규화되었고 stock '500.0' -> 500 파싱 검증
+        self.assertEqual(app_module.app_state["gaemi_inventory"]["PJ1489503"][0]["reg_date"], "2026-09-15 16:31:50")
+        self.assertEqual(app_module.app_state["gaemi_inventory"]["PJ1489503"][0]["stock"], 500)
+        self.assertEqual(app_module.app_state["gaemi_inventory"]["20EK03"][0]["stock"], 10)
+        self.assertEqual(app_module.app_state["gaemi_inventory"]["10GL02"][0]["stock"], 20)
+
+        s_xlsx = json.loads(self.client.get("/api/summary").data)
+        m_eo02_2 = next(m for m in s_xlsx["masters"] if m["seller_code"] == "20EO02")
+        self.assertEqual(m_eo02_2["nearest_expiry_date"], "2027-09-20")
+        m_ek03 = next(m for m in s_xlsx["masters"] if m["seller_code"] == "20EK03")
+        self.assertEqual(m_ek03["gaemi_total"], 10)
+        m_gl02 = next(m for m in s_xlsx["masters"] if m["seller_code"] == "10GL02")
+        self.assertEqual(m_gl02["gaemi_total"], 20)
+
+        # 3. 동일 데이터를 이번엔 CSV 문자열 등록일('2026-09-15 16:31:50')로 재업로드해도 동일 소비기한 보존
+        gaemi_csv_rows = [
+            ["번호", "상품코드", "상품명", "옵션명", "상태", "입고량", "출고량", "재고량", "등록일"],
+            [1, "PJ1489503", "데체코 EV 올리브오일", "500ml", "정상", "1000", "500", "480", "2026-09-15 16:31:50"],
+        ]
+        up_csv = self.client.post("/api/upload-file-data", json={"source": "gaemi", "rows": gaemi_csv_rows})
+        self.assertEqual(up_csv.status_code, 200)
+        s_csv = json.loads(self.client.get("/api/summary").data)
+        m_eo02_3 = next(m for m in s_csv["masters"] if m["seller_code"] == "20EO02")
+        self.assertEqual(m_eo02_3["nearest_expiry_date"], "2027-09-20")
+
+        # 4. 정규화 키로 __RESTORE__ 실행 시 과거 Excel 시리얼 별칭 키까지 함께 깔끔히 제거되는지 검증
+        save_res = self.client.post("/api/admin/product/save", headers=headers, json={
+            "id": m_eo02_3["id"],
+            "seller_code": "20EO02",
+            "name": m_eo02_3["name"],
+            "product_type": m_eo02_3["product_type"],
+            "category": m_eo02_3["category"],
+            "csv_lot_expiries": {
+                "PJ1489503||500ml||2026-09-15 16:31:50": "__RESTORE__"
+            }
+        })
+        self.assertEqual(save_res.status_code, 200)
+        self.assertNotIn("PJ1489503||500ml||46280.68877314815", app_module.app_state["lot_expiry_overrides"])
+        self.assertNotIn("PJ1489503||500ml||2026-09-15 16:31:50", app_module.app_state["lot_expiry_overrides"])
+
+        # 5. 매출 파서 Excel 시리얼 주문일 + float string('3.0') 주문수량 검증
+        sales_rows = [
+            ["주문일", "묶음번호", "쇼핑몰", "온라인상품명", "주문수량", "판매자관리코드"],
+            [46280.5, "B1", "스마트스토어", "테스트", "3.0", "20ek03"],
+        ]
+        parsed_sales = app_module.parse_sales_rows(sales_rows)
+        self.assertIn("20EK03", parsed_sales)
+        self.assertEqual(parsed_sales["20EK03"]["total_7d"], 3)
+        self.assertEqual(parsed_sales["20EK03"]["orders"][0]["date"], "2026-09-15 12:00:00")
+
+        # 6. 프론트엔드 보호 UI 및 정규화 JS 함수 존재 검증 (PIN 비노출 유지)
+        html = self.client.get("/").data.decode("utf-8")
+        self.assertNotIn("1500", html)
+        for marker in (
+            'id="driveProtectionBanner"',
+            "pullDriveNowFromBanner",
+            "excelSerialToJsIso",
+            "normalizeJsGaemiRegDate",
+            "canonicalizeJsLotKey",
+            "resolveJsLotOverride",
+        ):
+            self.assertIn(marker, html, f"Missing marker: {marker}")
+
+        print("OK: [Admin Test 19] Excel 시리얼/CSV 양방향 로트키 정규화·NFC/대소문자 매칭·오버라이드 정리 검증 완료")
 
 
 if __name__ == '__main__':

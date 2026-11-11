@@ -72,3 +72,25 @@
    - `python -m unittest discover -p "test_*.py" -v` — 32개 테스트 전부 통과 (`Ran 32 tests in 1.047s`, `OK`)
    - 문서/규칙 파일 추가 작업이며 `app.py` 및 테스트 코드 로직은 변경하지 않음
 5. **남은 문제 및 다음 작업 시 주의사항**: `AGENTS.md`와 `DEVELOPMENT_LOG.md`는 현재 워킹 트리에만 생성된 상태이므로 필요 시 커밋·푸시 여부를 사용자에게 확인해야 함. 이후 모든 작업 완료 시 본 파일 하단에만 새 섹션을 추가할 것.
+
+---
+
+## [2026-11-11] 소비기한·코드매핑 데이터 보존 강화 (Drive 덮어쓰기 차단 · 로트키/Excel 시리얼 정규화)
+1. **작업 날짜와 변경한 기능**: `2026-11-11` / Google Drive 덮어쓰기 보호 잠금·자동 복구 및 Excel 시리얼·CSV 양방향 로트키/코드매핑 정규화
+2. **수정한 파일과 핵심 변경 사항**:
+   - `app.py`:
+     - `_call_gas_bridge` 타임아웃 상향(20s)·일시 오류 재시도, 부팅 시 `pull_from_drive` 실패하면 `drive_sync_state["sync_blocked"] = True`, `status = "blocked"` 설정해 로컬 구버전 스냅샷이 Drive를 덮어쓰지 못하도록 차단하고 백그라운드 복구(`_attempt_boot_drive_recovery_once`, 차단 중 업로드한 CSV는 병합 보존) 및 `POST /api/admin/drive/sync-now` `409 require_force` 가드 추가
+     - `/api/upload-file-data` 및 `/api/load-sample`의 `save_state(..., wait_drive=True)` 동기 실행 전환과 상단 보호 배너(`#driveProtectionBanner`), 배지/저장 알림 동기화 상태 표시 추가
+     - `excel_serial_to_datetime`, `normalize_gaemi_reg_date`, `canonicalize_lot_key`, `build_lot_override_index`, `resolve_lot_expiry_override`, `_apply_lot_expiry_overrides_locked` 및 JS 동등 함수(`excelSerialToJsIso`, `canonicalizeJsLotKey`, `resolveJsLotOverride`) 추가; `parse_gaemi_rows`·`parse_sales_rows`·`parse_order_datetime`·`get_matching_gaemi_items`에 소수점 수치(`_clean_int_cell`), Excel 날짜 시리얼, NFC/대소문자 무관 매칭 적용
+     - `openEditProductModal` / `toggleCoupangOptionReturn` 캐시 최신화(`ensureAdminConfig`), `saveProductModal` 빈 입력 `__CLEAR__`/`__RESTORE__` 구분, `renderAdminExpiryTable` 기본 소비기한 힌트 추가
+   - `google_apps_script_bridge.gs`: `save` 액션 시 빈/유효하지 않은 `master_products` 페이로드 거부 가드 + 기존 KST 일일 1회 스냅샷 백업(`iljeomodo_backup_YYYY-MM-DD.json`, 최근 30일 보관) 유지
+   - `test_admin_mode.py`: `test_18_drive_boot_failure_overwrite_protection_and_recovery`, `test_19_excel_serial_lot_key_normalization_case_nfc_and_clear` 추가
+3. **변경 이유 및 중요한 설계 결정**: 실운영 진단 결과 ① Render 재시작 시 GAS 복원 실패에도 자동 Drive 덮어쓰기가 허용되던 구조적 위험과 ② Excel `.xlsx` 시리얼 `reg_date`(`46280.68877314815`)와 CSV 문자열(`2026-09-15 16:31:50`) 간 로트키 불일치·레거시 `gaemi_codes` 대소문자·NFD 불일치가 공존함을 확인함. 기존 실운영 Drive에 이미 저장된 Excel 시리얼 로트키를 무손실 호환(`resolve_lot_expiry_override` 4단계 매칭)하면서 신규/수정 저장 시에만 중복 별칭 키를 정리하도록 설계함.
+4. **실행한 테스트와 그 결과**:
+   - `python -W error::SyntaxWarning -m py_compile app.py test_app.py test_business_logic.py test_admin_mode.py` — 통과 (exit code 0)
+   - 정적 HTML/JS 검증(`verify_html_js.py`, 스크래치) — 통과 (`JS delimiter & string/template balance OK`, 153 DOM ID·138 인라인 핸들러 이상 없음, `GET /` 374,600 chars, `GET /api/summary` 38 masters)
+   - `python -m unittest discover -p "test_*.py" -v` — 34개 테스트(기존 32개 + 신규 2개) 전부 통과 (`Ran 34 tests in 2.030s`, `OK`)
+   - `git diff inventory_master_store.json` — 출력 없음 (원본 운영 파일 무수정 확인)
+5. **남은 문제 및 다음 작업 시 주의사항**:
+   - 수정된 `google_apps_script_bridge.gs` 코드는 Google Apps Script 웹앱 편집기에 사용자가 직접 붙여넣어 **새 버전으로 재배포**해야 클라우드 백업 가드·일일 백업이 반영됨.
+   - `origin/main` 원격 푸시는 규칙상 미실행 상태이며, 배포 전 관리자 센터 `[JSON 전체 백업 다운로드]` 후 사용자 승인 하에 커밋·푸시해야 함.

@@ -47,6 +47,58 @@ GAS_SCRIPT_FILE = os.path.join(BASE_DIR, 'google_apps_script_bridge.gs')
 
 EXP_DATE_PATTERN = re.compile(r'(\d{2,4})[.\-/](\d{1,2})[.\-/](\d{1,2})')
 
+def _clean_cell_str(val):
+    if val is None or isinstance(val, bool):
+        return ""
+    if isinstance(val, float):
+        if val != val:
+            return ""
+        if val.is_integer():
+            return str(int(val))
+    return unicodedata.normalize("NFC", str(val)).strip()
+
+def _clean_id_cell(val):
+    s = _clean_cell_str(val)
+    if not s:
+        return ""
+    if re.fullmatch(r"\d+\.0+", s):
+        s = s.split(".", 1)[0]
+    return s
+
+def _clean_int_cell(val):
+    s = _clean_cell_str(val).replace(",", "")
+    if not s or s == "-":
+        return 0
+    if s.isdigit():
+        return int(s)
+    if re.fullmatch(r"-?\d+(?:\.\d+)?", s):
+        try:
+            return max(0, int(round(float(s))))
+        except Exception:
+            return 0
+    return 0
+
+def excel_serial_to_datetime(val):
+    """Excel 1900 기준 날짜 시리얼(예: 46280.68877314815)을 datetime으로 변환"""
+    if val is None or isinstance(val, bool):
+        return None
+    try:
+        if isinstance(val, (int, float)):
+            num = float(val)
+        else:
+            s = str(val).strip()
+            if not re.fullmatch(r"\d{5}(?:\.\d+)?", s):
+                return None
+            num = float(s)
+    except Exception:
+        return None
+    if num != num or num < 20000.0 or num > 80000.0:
+        return None
+    day_int = int(num)
+    frac = num - day_int
+    total_secs = int(round(frac * 86400.0))
+    return datetime(1899, 12, 30) + timedelta(days=day_int, seconds=total_secs)
+
 def extract_expiry_date(text):
     if not text:
         return None
@@ -71,6 +123,143 @@ def normalize_date_str(val):
         return s
     d = extract_expiry_date(s)
     return d.strftime("%Y-%m-%d") if d else ""
+
+def normalize_gaemi_reg_date(val):
+    """개미창고 등록일/일시를 'YYYY-MM-DD HH:MM:SS' 또는 'YYYY-MM-DD'로 정규화 (Excel 시리얼 포함, 비파싱 텍스트는 무손실 보존)"""
+    if val is None or isinstance(val, bool):
+        return ""
+    dt_serial = excel_serial_to_datetime(val)
+    if dt_serial is not None:
+        has_time = False
+        try:
+            num = float(val)
+            has_time = abs(num - int(num)) > 1e-7 or (dt_serial.hour != 0 or dt_serial.minute != 0 or dt_serial.second != 0)
+        except Exception:
+            has_time = (dt_serial.hour != 0 or dt_serial.minute != 0 or dt_serial.second != 0)
+        return dt_serial.strftime("%Y-%m-%d %H:%M:%S") if has_time else dt_serial.strftime("%Y-%m-%d")
+
+    s = _clean_cell_str(val)
+    if not s:
+        return ""
+    m = re.fullmatch(r"(\d{2,4})[.\-/](\d{1,2})[.\-/](\d{1,2})(?:[ T]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?", s)
+    if m:
+        y = int(m.group(1))
+        if y < 100:
+            y += 2000
+        mo, d = int(m.group(2)), int(m.group(3))
+        try:
+            if m.group(4) is not None:
+                dt = datetime(y, mo, d, int(m.group(4)), int(m.group(5) or 0), int(m.group(6) or 0))
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
+            dt = datetime(y, mo, d)
+            return dt.strftime("%Y-%m-%d")
+        except Exception:
+            return s
+    return s
+
+def canonicalize_lot_key(raw_key):
+    """개미 로트 키('code||opt[||reg]')를 (canon_full, canon_date_only, canon_opt)로 정규화"""
+    s = _clean_cell_str(raw_key)
+    if not s:
+        return "", "", ""
+    parts = s.split("||")
+    code_up = _clean_cell_str(parts[0]).upper()
+    if not code_up:
+        return "", "", ""
+    opt_nfc = _clean_cell_str(parts[1]) if len(parts) >= 2 else ""
+    reg_raw = _clean_cell_str("||".join(parts[2:])) if len(parts) >= 3 else ""
+    canon_opt = f"{code_up}||{opt_nfc}"
+    if not reg_raw:
+        return canon_opt, canon_opt, canon_opt
+    canon_reg = normalize_gaemi_reg_date(reg_raw)
+    canon_full = f"{canon_opt}||{canon_reg}" if canon_reg else canon_opt
+    date_part = canon_reg[:10] if len(canon_reg) >= 10 and re.match(r"\d{4}-\d{2}-\d{2}", canon_reg) else canon_reg
+    canon_date_only = f"{canon_opt}||{date_part}" if date_part else canon_opt
+    return canon_full, canon_date_only, canon_opt
+
+def build_lot_override_index(lot_expiry_overrides):
+    full_map = {}
+    date_only_map = {}
+    opt_map = {}
+    if not isinstance(lot_expiry_overrides, dict):
+        return {"full": full_map, "date_only": date_only_map, "opt": opt_map}
+    for k, v in lot_expiry_overrides.items():
+        if v is None:
+            continue
+        cf, cdo, co = canonicalize_lot_key(k)
+        if not cf:
+            continue
+        raw_parts = _clean_cell_str(k).split("||")
+        if len(raw_parts) >= 3 and _clean_cell_str("||".join(raw_parts[2:])):
+            if cf not in full_map or _clean_cell_str(k) == cf:
+                full_map[cf] = v
+            cand_has_time = (cf != cdo)
+            date_only_map.setdefault(cdo, []).append((cand_has_time, v))
+        else:
+            if co not in opt_map or _clean_cell_str(k) == co:
+                opt_map[co] = v
+    return {"full": full_map, "date_only": date_only_map, "opt": opt_map}
+
+def resolve_lot_expiry_override(override_index, lot_expiry_overrides, g_code, item):
+    exact_key, opt_key = make_gaemi_lot_keys(g_code, item)
+    if not isinstance(lot_expiry_overrides, dict) or not lot_expiry_overrides:
+        return None
+    # Tier 1: 원시 키 정확 일치
+    if exact_key in lot_expiry_overrides:
+        return lot_expiry_overrides[exact_key]
+    cf, cdo, co = canonicalize_lot_key(exact_key)
+    # Tier 2: 정규화(Excel serial / CSV datetime / 대소문자 / NFC) 전체 키 일치
+    if cf and cf in override_index["full"]:
+        return override_index["full"][cf]
+    # Tier 3: 한쪽에 시각(HH:MM:SS)이 생략된 경우에만 날짜 단독 매칭 (동일 일자 다른 로트 혼선 방지)
+    item_has_time = bool(cf and cf != cdo)
+    cands = override_index["date_only"].get(cdo) or []
+    if cands:
+        if not item_has_time:
+            if len(cands) == 1:
+                return cands[0][1]
+        else:
+            no_time_cands = [val for cand_has_time, val in cands if not cand_has_time]
+            if no_time_cands:
+                return no_time_cands[0]
+    # Tier 4: 옵션 단위 키 일치 (원본 -> 정규화)
+    if opt_key in lot_expiry_overrides:
+        return lot_expiry_overrides[opt_key]
+    if co and co in override_index["opt"]:
+        return override_index["opt"][co]
+    return None
+
+def _apply_lot_expiry_overrides_locked(overrides, updates):
+    if not isinstance(updates, dict):
+        return
+    for lot_key, exp_val in updates.items():
+        k = _clean_cell_str(lot_key)
+        if not k:
+            continue
+        v = str(exp_val or "").strip()
+        target_full, _, _ = canonicalize_lot_key(k)
+        alias_keys = []
+        if target_full and len(k.split("||")) >= 3:
+            for existing_k in list(overrides.keys()):
+                if existing_k == k:
+                    continue
+                if len(_clean_cell_str(existing_k).split("||")) >= 3 and canonicalize_lot_key(existing_k)[0] == target_full:
+                    alias_keys.append(existing_k)
+
+        if v == "__RESTORE__" or v == "":
+            overrides.pop(k, None)
+            for ak in alias_keys:
+                overrides.pop(ak, None)
+        elif v == "__CLEAR__":
+            for ak in alias_keys:
+                overrides.pop(ak, None)
+            overrides[k] = "__CLEAR__"
+        else:
+            norm_d = normalize_date_str(v)
+            if norm_d:
+                for ak in alias_keys:
+                    overrides.pop(ak, None)
+                overrides[k] = norm_d
 
 # -------------------------------------------------------------
 # 세트/B2B 상품 실물 재고 연동 기본 매핑 규칙 (관리자 모드에서 수정 가능)
@@ -128,12 +317,23 @@ app_state = {
 
 drive_sync_state = {
     "configured": False,
-    "status": "disabled",      # disabled | idle | syncing | synced | error
+    "status": "disabled",      # disabled | idle | syncing | synced | error | blocked
     "last_synced_at": "",
     "last_loaded_at": "",
     "last_error": "",
-    "file_id": ""
+    "file_id": "",
+    "sync_blocked": False,
+    "boot_restore_failed": False
 }
+
+_blocked_state_flags = {
+    "admin_mutated": False,
+    "uploaded_sources": set(),
+    "fresh_uploads": {}
+}
+_boot_recovery_lock = threading.Lock()
+_boot_recovery_cancel = threading.Event()
+_boot_recovery_gen = 0
 
 def get_active_b2b_mappings():
     m = app_state.get("b2b_mappings")
@@ -167,18 +367,18 @@ def get_matching_gaemi_items(m, gaemi_inv):
     마스터 상품과 매칭되는 개미창고 (gaemi_code, item) 튜플 목록 반환.
     우선순위:
     1) 관리자 명시 매핑 gaemi_mappings ([{gaemi_code, option_name}]) - 상품코드+옵션명 정확 매칭 (option_name이 '' 또는 '*'면 전체 옵션)
-    2) 하위 호환 키워드 매핑 gaemi_codes + gaemi_filter
+    2) 하위 호환 키워드 매핑 gaemi_codes + gaemi_filter (대소문자/NFC 정규화)
     """
     items = []
+    upper_code_map = {_clean_cell_str(k).upper(): (k, v) for k, v in gaemi_inv.items()}
     gaemi_mappings = m.get("gaemi_mappings")
     if isinstance(gaemi_mappings, list) and len(gaemi_mappings) > 0:
-        upper_code_map = {str(k).strip().upper(): (k, v) for k, v in gaemi_inv.items()}
         seen_refs = set()
         for rule in gaemi_mappings:
             if not isinstance(rule, dict):
                 continue
-            req_code = str(rule.get("gaemi_code") or rule.get("code") or "").strip()
-            req_opt = str(rule.get("option_name", "")).strip()
+            req_code = _clean_cell_str(rule.get("gaemi_code") or rule.get("code") or "")
+            req_opt = _clean_cell_str(rule.get("option_name", ""))
             if not req_code:
                 continue
             matched = gaemi_inv.get(req_code)
@@ -190,7 +390,7 @@ def get_matching_gaemi_items(m, gaemi_inv):
             if not matched:
                 continue
             for idx, item in enumerate(matched):
-                item_opt = str(item.get("option_name", "")).strip()
+                item_opt = _clean_cell_str(item.get("option_name", ""))
                 if req_opt in ("", "*") or item_opt == req_opt:
                     ref = (actual_code, idx)
                     if ref not in seen_refs:
@@ -198,24 +398,33 @@ def get_matching_gaemi_items(m, gaemi_inv):
                         items.append((actual_code, item))
         return items
 
-    opt_filter = (m.get("gaemi_filter") or "").strip()
+    opt_filter = _clean_cell_str(m.get("gaemi_filter") or "")
     seen_legacy = set()
     for g_code in m.get("gaemi_codes", []):
-        g_c = str(g_code).strip()
-        if not g_c or g_c in seen_legacy:
+        g_c = _clean_cell_str(g_code)
+        g_key = g_c.upper()
+        if not g_key or g_key in seen_legacy:
             continue
-        seen_legacy.add(g_c)
-        for item in gaemi_inv.get(g_c, []):
-            if opt_filter and opt_filter not in item.get("option_name", ""):
+        seen_legacy.add(g_key)
+        matched = gaemi_inv.get(g_c)
+        actual_code = g_c
+        if matched is None:
+            found = upper_code_map.get(g_key)
+            if found:
+                actual_code, matched = found
+        for item in (matched or []):
+            item_opt = _clean_cell_str(item.get("option_name", ""))
+            if opt_filter and opt_filter not in item_opt:
                 continue
-            items.append((g_c, item))
+            items.append((actual_code, item))
     return items
 
 def make_gaemi_lot_keys(g_code, item):
-    opt = str(item.get("option_name", "")).strip()
-    reg = str(item.get("reg_date", "")).strip()
-    exact_key = f"{g_code}||{opt}||{reg}" if reg else f"{g_code}||{opt}"
-    opt_key = f"{g_code}||{opt}"
+    gc = _clean_cell_str(g_code)
+    opt = _clean_cell_str(item.get("option_name", ""))
+    reg = normalize_gaemi_reg_date(item.get("reg_date", ""))
+    exact_key = f"{gc}||{opt}||{reg}" if reg else f"{gc}||{opt}"
+    opt_key = f"{gc}||{opt}"
     return exact_key, opt_key
 
 def add_log(msg):
@@ -298,7 +507,7 @@ def get_gas_config():
     configured = bool(url and token)
     return {"configured": configured, "url": url, "token": token}
 
-def _call_gas_bridge(action, payload=None, timeout=15):
+def _call_gas_bridge(action, payload=None, timeout=20, retries=1, retry_delays=(0.8, 1.5), force=False):
     cfg = get_gas_config()
     if not cfg["configured"]:
         return {"success": False, "error": "Google Apps Script 환경변수(GOOGLE_APPS_SCRIPT_URL, GOOGLE_APPS_SCRIPT_TOKEN)가 설정되지 않았습니다."}
@@ -309,25 +518,54 @@ def _call_gas_bridge(action, payload=None, timeout=15):
     }
     if payload is not None:
         body["payload"] = payload
+    if force:
+        body["force"] = True
 
     data_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        cfg["url"],
-        data=data_bytes,
-        headers={
-            "Content-Type": "application/json; charset=utf-8",
-            "User-Agent": "Iljeomodo-Inventory/2.0"
-        },
-        method="POST"
-    )
-    cj = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-    with opener.open(req, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8", errors="replace")
-        return json.loads(raw)
+    last_exc = None
+    attempts = max(1, int(retries) + 1)
+
+    for attempt in range(attempts):
+        try:
+            req = urllib.request.Request(
+                cfg["url"],
+                data=data_bytes,
+                headers={
+                    "Content-Type": "application/json; charset=utf-8",
+                    "User-Agent": "Iljeomodo-Inventory/2.0"
+                },
+                method="POST"
+            )
+            cj = http.cookiejar.CookieJar()
+            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+            with opener.open(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                res = json.loads(raw)
+            if isinstance(res, dict) and not res.get("success"):
+                err_txt = str(res.get("error", "")).lower()
+                is_transient = any(k in err_txt for k in ("lock", "timeout", "exceeded", "busy", "too many", "try again"))
+                if is_transient and attempt + 1 < attempts:
+                    time.sleep(retry_delays[min(attempt, len(retry_delays) - 1)])
+                    continue
+            return res
+        except urllib.error.HTTPError as e:
+            last_exc = e
+            if e.code in (429, 500, 502, 503, 504) and attempt + 1 < attempts:
+                time.sleep(retry_delays[min(attempt, len(retry_delays) - 1)])
+                continue
+            raise
+        except Exception as e:
+            last_exc = e
+            if attempt + 1 < attempts:
+                time.sleep(retry_delays[min(attempt, len(retry_delays) - 1)])
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    return {"success": False, "error": "Drive bridge 요청 실패"}
 
 def normalize_hidden_unmapped_key(raw_key):
-    s = str(raw_key or "").strip()
+    s = _clean_cell_str(raw_key)
     if "::" not in s:
         return ""
     ch, rest = s.split("::", 1)
@@ -384,8 +622,8 @@ def _unhide_mapped_keys_locked(record):
     for rule in (record.get("gaemi_mappings") or []):
         if not isinstance(rule, dict):
             continue
-        gc = str(rule.get("gaemi_code") or rule.get("code") or "").strip().upper()
-        opt = str(rule.get("option_name", "")).strip()
+        gc = _clean_cell_str(rule.get("gaemi_code") or rule.get("code") or "").upper()
+        opt = _clean_cell_str(rule.get("option_name", ""))
         if not gc:
             continue
         if opt in ("", "*"):
@@ -477,33 +715,69 @@ def _apply_loaded_state(saved):
             app_state["upload_timestamps"] = {}
     return True
 
-def sync_to_drive(wait=False):
+def _reset_blocked_flags_locked():
+    _blocked_state_flags["admin_mutated"] = False
+    _blocked_state_flags["uploaded_sources"].clear()
+    _blocked_state_flags["fresh_uploads"].clear()
+
+def _cancel_boot_recovery():
+    global _boot_recovery_gen
+    with _boot_recovery_lock:
+        _boot_recovery_gen += 1
+        _boot_recovery_cancel.set()
+
+def sync_to_drive(wait=False, force=False):
     cfg = get_gas_config()
     if not cfg["configured"]:
         drive_sync_state["configured"] = False
         drive_sync_state["status"] = "disabled"
+        drive_sync_state["sync_blocked"] = False
+        drive_sync_state["boot_restore_failed"] = False
         return copy.deepcopy(drive_sync_state)
 
     drive_sync_state["configured"] = True
 
+    if drive_sync_state.get("sync_blocked") and not force:
+        err_msg = "부팅 시 Google Drive 최신 데이터를 복원하지 못해 기존 Drive 백업 보호를 위해 자동 덮어쓰기가 차단되었습니다."
+        drive_sync_state["status"] = "blocked"
+        drive_sync_state["last_error"] = err_msg
+        add_log(f"🛑 {err_msg}")
+        return copy.deepcopy(drive_sync_state)
+
     def _do_sync():
         with drive_sync_lock:
+            if drive_sync_state.get("sync_blocked") and not force:
+                drive_sync_state["status"] = "blocked"
+                return
             drive_sync_state["status"] = "syncing"
             try:
                 snap = build_state_snapshot()
-                res = _call_gas_bridge("save", payload=snap, timeout=15)
+                masters_list = snap.get("master_products")
+                if not force and (not isinstance(masters_list, list) or len(masters_list) == 0):
+                    err_msg = "마스터 상품 목록이 비어 있어 Google Drive 덮어쓰기를 중단했습니다."
+                    drive_sync_state["status"] = "blocked"
+                    drive_sync_state["sync_blocked"] = True
+                    drive_sync_state["last_error"] = err_msg
+                    add_log(f"🛑 {err_msg}")
+                    return
+
+                res = _call_gas_bridge("save", payload=snap, timeout=20, retries=1, retry_delays=(0.8,), force=force)
                 if res.get("success"):
                     drive_sync_state["status"] = "synced"
+                    drive_sync_state["sync_blocked"] = False
+                    drive_sync_state["boot_restore_failed"] = False
+                    with data_lock:
+                        _reset_blocked_flags_locked()
                     drive_sync_state["last_synced_at"] = now_kst().strftime("%Y-%m-%d %H:%M:%S")
                     drive_sync_state["last_error"] = ""
                     if res.get("fileId"):
                         drive_sync_state["file_id"] = res["fileId"]
                 else:
-                    drive_sync_state["status"] = "error"
+                    drive_sync_state["status"] = "blocked" if drive_sync_state.get("sync_blocked") else "error"
                     drive_sync_state["last_error"] = res.get("error", "알 수 없는 Drive 응답 오류")
                     add_log(f"⚠️ Google Drive 동기화 실패: {drive_sync_state['last_error']}")
             except Exception as e:
-                drive_sync_state["status"] = "error"
+                drive_sync_state["status"] = "blocked" if drive_sync_state.get("sync_blocked") else "error"
                 drive_sync_state["last_error"] = str(e)
                 add_log(f"⚠️ Google Drive 동기화 예외: {e}")
 
@@ -514,7 +788,7 @@ def sync_to_drive(wait=False):
         threading.Thread(target=_do_sync, daemon=True).start()
     return copy.deepcopy(drive_sync_state)
 
-def pull_from_drive():
+def pull_from_drive(timeout=20, retries=1, retry_delays=(0.8, 1.5)):
     cfg = get_gas_config()
     if not cfg["configured"]:
         drive_sync_state["configured"] = False
@@ -524,18 +798,29 @@ def pull_from_drive():
     drive_sync_state["configured"] = True
     try:
         with drive_sync_lock:
-            res = _call_gas_bridge("load", timeout=15)
+            res = _call_gas_bridge("load", timeout=timeout, retries=retries, retry_delays=retry_delays)
         if not res.get("success"):
             err = res.get("error", "Drive 조회 실패")
-            drive_sync_state["status"] = "error"
+            drive_sync_state["status"] = "blocked" if drive_sync_state.get("sync_blocked") else "error"
             drive_sync_state["last_error"] = err
             return {"success": False, "exists": False, "error": err}
 
         if res.get("exists") and isinstance(res.get("data"), dict):
-            _apply_loaded_state(res["data"])
+            remote_data = res["data"]
+            remote_masters = remote_data.get("master_products")
+            if not isinstance(remote_masters, list) or len(remote_masters) == 0:
+                err = "Google Drive 백업 데이터에 유효한 master_products 목록이 없어 복원을 중단했습니다."
+                drive_sync_state["status"] = "blocked" if drive_sync_state.get("sync_blocked") else "error"
+                drive_sync_state["last_error"] = err
+                return {"success": False, "exists": True, "error": err}
+            _apply_loaded_state(remote_data)
+            with data_lock:
+                _reset_blocked_flags_locked()
             _write_local_snapshot(build_state_snapshot())
             now_s = now_kst().strftime("%Y-%m-%d %H:%M:%S")
             drive_sync_state["status"] = "synced"
+            drive_sync_state["sync_blocked"] = False
+            drive_sync_state["boot_restore_failed"] = False
             drive_sync_state["last_loaded_at"] = now_s
             drive_sync_state["last_synced_at"] = now_s
             drive_sync_state["last_error"] = ""
@@ -544,15 +829,134 @@ def pull_from_drive():
             return {"success": True, "exists": True, "fileId": res.get("fileId", "")}
         else:
             drive_sync_state["status"] = "idle"
+            drive_sync_state["sync_blocked"] = False
+            drive_sync_state["boot_restore_failed"] = False
             return {"success": True, "exists": False}
     except Exception as e:
-        drive_sync_state["status"] = "error"
+        drive_sync_state["status"] = "blocked" if drive_sync_state.get("sync_blocked") else "error"
         drive_sync_state["last_error"] = str(e)
         return {"success": False, "exists": False, "error": str(e)}
+
+def _attempt_boot_drive_recovery_once():
+    """부팅 복원 실패로 잠긴 상태에서 백그라운드 자동 복구 1회 시도 (관리자 수동 수정 없을 때만)"""
+    if not drive_sync_state.get("sync_blocked"):
+        return True
+    cfg = get_gas_config()
+    if not cfg["configured"]:
+        return False
+
+    with data_lock:
+        if _blocked_state_flags.get("admin_mutated"):
+            return False
+        uploaded_sources = set(_blocked_state_flags.get("uploaded_sources") or ())
+        fresh_uploads = copy.deepcopy(_blocked_state_flags.get("fresh_uploads") or {})
+        local_ts = copy.deepcopy(app_state.get("upload_timestamps") or {})
+        local_data_uploaded_at = str(app_state.get("data_uploaded_at") or "").strip()
+
+    try:
+        with drive_sync_lock:
+            res = _call_gas_bridge("load", timeout=20, retries=0)
+        if not res.get("success"):
+            return False
+
+        if res.get("exists") and isinstance(res.get("data"), dict):
+            remote_data = res["data"]
+            remote_masters = remote_data.get("master_products")
+            if not isinstance(remote_masters, list) or len(remote_masters) == 0:
+                return False
+
+            # 재확인: Drive load 통신 중 관리자 수정이 발생했는지 체크
+            with data_lock:
+                if _blocked_state_flags.get("admin_mutated"):
+                    return False
+                uploaded_sources = set(_blocked_state_flags.get("uploaded_sources") or uploaded_sources)
+                fresh_uploads = copy.deepcopy(_blocked_state_flags.get("fresh_uploads") or fresh_uploads)
+                local_ts = copy.deepcopy(app_state.get("upload_timestamps") or local_ts)
+                local_data_uploaded_at = str(app_state.get("data_uploaded_at") or local_data_uploaded_at).strip()
+
+            _apply_loaded_state(remote_data)
+
+            had_fresh_uploads = False
+            if uploaded_sources and fresh_uploads:
+                with data_lock:
+                    if "gaemi" in fresh_uploads:
+                        old_gaemi = copy.deepcopy(app_state["gaemi_inventory"])
+                        apply_fifo_deduction_on_gaemi_upload(old_gaemi, fresh_uploads["gaemi"])
+                        app_state["gaemi_inventory"] = copy.deepcopy(fresh_uploads["gaemi"])
+                        had_fresh_uploads = True
+                    if "coupang" in fresh_uploads:
+                        app_state["coupang_inventory"].update(copy.deepcopy(fresh_uploads["coupang"]))
+                        had_fresh_uploads = True
+                    if "sales" in fresh_uploads:
+                        app_state["sales_inventory"] = copy.deepcopy(fresh_uploads["sales"])
+                        had_fresh_uploads = True
+                    if had_fresh_uploads:
+                        ts_map = app_state.setdefault("upload_timestamps", {})
+                        for src in uploaded_sources:
+                            if src in local_ts:
+                                ts_map[src] = local_ts[src]
+                        if local_data_uploaded_at:
+                            app_state["data_uploaded_at"] = local_data_uploaded_at
+                            app_state["last_updated"] = local_data_uploaded_at
+                    _reset_blocked_flags_locked()
+            else:
+                with data_lock:
+                    _reset_blocked_flags_locked()
+
+            drive_sync_state["sync_blocked"] = False
+            drive_sync_state["boot_restore_failed"] = False
+            _write_local_snapshot(build_state_snapshot())
+
+            if had_fresh_uploads:
+                sync_to_drive(wait=True)
+            else:
+                now_s = now_kst().strftime("%Y-%m-%d %H:%M:%S")
+                drive_sync_state["status"] = "synced"
+                drive_sync_state["last_loaded_at"] = now_s
+                drive_sync_state["last_synced_at"] = now_s
+                drive_sync_state["last_error"] = ""
+                if res.get("fileId"):
+                    drive_sync_state["file_id"] = res["fileId"]
+
+            add_log("☁️ [자동 복구 완료] Google Drive 최신 데이터를 복원하고 보호 잠금을 해제했습니다.")
+            return True
+        elif not res.get("exists"):
+            drive_sync_state["sync_blocked"] = False
+            drive_sync_state["boot_restore_failed"] = False
+            drive_sync_state["status"] = "idle"
+            return True
+    except Exception:
+        return False
+    return False
+
+def _schedule_boot_drive_recovery(delays=(3.0, 6.0, 12.0)):
+    if app.testing or os.environ.get("ILJEOMODO_SKIP_BG_RECOVERY") == "1":
+        return
+    global _boot_recovery_gen
+    with _boot_recovery_lock:
+        _boot_recovery_gen += 1
+        my_gen = _boot_recovery_gen
+        _boot_recovery_cancel.clear()
+
+    def _worker():
+        for delay in delays:
+            if _boot_recovery_cancel.wait(delay):
+                return
+            with _boot_recovery_lock:
+                if _boot_recovery_gen != my_gen:
+                    return
+            if _attempt_boot_drive_recovery_once():
+                return
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 # 영구 데이터 로드/저장
 def load_state():
     global app_state
+    _cancel_boot_recovery()
+    with data_lock:
+        _reset_blocked_flags_locked()
+
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
@@ -564,21 +968,33 @@ def load_state():
 
     cfg = get_gas_config()
     drive_sync_state["configured"] = cfg["configured"]
+    drive_sync_state["sync_blocked"] = False
+    drive_sync_state["boot_restore_failed"] = False
+
     if cfg["configured"] and os.environ.get("ILJEOMODO_SKIP_BOOT_DRIVE") != "1":
-        res = pull_from_drive()
+        res = pull_from_drive(timeout=18, retries=1, retry_delays=(1.0,))
         if res.get("success") and res.get("exists"):
             add_log("☁️ Google Drive 영구 저장소에서 최신 관리자/재고 데이터를 자동 복원했습니다.")
         elif res.get("success") and not res.get("exists"):
             add_log("☁️ Google Drive 최초 연결 완료: 초기 기준 데이터를 Drive에 업로드합니다.")
             sync_to_drive(wait=False)
         else:
-            add_log(f"⚠️ Google Drive 초기 복원 실패 (로컬 데이터로 계속 구동): {res.get('error')}")
+            drive_sync_state["sync_blocked"] = True
+            drive_sync_state["boot_restore_failed"] = True
+            drive_sync_state["status"] = "blocked"
+            drive_sync_state["last_error"] = res.get("error") or "초기 Google Drive 복원 실패"
+            add_log(f"🛑 Google Drive 초기 복원 실패 (기존 Drive 백업 보호를 위해 자동 덮어쓰기 차단): {res.get('error')}")
+            _schedule_boot_drive_recovery()
     elif not cfg["configured"]:
         drive_sync_state["status"] = "disabled"
 
 load_state()
 
-def save_state(sync_drive=True, wait_drive=False):
+def save_state(sync_drive=True, wait_drive=False, is_admin_mutation=False):
+    if is_admin_mutation and drive_sync_state.get("sync_blocked"):
+        with data_lock:
+            _blocked_state_flags["admin_mutated"] = True
+
     try:
         snapshot = build_state_snapshot()
         _write_local_snapshot(snapshot)
@@ -636,16 +1052,18 @@ def parse_gaemi_rows(rows):
         return {}
 
     header_idx = -1
-    for i, r in enumerate(rows[:6]):
-        line_str = " ".join([str(c) for c in r])
+    for i, r in enumerate(rows[:15]):
+        if not isinstance(r, (list, tuple)):
+            continue
+        line_str = " ".join([_clean_cell_str(c) for c in r])
         if "상품코드" in line_str and "재고량" in line_str:
             header_idx = i
             break
-            
+
     if header_idx == -1:
         return {}
-        
-    headers = [str(c).strip() for c in rows[header_idx]]
+
+    headers = [_clean_cell_str(c) for c in rows[header_idx]]
     col_code = next((i for i, h in enumerate(headers) if "상품코드" in h), 1)
     col_pname = next((i for i, h in enumerate(headers) if "상품명" in h), 2)
     col_oname = next((i for i, h in enumerate(headers) if "옵션명" in h), 3)
@@ -656,17 +1074,17 @@ def parse_gaemi_rows(rows):
     today = today_kst()
 
     for r in rows[header_idx + 1:]:
-        if len(r) <= max(col_code, col_stock):
+        if not isinstance(r, (list, tuple)) or len(r) <= max(col_code, col_stock):
             continue
-        code = str(r[col_code]).strip()
+        code = _clean_id_cell(r[col_code])
         if not code or code == "상품코드":
             continue
-            
-        pname = str(r[col_pname]).strip() if len(r) > col_pname else ""
-        oname = str(r[col_oname]).strip() if len(r) > col_oname else ""
-        stock_s = str(r[col_stock]).replace(",", "").strip()
-        stock = int(stock_s) if stock_s.isdigit() else 0
-        reg_date = str(r[col_reg]).strip() if len(r) > col_reg else ""
+
+        pname = _clean_cell_str(r[col_pname]) if len(r) > col_pname else ""
+        oname = _clean_cell_str(r[col_oname]) if len(r) > col_oname else ""
+        stock = _clean_int_cell(r[col_stock])
+        reg_raw = r[col_reg] if len(r) > col_reg else ""
+        reg_date = normalize_gaemi_reg_date(reg_raw)
 
         # 소비기한 추출 및 잔여일수(D-Day) 계산
         exp_d = extract_expiry_date(oname)
@@ -690,36 +1108,6 @@ def parse_gaemi_rows(rows):
 # -------------------------------------------------------------
 # 파서 2: 쿠팡 윙 재고 건강도 CSV 파서
 # -------------------------------------------------------------
-def _clean_cell_str(val):
-    if val is None or isinstance(val, bool):
-        return ""
-    if isinstance(val, float):
-        if val != val:
-            return ""
-        if val.is_integer():
-            return str(int(val))
-    return unicodedata.normalize("NFC", str(val)).strip()
-
-def _clean_id_cell(val):
-    s = _clean_cell_str(val)
-    if not s:
-        return ""
-    if re.fullmatch(r"\d+\.0+", s):
-        s = s.split(".", 1)[0]
-    return s
-
-def _clean_int_cell(val):
-    s = _clean_cell_str(val).replace(",", "")
-    if not s or s == "-":
-        return 0
-    if s.isdigit():
-        return int(s)
-    if re.fullmatch(r"-?\d+(?:\.\d+)?", s):
-        try:
-            return max(0, int(round(float(s))))
-        except Exception:
-            return 0
-    return 0
 
 def parse_coupang_rows(rows):
     """
@@ -879,18 +1267,26 @@ def parse_coupang_rows(rows):
 # 파서 3: 쿠팡외 통합 매출 데이터 CSV 파서 (7일 & 30일 분리 집계)
 # -------------------------------------------------------------
 def parse_order_datetime(date_str):
-    if not date_str:
+    if date_str is None or isinstance(date_str, bool):
         return None
-    s = str(date_str).strip()
+    dt_serial = excel_serial_to_datetime(date_str)
+    if dt_serial is not None:
+        return dt_serial
+    s = _clean_cell_str(date_str)
+    if not s:
+        return None
     for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y.%m.%d %H:%M:%S', '%Y.%m.%d', '%Y/%m/%d %H:%M:%S', '%Y/%m/%d'):
         try:
             return datetime.strptime(s, fmt)
         except Exception:
             pass
-    m = re.search(r'(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})', s)
+    m = re.search(r'(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})(?:[ T]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?', s)
     if m:
         try:
-            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return datetime(
+                int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
+            )
         except Exception:
             pass
     return None
@@ -905,8 +1301,10 @@ def parse_sales_rows(rows):
         return {}
 
     header_idx = -1
-    for i, r in enumerate(rows[:5]):
-        line_str = " ".join([str(c) for c in r])
+    for i, r in enumerate(rows[:15]):
+        if not isinstance(r, (list, tuple)):
+            continue
+        line_str = " ".join([_clean_cell_str(c) for c in r])
         if "판매자관리코드" in line_str or "상품관리코드" in line_str or "주문수량" in line_str or "온라인상품명" in line_str:
             header_idx = i
             break
@@ -914,7 +1312,7 @@ def parse_sales_rows(rows):
     if header_idx == -1:
         return {}
 
-    headers = [str(c).strip() for c in rows[header_idx]]
+    headers = [_clean_cell_str(c) for c in rows[header_idx]]
     col_code = next((i for i, h in enumerate(headers) if "판매자관리코드" in h or "상품관리코드" in h or "판매자코드" in h), -1)
     if col_code == -1:
         col_code = next((i for i, h in enumerate(headers) if "관리코드" in h), -1)
@@ -930,18 +1328,18 @@ def parse_sales_rows(rows):
     valid_dates = []
 
     for r in rows[header_idx + 1:]:
-        if len(r) <= max(col_code, col_qty):
+        if not isinstance(r, (list, tuple)) or len(r) <= max(col_code, col_qty):
             continue
-        code = str(r[col_code]).strip().upper()
+        code = _clean_id_cell(r[col_code]).upper()
         if not code or code in ("판매자관리코드", "상품관리코드", "판매자코드", "관리코드"):
             continue
-        name = str(r[col_name]).strip() if len(r) > col_name else ""
-        mall = str(r[col_mall]).strip() if len(r) > col_mall else ""
-        date_s = str(r[col_date]).strip() if len(r) > col_date else ""
-        qty_s = str(r[col_qty]).replace(",", "").strip()
-        qty = int(qty_s) if qty_s.isdigit() else 0
+        name = _clean_cell_str(r[col_name]) if len(r) > col_name else ""
+        mall = _clean_cell_str(r[col_mall]) if len(r) > col_mall else ""
+        raw_date = r[col_date] if len(r) > col_date else ""
+        dt = parse_order_datetime(raw_date)
+        date_s = normalize_gaemi_reg_date(raw_date) if excel_serial_to_datetime(raw_date) is not None else _clean_cell_str(raw_date)
+        qty = _clean_int_cell(r[col_qty])
 
-        dt = parse_order_datetime(date_s)
         if dt:
             valid_dates.append(dt)
 
@@ -1015,6 +1413,8 @@ def get_summary():
         upload_timestamps = copy.deepcopy(app_state.get("upload_timestamps", {}))
 
     base_to_shared_map = get_base_to_shared_map(b2b_mappings)
+    override_index = build_lot_override_index(lot_expiry_overrides)
+    sales_upper = {_clean_id_cell(k).upper(): v for k, v in sales.items()}
     default_import_lt = int(settings.get("default_import_lead_time", 110) or 110)
     default_import_buf = int(settings.get("default_import_buffer", 20) or 20)
     default_purchase_lt = int(settings.get("default_purchase_lead_time", 7) or 7)
@@ -1038,14 +1438,12 @@ def get_summary():
         for g_code, item in raw_gaemi_items:
             st = int(item.get("stock", 0))
             csv_g_total += st
-            opt_name = item.get("option_name", "")
-            reg_date = item.get("reg_date", "")
+            opt_name = _clean_cell_str(item.get("option_name", ""))
+            reg_date = normalize_gaemi_reg_date(item.get("reg_date", ""))
             exact_key, opt_key = make_gaemi_lot_keys(g_code, item)
             raw_exp = normalize_date_str(item.get("expiry_date", ""))
 
-            override_val = lot_expiry_overrides.get(exact_key)
-            if override_val is None:
-                override_val = lot_expiry_overrides.get(opt_key)
+            override_val = resolve_lot_expiry_override(override_index, lot_expiry_overrides, g_code, item)
 
             if override_val == "__CLEAR__":
                 eff_exp = ""
@@ -1258,7 +1656,7 @@ def get_summary():
             effective_sales_codes.append(sc)
             if sc != norm_code and sc in b2b_mappings and str(b2b_mappings[sc].get("base_code", "")).strip().upper() == norm_code:
                 continue
-            s_data = sales.get(sc, {"total_7d": 0, "total_30d": 0, "orders": []})
+            s_data = sales_upper.get(sc, {"total_7d": 0, "total_30d": 0, "orders": []})
             s7 = int(s_data.get("total_7d", 0) or 0)
             s30 = int(s_data.get("total_30d", s7) or 0)
             raw_other_sales_7d += s7
@@ -1309,7 +1707,7 @@ def get_summary():
         base_code = str(s_info.get("base_code", "")).strip().upper()
         mult = int(s_info.get("multiplier", 1) or 1)
 
-        s_sales = sales.get(s_code, {})
+        s_sales = sales_upper.get(s_code, {})
         s_7d = s_sales.get("total_7d", 0)
         s_30d = s_sales.get("total_30d", s_7d)
         s_orders = s_sales.get("orders", [])
@@ -1861,7 +2259,10 @@ def upload_file_data():
             app_state["data_uploaded_at"] = uploaded_at
             app_state["last_updated"] = uploaded_at
             app_state.setdefault("upload_timestamps", {})["gaemi"] = uploaded_at
-        sync_res = save_state(sync_drive=True, wait_drive=False)
+            if drive_sync_state.get("sync_blocked"):
+                _blocked_state_flags["uploaded_sources"].add("gaemi")
+                _blocked_state_flags["fresh_uploads"]["gaemi"] = copy.deepcopy(parsed)
+        sync_res = save_state(sync_drive=True, wait_drive=True)
         total_items = sum(len(v) for v in parsed.values())
         fifo_msg = f" · FIFO 차감: {', '.join(deducted)}" if deducted else ""
         add_log(f"📦 [개미창고(3PL)] {len(parsed)}개 상품코드(세부 {total_items}건) 수량 갱신 완료 (관리자 소비기한/기준 유지{fifo_msg})")
@@ -1885,7 +2286,12 @@ def upload_file_data():
             app_state["data_uploaded_at"] = uploaded_at
             app_state["last_updated"] = uploaded_at
             app_state.setdefault("upload_timestamps", {})["coupang"] = uploaded_at
-        sync_res = save_state(sync_drive=True, wait_drive=False)
+            if drive_sync_state.get("sync_blocked"):
+                _blocked_state_flags["uploaded_sources"].add("coupang")
+                prev_up = _blocked_state_flags["fresh_uploads"].get("coupang") or {}
+                prev_up.update(copy.deepcopy(parsed))
+                _blocked_state_flags["fresh_uploads"]["coupang"] = prev_up
+        sync_res = save_state(sync_drive=True, wait_drive=True)
         add_log(f"🚀 [쿠팡 윙] {len(parsed)}개 옵션 ID{ret_note}의 실시간 재고 및 판매량 데이터가 업데이트되었습니다!")
         return jsonify({
             "success": True,
@@ -1905,7 +2311,10 @@ def upload_file_data():
             app_state["data_uploaded_at"] = uploaded_at
             app_state["last_updated"] = uploaded_at
             app_state.setdefault("upload_timestamps", {})["sales"] = uploaded_at
-        sync_res = save_state(sync_drive=True, wait_drive=False)
+            if drive_sync_state.get("sync_blocked"):
+                _blocked_state_flags["uploaded_sources"].add("sales")
+                _blocked_state_flags["fresh_uploads"]["sales"] = copy.deepcopy(parsed)
+        sync_res = save_state(sync_drive=True, wait_drive=True)
         total_qty = sum(v["total_7d"] for v in parsed.values())
         add_log(f"📈 [쿠팡외 통합 매출] {len(parsed)}개 상품코드(총 {total_qty}개 주문 출고) 데이터가 반영되었습니다!")
         return jsonify({
@@ -1977,7 +2386,7 @@ def load_sample():
             for src in loaded_sources:
                 ts_map[src] = uploaded_at
 
-    sync_res = save_state(sync_drive=True, wait_drive=False)
+    sync_res = save_state(sync_drive=True, wait_drive=True, is_admin_mutation=True)
     add_log(f"✨ [샘플 데이터 로드 완료] {' / '.join(loaded)} 데이터가 반영되었습니다!")
     return jsonify({"success": True, "message": f"{', '.join(loaded)} 샘플 데이터 로드 완료", "drive_sync": sync_res})
 
@@ -2371,21 +2780,7 @@ def admin_save_product():
         csv_lot_expiries = body.get("csv_lot_expiries") or {}
         if isinstance(csv_lot_expiries, dict):
             overrides = app_state.setdefault("lot_expiry_overrides", {})
-            for lot_key, exp_val in csv_lot_expiries.items():
-                k = str(lot_key).strip()
-                if not k:
-                    continue
-                v = str(exp_val or "").strip()
-                if v == "__RESTORE__":
-                    overrides.pop(k, None)
-                elif v == "__CLEAR__":
-                    overrides[k] = "__CLEAR__"
-                elif v == "":
-                    overrides.pop(k, None)
-                else:
-                    norm_d = normalize_date_str(v)
-                    if norm_d:
-                        overrides[k] = norm_d
+            _apply_lot_expiry_overrides_locked(overrides, csv_lot_expiries)
 
         # (선택) 임시 수동 재고 보정 — 다음 CSV 업로드 전까지 반영됨
         temp_gaemi_stock_map = body.get("temp_gaemi_stocks")
@@ -2425,7 +2820,7 @@ def admin_save_product():
         _unhide_mapped_keys_locked(record)
         saved_copy = copy.deepcopy(record)
 
-    sync_res = save_state(sync_drive=True, wait_drive=True)
+    sync_res = save_state(sync_drive=True, wait_drive=True, is_admin_mutation=True)
     add_log(f"✏️ [관리자 {action_label}] {seller_code} ({name}) 기준 정보가 업데이트되었습니다.")
     return jsonify({
         "success": True,
@@ -2488,7 +2883,7 @@ def admin_save_product_mappings():
         t_code = target.get("seller_code", "")
         t_name = target.get("name", "")
 
-    sync_res = save_state(sync_drive=True, wait_drive=True)
+    sync_res = save_state(sync_drive=True, wait_drive=True, is_admin_mutation=True)
     add_log(f"🔗 [관리자 코드매핑] {t_code} ({t_name}) 채널별 코드 매핑이 저장되었습니다.")
     return jsonify({
         "success": True,
@@ -2555,7 +2950,7 @@ def admin_toggle_unmapped_explorer_hidden():
 
         result_list = list(app_state["hidden_unmapped_codes"])
 
-    sync_res = save_state(sync_drive=True, wait_drive=True)
+    sync_res = save_state(sync_drive=True, wait_drive=True, is_admin_mutation=True)
     add_log(f"👁️ [관리자 미매핑 탐색기] {msg}")
     return jsonify({
         "success": True,
@@ -2595,7 +2990,7 @@ def admin_delete_product():
             target["is_active"] = False
             msg = f"[{target.get('seller_code')}] {t_name} 대시보드 숨김 처리 완료"
 
-    sync_res = save_state(sync_drive=True, wait_drive=True)
+    sync_res = save_state(sync_drive=True, wait_drive=True, is_admin_mutation=True)
     add_log(f"🗂️ [관리자] {msg}")
     return jsonify({"success": True, "message": msg, "drive_sync": sync_res})
 
@@ -2641,21 +3036,9 @@ def admin_bulk_save_products():
 
         if isinstance(lot_updates, dict):
             overrides = app_state.setdefault("lot_expiry_overrides", {})
-            for k, v in lot_updates.items():
-                key = str(k).strip()
-                val = str(v or "").strip()
-                if not key:
-                    continue
-                if val == "__RESTORE__" or val == "":
-                    overrides.pop(key, None)
-                elif val == "__CLEAR__":
-                    overrides[key] = "__CLEAR__"
-                else:
-                    nd = normalize_date_str(val)
-                    if nd:
-                        overrides[key] = nd
+            _apply_lot_expiry_overrides_locked(overrides, lot_updates)
 
-    sync_res = save_state(sync_drive=True, wait_drive=True)
+    sync_res = save_state(sync_drive=True, wait_drive=True, is_admin_mutation=True)
     add_log(f"📊 [관리자 일괄 저장] {updated_count}개 품목 및 소비기한 기준이 저장되었습니다.")
     return jsonify({
         "success": True,
@@ -2689,7 +3072,7 @@ def admin_save_b2b_mappings():
     with data_lock:
         app_state["b2b_mappings"] = new_map
 
-    sync_res = save_state(sync_drive=True, wait_drive=True)
+    sync_res = save_state(sync_drive=True, wait_drive=True, is_admin_mutation=True)
     add_log(f"🔗 [관리자 B2B 매핑] {len(new_map)}개 세트(S코드) 연동 규칙이 업데이트되었습니다.")
     return jsonify({
         "success": True,
@@ -2733,7 +3116,7 @@ def admin_save_settings():
     if new_pin and not os.environ.get("ADMIN_PIN", "").strip():
         new_token, _ = issue_admin_token()
 
-    sync_res = save_state(sync_drive=True, wait_drive=True)
+    sync_res = save_state(sync_drive=True, wait_drive=True, is_admin_mutation=True)
     add_log(f"⚙️ [관리자 설정] 전역 발주/소비기한 기준{pin_msg} 저장 완료")
     return jsonify({
         "success": True,
@@ -2752,11 +3135,21 @@ def admin_drive_sync_now():
             "message": "Render 환경변수(GOOGLE_APPS_SCRIPT_URL, GOOGLE_APPS_SCRIPT_TOKEN)가 아직 등록되지 않았습니다.",
             "drive_sync": copy.deepcopy(drive_sync_state)
         }), 400
-    res = sync_to_drive(wait=True)
+    body = request.get_json(silent=True) or {}
+    force = bool(body.get("force", False))
+    if drive_sync_state.get("sync_blocked") and not force:
+        return jsonify({
+            "success": False,
+            "require_force": True,
+            "message": "부팅 시 Google Drive 최신 데이터를 복원하지 못해 기존 백업 보호를 위해 자동 덮어쓰기가 잠겨 있습니다. 먼저 [Drive에서 최신 불러오기]를 시도하거나, 현재 서버 상태로 강제 덮어쓰기를 실행하세요.",
+            "drive_sync": copy.deepcopy(drive_sync_state)
+        }), 409
+    res = sync_to_drive(wait=True, force=force)
     if res.get("status") == "synced":
         add_log("☁️ [Google Drive 수동 백업] 현재 전체 데이터가 Google Drive에 즉시 저장되었습니다.")
         return jsonify({"success": True, "message": "Google Drive 즉시 백업 완료!", "drive_sync": res})
-    return jsonify({"success": False, "message": f"동기화 실패: {res.get('last_error')}", "drive_sync": res}), 500
+    status_code = 409 if res.get("status") == "blocked" else 500
+    return jsonify({"success": False, "message": f"동기화 실패: {res.get('last_error')}", "drive_sync": res}), status_code
 
 @app.route("/api/admin/drive/pull-now", methods=["POST"])
 @require_admin
@@ -2794,10 +3187,14 @@ def admin_backup_export():
 def admin_backup_import():
     body = request.get_json() or {}
     backup_data = body.get("data", body)
-    if not isinstance(backup_data, dict) or "master_products" not in backup_data:
-        return jsonify({"success": False, "message": "올바른 일쩜오도 백업 JSON 형식이 아닙니다. ('master_products' 키 누락)"}), 400
+    if not isinstance(backup_data, dict) or not isinstance(backup_data.get("master_products"), list) or len(backup_data.get("master_products")) == 0:
+        return jsonify({"success": False, "message": "올바른 일쩜오도 백업 JSON 형식이 아닙니다. (유효한 'master_products' 목록 누락)"}), 400
 
     _apply_loaded_state(backup_data)
+    drive_sync_state["sync_blocked"] = False
+    drive_sync_state["boot_restore_failed"] = False
+    with data_lock:
+        _reset_blocked_flags_locked()
     sync_res = save_state(sync_drive=True, wait_drive=True)
     add_log("📥 [관리자 백업 복원] JSON 백업 파일로부터 전체 데이터를 성공적으로 복원했습니다.")
     return jsonify({
@@ -2974,6 +3371,24 @@ HTML_TEMPLATE = """
 
     <!-- 메인 대시보드 컨테이너 -->
     <main class="max-w-7xl mx-auto px-4 py-4 flex-1 w-full space-y-3">
+
+        <!-- Google Drive 보호 잠금 배너 (부팅 복원 실패 시 자동 표시) -->
+        <div id="driveProtectionBanner" class="hidden rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-xs text-rose-900 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-start gap-2 min-w-0">
+                <i class="fa-solid fa-shield-halved text-rose-600 mt-0.5 shrink-0"></i>
+                <div>
+                    <div class="font-bold">Google Drive 자동 덮어쓰기 보호 잠금 중</div>
+                    <div class="text-[11px] text-rose-800 mt-0.5">
+                        서버 재시작 시 Google Drive에서 최신 백업을 불러오지 못해 기존 소비기한·매핑 데이터를 보호하려고 자동 저장이 잠겼습니다.
+                        <span id="driveProtectionErrorText" class="font-mono"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+                <button type="button" onclick="pullDriveNowFromBanner()" class="px-2.5 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 text-white font-semibold text-[11px]">Drive에서 최신 복원</button>
+                <button type="button" onclick="openAdminCenter('drive')" class="px-2.5 py-1.5 rounded-lg bg-white hover:bg-rose-100 border border-rose-300 text-rose-800 font-semibold text-[11px]">Drive 관리 열기</button>
+            </div>
+        </div>
 
         <!-- 1. 재고 요약 스트립 -->
         <div class="bg-white rounded-xl border border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -4427,7 +4842,14 @@ HTML_TEMPLATE = """
                     });
                     const resJson = await res.json();
                     if (resJson.success) {
-                        statusEl.innerText = `✅ ${resJson.message || (file.name + ' 반영 완료!')}`;
+                        const ds = resJson.drive_sync || {};
+                        if (ds.sync_blocked || ds.status === 'blocked') {
+                            statusEl.innerText = `⚠️ ${resJson.message || (file.name + ' 반영')} · Drive 덮어쓰기 차단 상태 (상단 배너에서 Drive 복원 필요)`;
+                        } else if (ds.status === 'error') {
+                            statusEl.innerText = `⚠️ ${resJson.message || (file.name + ' 반영')} · Drive 동기화 실패 (${ds.last_error || '오류'})`;
+                        } else {
+                            statusEl.innerText = `✅ ${resJson.message || (file.name + ' 반영 완료!')}`;
+                        }
                         adminConfigCache = null;
                         await fetchSummary();
                         const centerEl = document.getElementById('adminCenterModal');
@@ -4510,9 +4932,7 @@ HTML_TEMPLATE = """
             }
             if (btnEl) btnEl.disabled = true;
             try {
-                if (!adminConfigCache) {
-                    await ensureAdminConfig();
-                }
+                await ensureAdminConfig();
                 const masters = (adminConfigCache && adminConfigCache.master_products) || [];
                 const target = masters.find(m => m.id === prodId || m.seller_code === prodId);
                 if (!target) {
@@ -4774,13 +5194,27 @@ HTML_TEMPLATE = """
             const badge = document.getElementById('driveSyncBadge');
             const dot = document.getElementById('driveSyncDot');
             const text = document.getElementById('driveSyncBadgeText');
-            if (!badge || !text) return;
+            const banner = document.getElementById('driveProtectionBanner');
+            const bannerErr = document.getElementById('driveProtectionErrorText');
             const info = ds || {};
+            const isBlocked = Boolean(info.configured && (info.sync_blocked || info.status === 'blocked'));
+            if (banner) {
+                banner.classList.toggle('hidden', !isBlocked);
+                if (bannerErr) {
+                    bannerErr.innerText = (isBlocked && info.last_error) ? `(${info.last_error})` : '';
+                }
+            }
+            if (!badge || !text) return;
             if (!info.configured) {
                 badge.className = "inline-flex items-center gap-1 text-[11px] font-medium text-slate-500";
                 if (dot) dot.className = "w-1.5 h-1.5 rounded-full bg-slate-400";
                 text.innerText = "로컬 저장";
                 badge.title = "로컬 저장 모드 (Google Drive 미연동)";
+            } else if (isBlocked) {
+                badge.className = "inline-flex items-center gap-1 text-[11px] font-bold text-rose-700";
+                if (dot) dot.className = "w-1.5 h-1.5 rounded-full bg-rose-600";
+                text.innerText = "Drive 잠금";
+                badge.title = info.last_error || "Google Drive 초기 복원 실패로 덮어쓰기 보호 잠금 중";
             } else if (info.status === 'synced') {
                 badge.className = "inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700";
                 if (dot) dot.className = "w-1.5 h-1.5 rounded-full bg-emerald-500";
@@ -4802,6 +5236,14 @@ HTML_TEMPLATE = """
                 text.innerText = "Drive 연결됨";
                 badge.title = "Google Drive 연결됨";
             }
+        }
+
+        async function pullDriveNowFromBanner() {
+            if (!isAdminMode) {
+                openPinModal();
+                return;
+            }
+            await pullDriveNow();
         }
 
         // 데이터 주기적 갱신
@@ -5682,18 +6124,138 @@ HTML_TEMPLATE = """
             return adminConfigCache;
         }
 
+        function formatDriveSyncNotice(ds) {
+            if (!ds || !ds.configured) return '';
+            if (ds.sync_blocked || ds.status === 'blocked') {
+                return '\\n⚠️ 현재 Drive 자동 덮어쓰기 잠금 상태로 로컬에만 저장되었습니다. 상단 배너 또는 [Google Drive·백업] 탭에서 복원 상태를 확인하세요.';
+            }
+            if (ds.status === 'error') {
+                return `\\n⚠️ Google Drive 동기화 실패(로컬만 저장됨): ${ds.last_error || '연결 오류'}`;
+            }
+            return '';
+        }
+
+        function cleanJsNfc(val) {
+            if (val === null || val === undefined || typeof val === 'boolean') return '';
+            return String(val).normalize('NFC').trim();
+        }
+
+        function excelSerialToJsIso(val) {
+            if (val === null || val === undefined || typeof val === 'boolean') return '';
+            const s = String(val).trim();
+            if (!/^\\d{5}(?:\\.\\d+)?$/.test(s)) return '';
+            const num = parseFloat(s);
+            if (!Number.isFinite(num) || num < 20000 || num > 80000) return '';
+            const dayInt = Math.floor(num);
+            const totalSecs = Math.round((num - dayInt) * 86400);
+            const utcMs = Date.UTC(1899, 11, 30) + dayInt * 86400000 + totalSecs * 1000;
+            const d = new Date(utcMs);
+            const pad2 = n => String(n).padStart(2, '0');
+            const ymd = `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+            const hasTime = Math.abs(num - dayInt) > 1e-7 || d.getUTCHours() || d.getUTCMinutes() || d.getUTCSeconds();
+            if (!hasTime) return ymd;
+            return `${ymd} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`;
+        }
+
+        function normalizeJsGaemiRegDate(val) {
+            const fromSerial = excelSerialToJsIso(val);
+            if (fromSerial) return fromSerial;
+            const s = cleanJsNfc(val);
+            if (!s) return '';
+            const m = s.match(/^(\\d{2,4})[.\\-/](\\d{1,2})[.\\-/](\\d{1,2})(?:[ T]+(\\d{1,2}):(\\d{1,2})(?::(\\d{1,2}))?)?$/);
+            if (!m) return s;
+            let y = parseInt(m[1], 10);
+            if (y < 100) y += 2000;
+            const pad2 = n => String(parseInt(n || '0', 10)).padStart(2, '0');
+            const ymd = `${y}-${pad2(m[2])}-${pad2(m[3])}`;
+            if (m[4] !== undefined) {
+                return `${ymd} ${pad2(m[4])}:${pad2(m[5])}:${pad2(m[6] || '0')}`;
+            }
+            return ymd;
+        }
+
+        function canonicalizeJsLotKey(rawKey) {
+            const s = cleanJsNfc(rawKey);
+            if (!s) return { canonFull: '', canonDateOnly: '', canonOpt: '', rawHasTime: false };
+            const parts = s.split('||');
+            const codeUp = cleanJsNfc(parts[0] || '').toUpperCase();
+            if (!codeUp) return { canonFull: '', canonDateOnly: '', canonOpt: '', rawHasTime: false };
+            const optNfc = cleanJsNfc(parts[1] || '');
+            const regRaw = parts.length >= 3 ? cleanJsNfc(parts.slice(2).join('||')) : '';
+            const canonOpt = `${codeUp}||${optNfc}`;
+            if (!regRaw) return { canonFull: canonOpt, canonDateOnly: canonOpt, canonOpt, rawHasTime: false };
+            const canonReg = normalizeJsGaemiRegDate(regRaw);
+            const canonFull = canonReg ? `${canonOpt}||${canonReg}` : canonOpt;
+            const datePart = /^\\d{4}-\\d{2}-\\d{2}/.test(canonReg) ? canonReg.slice(0, 10) : canonReg;
+            const canonDateOnly = datePart ? `${canonOpt}||${datePart}` : canonOpt;
+            return { canonFull, canonDateOnly, canonOpt, rawHasTime: canonFull !== canonDateOnly };
+        }
+
+        function buildJsLotOverrideIndex(overrides) {
+            const fullMap = {};
+            const dateOnlyMap = {};
+            const optMap = {};
+            Object.entries(overrides || {}).forEach(([k, v]) => {
+                if (v === null || v === undefined) return;
+                const c = canonicalizeJsLotKey(k);
+                if (!c.canonFull) return;
+                const parts = cleanJsNfc(k).split('||');
+                if (parts.length >= 3 && cleanJsNfc(parts.slice(2).join('||'))) {
+                    if (fullMap[c.canonFull] === undefined || cleanJsNfc(k) === c.canonFull) {
+                        fullMap[c.canonFull] = v;
+                    }
+                    if (!dateOnlyMap[c.canonDateOnly]) dateOnlyMap[c.canonDateOnly] = [];
+                    dateOnlyMap[c.canonDateOnly].push({ hasTime: c.rawHasTime, val: v });
+                } else {
+                    if (optMap[c.canonOpt] === undefined || cleanJsNfc(k) === c.canonOpt) {
+                        optMap[c.canonOpt] = v;
+                    }
+                }
+            });
+            return { fullMap, dateOnlyMap, optMap };
+        }
+
+        function resolveJsLotOverride(overrides, ovIndex, exactKey, optKey) {
+            if (!overrides) return undefined;
+            if (overrides[exactKey] !== undefined) return overrides[exactKey];
+            const c = canonicalizeJsLotKey(exactKey);
+            if (c.canonFull && ovIndex.fullMap[c.canonFull] !== undefined) {
+                return ovIndex.fullMap[c.canonFull];
+            }
+            const cands = ovIndex.dateOnlyMap[c.canonDateOnly] || [];
+            if (cands.length > 0) {
+                if (!c.rawHasTime) {
+                    if (cands.length === 1) return cands[0].val;
+                } else {
+                    const noTime = cands.find(x => !x.hasTime);
+                    if (noTime) return noTime.val;
+                }
+            }
+            if (overrides[optKey] !== undefined) return overrides[optKey];
+            if (c.canonOpt && ovIndex.optMap[c.canonOpt] !== undefined) {
+                return ovIndex.optMap[c.canonOpt];
+            }
+            return undefined;
+        }
+
         function computeCsvLotsFromCache(item, cfg) {
             const gaemi = (cfg && cfg.gaemi_inventory) || {};
             const overrides = (cfg && cfg.lot_expiry_overrides) || {};
+            const ovIndex = buildJsLotOverrideIndex(overrides);
             const lots = [];
+            const upperCodeMap = {};
+            Object.keys(gaemi).forEach(k => {
+                upperCodeMap[cleanJsNfc(k).toUpperCase()] = { actualCode: k, rows: gaemi[k] || [] };
+            });
 
             const pushLot = (actualCode, gItem) => {
-                const optName = gItem.option_name || '';
-                const reg = (gItem.reg_date || '').trim();
-                const exactKey = reg ? `${actualCode}||${optName.trim()}||${reg}` : `${actualCode}||${optName.trim()}`;
-                const optKey = `${actualCode}||${optName.trim()}`;
+                const codeNfc = cleanJsNfc(actualCode);
+                const optName = cleanJsNfc(gItem.option_name || '');
+                const reg = normalizeJsGaemiRegDate(gItem.reg_date || '');
+                const exactKey = reg ? `${codeNfc}||${optName}||${reg}` : `${codeNfc}||${optName}`;
+                const optKey = `${codeNfc}||${optName}`;
                 const rawExp = (gItem.expiry_date || '').trim();
-                const ov = overrides[exactKey] !== undefined ? overrides[exactKey] : overrides[optKey];
+                const ov = resolveJsLotOverride(overrides, ovIndex, exactKey, optKey);
                 let effExp = rawExp;
                 let isAdmin = false;
                 if (ov === '__CLEAR__') { effExp = ''; isAdmin = true; }
@@ -5701,7 +6263,7 @@ HTML_TEMPLATE = """
                 lots.push({
                     gaemi_code: actualCode,
                     lot_key: exactKey,
-                    option_name: optName,
+                    option_name: gItem.option_name || '',
                     stock: parseInt(gItem.stock || 0, 10),
                     reg_date: reg,
                     expiry_date: effExp,
@@ -5712,15 +6274,11 @@ HTML_TEMPLATE = """
 
             const gMappings = item.gaemi_mappings;
             if (Array.isArray(gMappings) && gMappings.length > 0) {
-                const upperCodeMap = {};
-                Object.keys(gaemi).forEach(k => {
-                    upperCodeMap[String(k).trim().toUpperCase()] = { actualCode: k, rows: gaemi[k] || [] };
-                });
                 const seenRefs = new Set();
                 gMappings.forEach(rule => {
                     if (!rule || typeof rule !== 'object') return;
-                    const reqCode = String(rule.gaemi_code || rule.code || '').trim();
-                    const reqOpt = String(rule.option_name || '').trim();
+                    const reqCode = cleanJsNfc(rule.gaemi_code || rule.code || '');
+                    const reqOpt = cleanJsNfc(rule.option_name || '');
                     if (!reqCode) return;
                     let actualCode = reqCode;
                     let matched = gaemi[reqCode];
@@ -5733,7 +6291,7 @@ HTML_TEMPLATE = """
                     }
                     if (!matched) return;
                     matched.forEach((gItem, idx) => {
-                        const itemOpt = String(gItem.option_name || '').trim();
+                        const itemOpt = cleanJsNfc(gItem.option_name || '');
                         if (reqOpt === '' || reqOpt === '*' || itemOpt === reqOpt) {
                             const ref = `${actualCode}::${idx}`;
                             if (!seenRefs.has(ref)) {
@@ -5746,17 +6304,27 @@ HTML_TEMPLATE = """
                 return lots;
             }
 
-            const optFilter = (item.gaemi_filter || '').trim();
+            const optFilter = cleanJsNfc(item.gaemi_filter || '');
             const gCodes = item.gaemi_codes || [];
             const seenLegacy = new Set();
             gCodes.forEach(gCode => {
-                const gC = String(gCode || '').trim();
-                if (!gC || seenLegacy.has(gC)) return;
-                seenLegacy.add(gC);
-                (gaemi[gC] || []).forEach(gItem => {
-                    const optName = gItem.option_name || '';
+                const gC = cleanJsNfc(gCode || '');
+                const gUp = gC.toUpperCase();
+                if (!gUp || seenLegacy.has(gUp)) return;
+                seenLegacy.add(gUp);
+                let actualCode = gC;
+                let matched = gaemi[gC];
+                if (!matched) {
+                    const found = upperCodeMap[gUp];
+                    if (found) {
+                        actualCode = found.actualCode;
+                        matched = found.rows;
+                    }
+                }
+                (matched || []).forEach(gItem => {
+                    const optName = cleanJsNfc(gItem.option_name || '');
                     if (optFilter && !optName.includes(optFilter)) return;
-                    pushLot(gC, gItem);
+                    pushLot(actualCode, gItem);
                 });
             });
             return lots;
@@ -5847,8 +6415,10 @@ HTML_TEMPLATE = """
         async function openEditProductModal(prodId) {
             if (!isAdminMode) { openPinModal(); return; }
             let item = allMasterData.find(m => m.id === prodId || m.seller_code === prodId);
-            if (!item && (!adminConfigCache || !adminConfigCache.master_products)) {
-                try { await ensureAdminConfig(); } catch (e) { return; }
+            try {
+                await ensureAdminConfig();
+            } catch (e) {
+                if (!item) return;
             }
             let rawCfgItem = null;
             if (adminConfigCache && adminConfigCache.master_products) {
@@ -6206,6 +6776,7 @@ HTML_TEMPLATE = """
                 if (!k) return;
                 if (mode === '__RESTORE__') csvLotExpiries[k] = '__RESTORE__';
                 else if (mode === '__CLEAR__') csvLotExpiries[k] = '__CLEAR__';
+                else if (curVal === '' && (rawExp !== '' || wasAdmin)) csvLotExpiries[k] = rawExp !== '' ? '__CLEAR__' : '__RESTORE__';
                 else if (wasAdmin || curVal !== rawExp) csvLotExpiries[k] = curVal;
             });
 
@@ -6278,7 +6849,7 @@ HTML_TEMPLATE = """
                         renderAdminCenterTabs();
                     }
                 }
-                alert('✅ ' + json.message);
+                alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
             } catch (err) {
                 if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('저장 오류: ' + err.message);
             }
@@ -6448,7 +7019,7 @@ HTML_TEMPLATE = """
                 await ensureAdminConfig();
                 await fetchSummary();
                 renderAdminCenterTabs();
-                alert('✅ ' + json.message);
+                alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
             } catch (err) {
                 if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('일괄 저장 오류: ' + err.message);
             }
@@ -6525,6 +7096,9 @@ HTML_TEMPLATE = """
                             <input type="date" class="ac-exp-lot-input w-full px-2 py-1 border border-slate-300 rounded font-mono text-[11px]" data-lot-key="${escapeHtml(l.lot_key)}" data-orig="${escapeHtml(l.expiry_date || '')}" value="${escapeHtml(l.expiry_date || '')}">
                         </div>
                     `).join('');
+                    if (m.default_expiry_date && activeCsvLots.some(l => !l.expiry_date)) {
+                        inputColHtml += `<div class="text-[10px] text-slate-400">기본 소비기한: <span class="font-mono">${escapeHtml(m.default_expiry_date)}</span> (미입력 시 적용)</div>`;
+                    }
                 } else if (hasManualLots) {
                     lotSummaryHtml = activeManLots.length > 0
                         ? activeManLots.map(l => `<div class="text-[11px] text-slate-700">• ${escapeHtml(l.label)}: ${(l.qty || 0).toLocaleString()}개 (${escapeHtml(l.expiry_date || '미지정')})</div>`).join('')
@@ -6602,7 +7176,7 @@ HTML_TEMPLATE = """
                 await ensureAdminConfig();
                 await fetchSummary();
                 renderAdminCenterTabs();
-                alert('✅ 소비기한 일괄 반영 완료!');
+                alert('✅ 소비기한 일괄 반영 완료!' + formatDriveSyncNotice(json.drive_sync));
             } catch (err) {
                 if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('소비기한 저장 오류: ' + err.message);
             }
@@ -6664,7 +7238,7 @@ HTML_TEMPLATE = """
                 await ensureAdminConfig();
                 await fetchSummary();
                 renderAdminCenterTabs();
-                alert('✅ ' + json.message);
+                alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
             } catch (err) {
                 if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('B2B 매핑 오류: ' + err.message);
             }
@@ -6717,7 +7291,7 @@ HTML_TEMPLATE = """
                 await ensureAdminConfig();
                 await fetchSummary();
                 renderAdminCenterTabs();
-                alert('✅ ' + json.message);
+                alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
             } catch (err) {
                 if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('설정 저장 오류: ' + err.message);
             }
@@ -6730,20 +7304,36 @@ HTML_TEMPLATE = """
             const configuredLabel = ds.configured
                 ? '<span class="text-emerald-700 font-bold">✅ 환경변수 연결됨</span>'
                 : '<span class="text-amber-700 font-bold">⚠️ 미설정 (현재 Render 로컬 캐시만 사용)</span>';
+            const blockedHtml = (ds.sync_blocked || ds.status === 'blocked')
+                ? '<div class="mt-1 p-2 rounded border border-rose-300 bg-rose-50 text-rose-800 text-[11px] font-bold">🛑 부팅 시 Drive 복원 실패로 자동 덮어쓰기가 잠겨 있습니다. 먼저 [Drive에서 최신 불러오기]를 시도하세요.</div>'
+                : '';
             box.innerHTML = `
                 <div><strong>연동 상태:</strong> ${configuredLabel} (${escapeHtml(ds.status || '-')})</div>
                 <div><strong>마지막 Drive 백업:</strong> <span class="font-mono">${escapeHtml(ds.last_synced_at || '기록 없음')}</span></div>
                 <div><strong>마지막 Drive 복원:</strong> <span class="font-mono">${escapeHtml(ds.last_loaded_at || '기록 없음')}</span></div>
                 ${ds.file_id ? `<div><strong>Drive 파일 ID:</strong> <span class="font-mono text-[11px]">${escapeHtml(ds.file_id)}</span></div>` : ''}
                 ${ds.last_error ? `<div class="text-rose-600 font-bold"><strong>최근 오류:</strong> ${escapeHtml(ds.last_error)}</div>` : ''}
+                ${blockedHtml}
             `;
             document.getElementById('acGasCodePreview').textContent = adminConfigCache.gas_script || '// google_apps_script_bridge.gs 파일 내용을 불러올 수 없습니다.';
         }
 
-        async function syncDriveNow() {
+        async function syncDriveNow(force = false) {
             try {
-                const res = await adminFetch('/api/admin/drive/sync-now', { method: 'POST' });
+                const res = await adminFetch('/api/admin/drive/sync-now', {
+                    method: 'POST',
+                    body: JSON.stringify({ force: Boolean(force) })
+                });
                 const json = await res.json();
+                if (res.status === 409 && json.require_force && !force) {
+                    if (confirm(`⚠️ ${json.message}\\n\\n정말 현재 서버 상태로 Google Drive 기존 데이터를 강제 덮어쓰기(백업)하시겠습니까?`)) {
+                        return await syncDriveNow(true);
+                    }
+                    await ensureAdminConfig();
+                    renderAdminDriveTab();
+                    fetchSummary();
+                    return;
+                }
                 await ensureAdminConfig();
                 renderAdminDriveTab();
                 fetchSummary();
@@ -6804,7 +7394,7 @@ HTML_TEMPLATE = """
                     await ensureAdminConfig();
                     renderAdminCenterTabs();
                     await fetchSummary();
-                    alert('✅ ' + json.message);
+                    alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
                 } catch (err) {
                     if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('JSON 백업 파일 파싱/복원 오류: ' + err.message);
                 } finally {
@@ -6883,15 +7473,16 @@ HTML_TEMPLATE = """
             const gaemiInv = (cfg && cfg.gaemi_inventory) || {};
             const map = new Map();
             Object.entries(gaemiInv).forEach(([gCode, rows]) => {
+                const gcNfc = cleanJsNfc(gCode);
                 (rows || []).forEach(r => {
-                    const optName = String(r.option_name || '').trim();
-                    const key = `${String(gCode).trim().toUpperCase()}||${optName}`;
+                    const optName = cleanJsNfc(r.option_name || '');
+                    const key = `${gcNfc.toUpperCase()}||${optName}`;
                     if (!map.has(key)) {
                         map.set(key, {
                             key,
-                            gaemi_code: String(gCode).trim(),
+                            gaemi_code: gcNfc,
                             option_name: optName,
-                            product_name: String(r.product_name || '').trim(),
+                            product_name: cleanJsNfc(r.product_name || ''),
                             stock: 0,
                             lot_count: 0
                         });
@@ -6901,7 +7492,7 @@ HTML_TEMPLATE = """
                     entry.stock += rowStock;
                     if (rowStock > 0) entry.lot_count += 1;
                     if (!entry.product_name && r.product_name) {
-                        entry.product_name = String(r.product_name).trim();
+                        entry.product_name = cleanJsNfc(r.product_name);
                     }
                 });
             });
@@ -6918,8 +7509,8 @@ HTML_TEMPLATE = """
                 const seenKeys = new Set();
                 gMappings.forEach(rule => {
                     if (!rule || typeof rule !== 'object') return;
-                    const reqCode = String(rule.gaemi_code || rule.code || '').trim().toUpperCase();
-                    const reqOpt = String(rule.option_name || '').trim();
+                    const reqCode = cleanJsNfc(rule.gaemi_code || rule.code || '').toUpperCase();
+                    const reqOpt = cleanJsNfc(rule.option_name || '');
                     if (!reqCode) return;
                     groupedEntries.forEach(entry => {
                         if (entry.gaemi_code.toUpperCase() !== reqCode) return;
@@ -6934,13 +7525,14 @@ HTML_TEMPLATE = """
                 return { matched, usedLegacy: false };
             }
 
-            const legacyCodes = (m.gaemi_codes || []).map(c => String(c || '').trim()).filter(Boolean);
-            const optFilter = String(m.gaemi_filter || '').trim();
+            const legacyCodes = (m.gaemi_codes || []).map(c => cleanJsNfc(c || '')).filter(Boolean);
+            const optFilter = cleanJsNfc(m.gaemi_filter || '');
             const matched = [];
             const seenKeys = new Set();
             legacyCodes.forEach(lc => {
+                const lcUp = lc.toUpperCase();
                 groupedEntries.forEach(entry => {
-                    if (entry.gaemi_code !== lc) return;
+                    if (entry.gaemi_code.toUpperCase() !== lcUp) return;
                     if (optFilter && !entry.option_name.includes(optFilter)) return;
                     if (!seenKeys.has(entry.key)) {
                         seenKeys.add(entry.key);
@@ -8583,7 +9175,7 @@ HTML_TEMPLATE = """
                         showAcMapToast('✅ ' + json.message);
                     }
                 } else {
-                    alert('✅ ' + json.message);
+                    alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
                 }
             } catch (err) {
                 if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('코드 매핑 저장 오류: ' + err.message);
