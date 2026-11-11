@@ -1167,7 +1167,7 @@ class TestIljeomodoAdminMode(unittest.TestCase):
 
         html = self.client.get("/").data.decode("utf-8")
         self.assertNotIn("1500", html)
-        for marker in ('id="statInboundWait"', 'id="pillInboundCount"', "setStatusFilter('inbound')", "발주 완료 · 입고 예정:", "입고포함"):
+        for marker in ('id="statInboundWait"', "setStatusFilter('inbound')", "발주 완료 · 입고 예정:", "입고포함"):
             self.assertIn(marker, html)
         print("OK: [Admin Test 14] 입고 예정일·수량 등록 시 입고 대기/예정/소진주의/추가검토 전환 검증 완료")
 

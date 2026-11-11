@@ -84,19 +84,6 @@ DEFAULT_SHARED_STOCK_MAP = {
     "S200019": {"base_code": "20EO02", "multiplier": 2, "desc": "20EO02 2병 선물세트"},
 }
 
-SHARED_STOCK_MAP = copy.deepcopy(DEFAULT_SHARED_STOCK_MAP)
-
-BASE_TO_SHARED_MAP = {}
-for _s_code, _info in SHARED_STOCK_MAP.items():
-    _b_code = _info["base_code"]
-    if _b_code not in BASE_TO_SHARED_MAP:
-        BASE_TO_SHARED_MAP[_b_code] = []
-    BASE_TO_SHARED_MAP[_b_code].append({
-        "s_code": _s_code,
-        "multiplier": _info["multiplier"],
-        "desc": _info["desc"]
-    })
-
 DEFAULT_SETTINGS = {
     "default_import_lead_time": 110,
     "default_import_buffer": 20,
@@ -1567,7 +1554,6 @@ def get_summary():
                     status = f"🔴 추가 발주 검토 (입고포함 D-{int(effective_runway)}일)"
                     status_color = "red"
                     action_cta = "📋 추가 발주 검토"
-                    action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
                     risk_score = 920 - effective_runway
                     is_urgent = True
                 else:
@@ -1575,14 +1561,12 @@ def get_summary():
                     status = f"🚢 입고 대기 (품절 · {arr_tag})"
                     status_color = "teal"
                     action_cta = f"🚚 {arr_short} 입고 확인" if arr_short else "🚚 입고 일정 확인"
-                    action_cta_class = "bg-teal-600 hover:bg-teal-700 text-white"
                     risk_score = 330
                     is_in_transit_wait = True
             else:
                 status = "🔴 결품 (0개)"
                 status_color = "red"
                 action_cta = "🚨 결품 즉시 발주"
-                action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
                 risk_score = 1000
                 is_urgent = True
         elif daily_sales > 0 and total_runway < eff_lead_time and (not has_in_transit or effective_runway < eff_lead_time):
@@ -1590,35 +1574,30 @@ def get_summary():
                 status = f"🔴 추가 발주 검토 (입고포함 D-{int(effective_runway)}일)"
                 status_color = "red"
                 action_cta = "📋 추가 발주 검토"
-                action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
                 risk_score = (880 if product_type == "수입" else 830) - effective_runway
                 is_urgent = True
             else:
                 status = f"🔴 긴급 발주 (D-{int(total_runway)}일)"
                 status_color = "red"
                 action_cta = "🚨 수입 발주 기안" if product_type == "수입" else "🚨 사입 긴급 발주"
-                action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
                 risk_score = (900 if product_type == "수입" else 850) - total_runway
                 is_urgent = True
         elif g_total >= 10 and (coupang_runway <= 14 or (c_physical_total == 0 and c_sales_7d > 0)):
             status = f"🔵 쿠팡 채우기 (쿠팡 D-{int(coupang_runway)}일)"
             status_color = "blue"
             action_cta = "📦 쿠팡 입고 요청"
-            action_cta_class = "bg-blue-600 hover:bg-blue-700 text-white"
             risk_score = 700 - coupang_runway
             is_coupang_transfer = True
         elif daily_sales > 0 and total_runway <= eff_prepare_limit and not has_in_transit:
             status = f"🟡 발주 준비 (D-{int(total_runway)}일)" if product_type == "수입" else f"🟡 사입 주의 (D-{int(total_runway)}일)"
             status_color = "amber"
             action_cta = "📝 발주서 작성" if product_type == "수입" else "📝 사입 발주 검토"
-            action_cta_class = "bg-amber-500 hover:bg-amber-600 text-white"
             risk_score = (500 if product_type == "수입" else 450) - total_runway
             is_order_prepare = True
         elif expiry_risk:
             status = f"⏳ 기한 주의 ({expiry_note})"
             status_color = "purple"
             action_cta = "🏷️ 임박 특가/프로모션"
-            action_cta_class = "bg-purple-600 hover:bg-purple-700 text-white"
             risk_score = 350
             is_exp_warn = True
         elif has_in_transit and daily_sales > 0 and total_runway <= eff_prepare_limit:
@@ -1627,26 +1606,22 @@ def get_summary():
                 status = f"🚢 입고 예정 · 추가준비 ({arr_tag})"
                 status_color = "teal"
                 action_cta = "📋 추가 발주 확인"
-                action_cta_class = "bg-teal-600 hover:bg-teal-700 text-white"
                 risk_score = 310 - min(total_runway, 150)
             elif pre_arrival_gap:
                 status = f"🚚 입고 전 소진주의 ({arr_tag})"
                 status_color = "teal"
                 action_cta = f"🚚 {arr_short} 입고 점검" if arr_short else "🚚 입고 일정 점검"
-                action_cta_class = "bg-teal-600 hover:bg-teal-700 text-white"
                 risk_score = 320 - min(total_runway, 120)
             else:
                 status = f"🚢 입고 예정 ({arr_tag})"
                 status_color = "teal"
                 action_cta = f"📦 {arr_short} 입고 대기" if arr_short else "📦 입고 일정 확인"
-                action_cta_class = "bg-teal-600 hover:bg-teal-700 text-white"
                 risk_score = 220 - min(total_runway, 150)
             is_in_transit_wait = True
         elif master_physical_total > 0 and daily_sales <= 0:
             status = "🟠 판매 정체 (소진무)"
             status_color = "orange"
             action_cta = "🔔 미판매 점검 알람"
-            action_cta_class = "bg-orange-500 hover:bg-orange-600 text-white"
             risk_score = 250 + min(round(master_physical_total / 1000.0, 2), 49)
             is_no_sales = True
         else:
@@ -1654,7 +1629,6 @@ def get_summary():
             status = f"✅ 정상 안전 ({safe_d})"
             status_color = "green"
             action_cta = "✅ 정상 유지"
-            action_cta_class = "bg-emerald-100 text-emerald-800"
             risk_score = 100 - min(total_runway, 200)
             is_safe = True
 
@@ -1754,7 +1728,6 @@ def get_summary():
             "status": status,
             "status_color": status_color,
             "action_cta": action_cta,
-            "action_cta_class": action_cta_class,
             "risk_score": risk_score,
             "options": option_details,
             "recent_orders": recent_orders
@@ -1763,8 +1736,6 @@ def get_summary():
     # 액션보드 핵심: 위험도 순(Risk Score) 강제 정렬
     master_summaries.sort(key=lambda x: x["risk_score"], reverse=True)
 
-    # 하위 호환성 유지 카운터 (테스트 코드 호환)
-    legacy_leadtime_count = sum(1 for m in master_summaries if m["product_type"] == "수입" and m["total_runway"] <= m["effective_prepare_limit"])
     coupang_missing_grade_count = sum(
         1 for v in coupang.values()
         if isinstance(v, dict) and "grade" not in v
@@ -1800,10 +1771,6 @@ def get_summary():
             "in_transit_count": in_transit_wait_count,
             "no_sales_count": no_sales_count,
             "safe_count": safe_count,
-            "leadtime_count": legacy_leadtime_count,
-            "urgent_count": urgent_order_count,
-            "danger_count": urgent_order_count,
-            "warning_count": order_prepare_count,
             "last_updated": last_updated,
             "data_uploaded_at": last_updated,
             "upload_timestamps": upload_timestamps,
@@ -2866,8 +2833,8 @@ HTML_TEMPLATE = """
         .log-box::-webkit-scrollbar { width: 5px; }
         .log-box::-webkit-scrollbar-track { background: #0f172a; }
         .log-box::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-        .drag-col-over { border-left: 3px solid #059669 !important; background-color: #d1fae5 !important; }
-        .drag-row-over { border-top: 3px solid #059669 !important; }
+        .drag-col-over { border-left: 3px solid #0f172a !important; background-color: #f1f5f9 !important; }
+        .drag-row-over { border-top: 3px solid #0f172a !important; }
         #masterTable { table-layout: fixed; }
         #masterTable th, #masterTable td { box-sizing: border-box; }
         #masterTable th { position: relative; }
@@ -2895,7 +2862,7 @@ HTML_TEMPLATE = """
         }
         .col-resizer:hover::after,
         .col-resizer.resizing::after {
-            background-color: #4f46e5;
+            background-color: #334155;
             width: 3px;
             height: 82%;
         }
@@ -2905,373 +2872,287 @@ HTML_TEMPLATE = """
             left: 0;
             box-sizing: border-box;
         }
-        :fullscreen body { background-color: #f1f5f9; }
-        :-webkit-full-screen body { background-color: #f1f5f9; }
+        :fullscreen body { background-color: #f8fafc; }
+        :-webkit-full-screen body { background-color: #f8fafc; }
     </style>
 </head>
-<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
 
-    <!-- 상단 헤더 (일쩜오도 BI 로고, 실시간 재고 업데이트 일시, 관리자 & 액션 버튼) -->
-    <header class="bg-slate-900 text-white shadow-md border-b border-slate-800 sticky top-0 z-50">
+    <!-- 상단 미니멀 헤더 -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
-            <div class="flex items-center space-x-3">
-                <div class="h-10 px-2 py-1 bg-white rounded-xl shadow-sm border border-slate-700 flex items-center justify-center">
+            <div class="flex items-center space-x-3 min-w-0">
+                <div class="h-8 px-1 flex items-center justify-center shrink-0">
                     <img src="/logo.png" alt="일쩜오도 로고" class="h-7 w-auto object-contain">
                 </div>
-                <div>
-                    <div class="flex items-center space-x-2">
-                        <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">일쩜오도 재고현황 | 발주 의사결정 액션보드</h1>
-                        <span class="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 font-semibold px-2 py-0.5 rounded-full">결품 제로(Zero) 경보</span>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2 mt-0.5">
-                        <p id="headerSubtitleText" class="text-[11px] text-slate-400">수입 리드타임 110일 발주 경보 · 창고 간 불균형 해소 · 소비기한 선입선출(FIFO) 관리</p>
-                        <span class="text-slate-600 hidden sm:inline">|</span>
-                        <span class="inline-flex items-center text-[11px] text-emerald-400 font-semibold bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-md" title="데이터 파일(개미창고·쿠팡·매출) 최종 업로드 시간 (한국 시간 KST)">
-                            <i class="fa-regular fa-clock mr-1 text-emerald-400"></i>
-                            <span>재고 업데이트: </span>
-                            <span id="headerLastUpdated" class="ml-1 font-mono text-white">확인 중...</span>
+                <div class="min-w-0">
+                    <h1 class="text-sm sm:text-base font-bold tracking-tight text-slate-900 truncate">일쩜오도 재고현황</h1>
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
+                        <span title="데이터 파일(개미창고·쿠팡·매출) 최종 업로드 시간 (KST)">
+                            업데이트 <span id="headerLastUpdated" class="font-mono text-slate-700 font-semibold">확인 중...</span>
                         </span>
-                        <span id="driveSyncBadge" class="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-slate-800 text-slate-300 border-slate-700" title="Google Drive 영구 저장소 연동 상태">
-                            <i class="fa-solid fa-cloud mr-1"></i>
-                            <span id="driveSyncBadgeText">로컬 저장 모드</span>
+                        <span class="text-slate-300">·</span>
+                        <span id="driveSyncBadge" class="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500" title="Google Drive 영구 저장소 연동 상태">
+                            <span id="driveSyncDot" class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                            <span id="driveSyncBadgeText">로컬 저장</span>
                         </span>
+                        <span id="headerSubtitleText" class="hidden sm:inline text-slate-400">· 수입 110일 기준</span>
+                        <button type="button" onclick="copyPublicUrl()" class="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-800 transition" title="Google Sites 연동 주소 복사">
+                            <i class="fa-regular fa-copy text-[10px]"></i>
+                            <span>링크</span>
+                        </button>
                     </div>
                 </div>
             </div>
-            
-            <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <button onclick="toggleFullScreen()" id="fullscreenBtn" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm" title="전체화면으로 시원하게 보기">
+
+            <div class="flex items-center gap-1.5 shrink-0">
+                <button type="button" onclick="toggleFullScreen()" id="fullscreenBtn" class="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg text-xs transition" title="전체화면 토글">
                     <i class="fa-solid fa-expand" id="fullscreenIcon"></i>
-                    <span id="fullscreenText">전체화면</span>
+                    <span id="fullscreenText" class="sr-only">전체화면</span>
                 </button>
-                <button onclick="openInNewTab()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm" title="새 탭에서 100% 꽉 차게 열기">
+                <button type="button" onclick="openInNewTab()" class="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg text-xs transition" title="새 탭으로 열기">
                     <i class="fa-solid fa-arrow-up-right-from-square"></i>
-                    <span class="hidden sm:inline">새 탭으로 열기</span>
                 </button>
 
+                <a href="/api/export-master-csv" class="px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold transition flex items-center gap-1.5" title="액션 리포트 CSV 다운로드">
+                    <i class="fa-solid fa-download text-[11px] text-slate-500"></i>
+                    <span class="hidden sm:inline">리포트</span>
+                </a>
+
                 <!-- 관리자 잠금 상태 버튼 -->
-                <button id="btnAdminUnlock" onclick="openPinModal()" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg text-xs font-extrabold transition flex items-center space-x-1.5 shadow-sm" title="PIN 인증 후 상품명, 유통기한, 리드타임, B2B 매핑을 수정합니다">
-                    <i class="fa-solid fa-lock"></i>
+                <button type="button" id="btnAdminUnlock" onclick="openPinModal()" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5" title="PIN 인증 후 상품명, 유통기한, 리드타임, B2B 매핑을 수정합니다">
+                    <i class="fa-solid fa-lock text-[11px]"></i>
                     <span>관리자 모드</span>
                 </button>
 
-                <!-- 관리자 인증 완료 시 표시되는 툴바 -->
-                <div id="adminToolbarBtns" class="hidden flex items-center gap-1.5">
-                    <button onclick="openCreateProductModal()" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1 shadow-sm">
-                        <i class="fa-solid fa-plus"></i>
-                        <span>단품 추가</span>
+                <!-- 관리자 인증 완료 드롭다운 메뉴 -->
+                <div id="adminToolbarBtns" class="hidden relative">
+                    <button type="button" id="btnAdminMenuToggle" onclick="toggleAdminMenu(event)" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-xs">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                        <span>관리자 메뉴</span>
+                        <i class="fa-solid fa-chevron-down text-[10px] opacity-75"></i>
                     </button>
-                    <button onclick="openAdminCenter('mapping')" class="px-2.5 py-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-lg text-xs font-extrabold transition flex items-center space-x-1 shadow-sm" title="쿠팡외 매출코드 · 개미 상품코드+옵션명 · 쿠팡 옵션ID 수동 매핑">
-                        <i class="fa-solid fa-link"></i>
-                        <span>코드 매핑</span>
-                    </button>
-                    <button onclick="openAdminCenter('bulk')" class="px-2.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-lg text-xs font-extrabold transition flex items-center space-x-1 shadow-sm">
-                        <i class="fa-solid fa-sliders"></i>
-                        <span>관리자 센터</span>
-                    </button>
-                    <button onclick="lockAdminMode()" class="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1 shadow-sm" title="관리자 편집 권한 잠금">
-                        <i class="fa-solid fa-lock-open"></i>
-                        <span>잠금</span>
-                    </button>
+                    <div id="adminMenuDropdown" class="hidden absolute right-0 mt-1.5 w-52 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs text-slate-700 z-50">
+                        <button type="button" onclick="closeAdminMenu(); openCreateProductModal();" class="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 font-semibold text-slate-900">
+                            <i class="fa-solid fa-plus w-4 text-center text-indigo-600"></i>
+                            <span>단품 추가</span>
+                        </button>
+                        <button type="button" onclick="closeAdminMenu(); openAdminCenter('mapping');" class="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 font-medium">
+                            <i class="fa-solid fa-link w-4 text-center text-slate-500"></i>
+                            <span>상품 코드 매핑</span>
+                        </button>
+                        <button type="button" onclick="closeAdminMenu(); openAdminCenter('expiry');" class="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 font-medium">
+                            <i class="fa-regular fa-clock w-4 text-center text-slate-500"></i>
+                            <span>소비기한 일괄 입력</span>
+                        </button>
+                        <button type="button" onclick="closeAdminMenu(); openAdminCenter('bulk');" class="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 font-medium">
+                            <i class="fa-solid fa-table-list w-4 text-center text-slate-500"></i>
+                            <span>전체 품목 일괄 편집</span>
+                        </button>
+                        <button type="button" onclick="closeAdminMenu(); openAdminCenter('b2b');" class="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 font-medium">
+                            <i class="fa-solid fa-boxes-stacked w-4 text-center text-slate-500"></i>
+                            <span>B2B/세트(S코드)</span>
+                        </button>
+                        <button type="button" onclick="closeAdminMenu(); openAdminCenter('settings');" class="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 font-medium">
+                            <i class="fa-solid fa-sliders w-4 text-center text-slate-500"></i>
+                            <span>전역 기준 & PIN</span>
+                        </button>
+                        <button type="button" onclick="closeAdminMenu(); openAdminCenter('drive');" class="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 font-medium">
+                            <i class="fa-solid fa-cloud w-4 text-center text-slate-500"></i>
+                            <span>Google Drive · 백업</span>
+                        </button>
+                        <div class="my-1 border-t border-slate-100"></div>
+                        <button type="button" onclick="closeAdminMenu(); lockAdminMode();" class="w-full text-left px-3.5 py-2 hover:bg-rose-50 flex items-center gap-2 font-semibold text-rose-600">
+                            <i class="fa-solid fa-lock w-4 text-center"></i>
+                            <span>관리자 잠금</span>
+                        </button>
+                    </div>
                 </div>
-
-                <a href="/api/export-master-csv" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-sm">
-                    <i class="fa-solid fa-file-excel"></i>
-                    <span>액션 리포트 다운로드</span>
-                </a>
             </div>
         </div>
     </header>
 
-    <!-- 관리자 모드 활성 배너 -->
-    <div id="adminModeBanner" class="hidden bg-amber-50 border-b border-amber-300 text-amber-950 px-4 py-2 text-xs">
-        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
-            <div class="flex items-center space-x-2">
-                <span class="px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-extrabold text-[10px]">관리자 편집 모드 ON</span>
-                <span class="font-medium">각 행의 <strong>[🔗 매핑]</strong>·<strong>[✏️ 수정]</strong> 버튼으로 채널별 코드 매핑·상품명·소비기한·입고예정을 편집할 수 있습니다.</span>
-            </div>
-            <div class="flex items-center space-x-2">
-                <button onclick="openAdminCenter('mapping')" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 rounded font-bold text-[11px] text-indigo-900 transition">
-                    🔗 상품 코드 매핑
-                </button>
-                <button onclick="openAdminCenter('expiry')" class="px-2 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded font-bold text-[11px] text-amber-900 transition">
-                    ⏳ 소비기한 일괄입력
-                </button>
-                <button onclick="openAdminCenter('drive')" class="px-2 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded font-bold text-[11px] text-amber-900 transition">
-                    ☁️ Drive/백업 관리
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 구글 사이트 연동 안내 배너 -->
-    <div id="tunnelBanner" class="bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 text-white shadow-inner px-4 py-2">
-        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
-            <div class="flex items-center space-x-2">
-                <span class="bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider text-[10px]">Google Sites 24시간 연동 URL</span>
-                <span id="publicUrlText" class="font-mono bg-black/40 px-2.5 py-0.5 rounded select-all font-semibold text-emerald-300">
-                    https://inventory-management-q7bp.onrender.com
-                </span>
-            </div>
-            <button onclick="copyPublicUrl()" class="px-2.5 py-0.5 bg-white text-emerald-800 rounded font-semibold hover:bg-emerald-50 transition flex items-center space-x-1 shadow-sm">
-                <i class="fa-regular fa-copy"></i>
-                <span>주소 복사</span>
-            </button>
-        </div>
-    </div>
-
     <!-- 메인 대시보드 컨테이너 -->
-    <main class="max-w-7xl mx-auto px-4 py-4 flex-1 w-full space-y-4">
+    <main class="max-w-7xl mx-auto px-4 py-4 flex-1 w-full space-y-3">
 
-        <!-- 1. 핵심 6대 신호등 Action KPI 위젯 (상단 배치) -->
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            
-            <!-- 🔴 긴급 발주 요망 (통합 D-Day < 리드타임) -->
-            <div onclick="setStatusFilter('urgent')" class="bg-rose-50/70 rounded-xl shadow-sm border-2 border-rose-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-rose-100/80 transition relative overflow-hidden group">
-                <div class="flex items-center justify-between gap-1">
-                    <span class="text-[11px] font-bold text-rose-900 flex items-center">
-                        <i class="fa-solid fa-triangle-exclamation text-rose-600 mr-1.5 animate-bounce"></i>긴급 발주 요망
-                    </span>
-                    <span id="kpiBadgeUrgent" class="text-[9px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded font-bold shrink-0">110일 미만/결품</span>
-                </div>
-                <div class="flex items-baseline justify-between mt-2">
-                    <div>
-                        <span id="statUrgentOrders" class="text-3xl font-black text-rose-700">0</span>
-                        <span class="text-xs text-rose-600 font-bold ml-1">개 품목</span>
-                    </div>
-                    <i class="fa-solid fa-fire text-rose-400 text-2xl group-hover:scale-110 transition"></i>
-                </div>
-                <div class="mt-1 flex items-center justify-between text-[10px] text-rose-700 font-semibold border-t border-rose-200/60 pt-1">
-                    <span>수입 리드타임 결품 초읽기</span>
-                    <span class="text-rose-900 group-hover:underline shrink-0">클릭 필터</span>
-                </div>
-            </div>
-
-            <!-- 🟡 발주 준비 (리드타임 ~ 리드타임+버퍼) -->
-            <div onclick="setStatusFilter('prepare')" class="bg-amber-50/70 rounded-xl shadow-sm border-2 border-amber-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-amber-100/80 transition relative overflow-hidden group">
-                <div class="flex items-center justify-between gap-1">
-                    <span class="text-[11px] font-bold text-amber-900 flex items-center">
-                        <i class="fa-solid fa-clipboard-list text-amber-600 mr-1.5"></i>발주 준비
-                    </span>
-                    <span id="kpiBadgePrepare" class="text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold shrink-0">110~130일</span>
-                </div>
-                <div class="flex items-baseline justify-between mt-2">
-                    <div>
-                        <span id="statOrderPrepare" class="text-3xl font-black text-amber-700">0</span>
-                        <span class="text-xs text-amber-600 font-bold ml-1">개 품목</span>
-                    </div>
-                    <i class="fa-solid fa-cart-flatbed text-amber-400 text-2xl group-hover:scale-110 transition"></i>
-                </div>
-                <div class="mt-1 flex items-center justify-between text-[10px] text-amber-700 font-semibold border-t border-amber-200/60 pt-1">
-                    <span>안전재고 구간 (기안 준비)</span>
-                    <span class="text-amber-900 group-hover:underline shrink-0">클릭 필터</span>
-                </div>
-            </div>
-
-            <!-- 🔵 쿠팡 채우기 필요 (창고 간 불균형) -->
-            <div onclick="setStatusFilter('transfer')" class="bg-blue-50/70 rounded-xl shadow-sm border-2 border-blue-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-blue-100/80 transition relative overflow-hidden group">
-                <div class="flex items-center justify-between gap-1">
-                    <span class="text-[11px] font-bold text-blue-900 flex items-center">
-                        <i class="fa-solid fa-truck-arrow-right text-blue-600 mr-1.5"></i>쿠팡 채우기 필요
-                    </span>
-                    <span class="text-[9px] bg-blue-200 text-blue-900 px-1.5 py-0.5 rounded font-bold shrink-0">창고 불균형</span>
-                </div>
-                <div class="flex items-baseline justify-between mt-2">
-                    <div>
-                        <span id="statCoupangTransfer" class="text-3xl font-black text-blue-700">0</span>
-                        <span class="text-xs text-blue-600 font-bold ml-1">개 품목</span>
-                    </div>
-                    <i class="fa-solid fa-boxes-packing text-blue-400 text-2xl group-hover:scale-110 transition"></i>
-                </div>
-                <div class="mt-1 flex items-center justify-between text-[10px] text-blue-700 font-semibold border-t border-blue-200/60 pt-1">
-                    <span>개미 실물 有 · 쿠팡 D-14 이하</span>
-                    <span class="text-blue-900 group-hover:underline shrink-0">클릭 필터</span>
-                </div>
-            </div>
-
-            <!-- ⏳ 소비기한 주의 (기준일 미만 or 미소진 위험) -->
-            <div onclick="setStatusFilter('expiry')" class="bg-purple-50/70 rounded-xl shadow-sm border-2 border-purple-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-purple-100/80 transition relative overflow-hidden group">
-                <div class="flex items-center justify-between gap-1">
-                    <span class="text-[11px] font-bold text-purple-900 flex items-center">
-                        <i class="fa-solid fa-hourglass-half text-purple-600 mr-1.5"></i>소비기한 주의
-                    </span>
-                    <span class="text-[9px] bg-purple-200 text-purple-900 px-1.5 py-0.5 rounded font-bold shrink-0">선입선출</span>
-                </div>
-                <div class="flex items-baseline justify-between mt-2">
-                    <div>
-                        <span id="statExpiryWarning" class="text-3xl font-black text-purple-700">0</span>
-                        <span class="text-xs text-purple-600 font-bold ml-1">개 품목</span>
-                    </div>
-                    <i class="fa-solid fa-calendar-xmark text-purple-400 text-2xl group-hover:scale-110 transition"></i>
-                </div>
-                <div class="mt-1 flex items-center justify-between text-[10px] text-purple-700 font-semibold border-t border-purple-200/60 pt-1">
-                    <span id="kpiSubExpiry">잔여 120일 미만 or 미소진 위험</span>
-                    <span class="text-purple-900 group-hover:underline shrink-0">클릭 필터</span>
-                </div>
-            </div>
-
-            <!-- 🟠 판매 정체 (소진무: 재고 보유 · 최근 7/30일 판매 0) -->
-            <div onclick="setStatusFilter('no_sales')" class="bg-orange-50/70 rounded-xl shadow-sm border-2 border-orange-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-orange-100/80 transition relative overflow-hidden group">
-                <div class="flex items-center justify-between gap-1">
-                    <span class="text-[11px] font-bold text-orange-950 flex items-center">
-                        <i class="fa-solid fa-bell text-orange-600 mr-1.5 animate-pulse"></i>판매 정체 (소진무)
-                    </span>
-                    <span class="text-[9px] bg-orange-200 text-orange-950 px-1.5 py-0.5 rounded font-bold shrink-0">미판매 알람</span>
-                </div>
-                <div class="flex items-baseline justify-between mt-2">
-                    <div>
-                        <span id="statNoSales" class="text-3xl font-black text-orange-700">0</span>
-                        <span class="text-xs text-orange-700 font-bold ml-1">개 품목</span>
-                    </div>
-                    <i class="fa-solid fa-circle-pause text-orange-400 text-2xl group-hover:scale-110 transition"></i>
-                </div>
-                <div class="mt-1 flex items-center justify-between text-[10px] text-orange-800 font-semibold border-t border-orange-200/60 pt-1">
-                    <span>재고 有 · 7/30일 판매 0</span>
-                    <span class="text-orange-950 group-hover:underline shrink-0">클릭 필터</span>
-                </div>
-            </div>
-
-            <!-- 🟢 정상 안전 -->
-            <div onclick="setStatusFilter('safe')" class="bg-emerald-50/70 rounded-xl shadow-sm border-2 border-emerald-300 p-3.5 flex flex-col justify-between cursor-pointer hover:bg-emerald-100/80 transition relative overflow-hidden group">
-                <div class="flex items-center justify-between gap-1">
-                    <span class="text-[11px] font-bold text-emerald-900 flex items-center">
-                        <i class="fa-solid fa-circle-check text-emerald-600 mr-1.5"></i>정상 안전
-                    </span>
-                    <span id="kpiBadgeSafe" class="text-[9px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold shrink-0">130일 이상</span>
-                </div>
-                <div class="flex items-baseline justify-between mt-2">
-                    <div>
-                        <span id="statSafeStock" class="text-3xl font-black text-emerald-700">0</span>
-                        <span class="text-xs text-emerald-600 font-bold ml-1">개 품목</span>
-                    </div>
-                    <i class="fa-solid fa-shield-halved text-emerald-400 text-2xl group-hover:scale-110 transition"></i>
-                </div>
-                <div class="mt-1 flex items-center justify-between text-[10px] text-emerald-700 font-semibold border-t border-emerald-200/60 pt-1">
-                    <span>안정적 재고 유지 상태</span>
-                    <span class="text-emerald-900 group-hover:underline shrink-0">클릭 필터</span>
-                </div>
-            </div>
-
-        </div>
-
-        <!-- 2. 재고 요약 바 (마스터 품목수 및 창고별 합계 스트립) -->
-        <div class="bg-white rounded-xl shadow-xs border border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div class="flex flex-wrap items-center gap-4 text-slate-600">
+        <!-- 1. 재고 요약 스트립 -->
+        <div class="bg-white rounded-xl border border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600">
                 <div class="flex items-center space-x-1.5">
-                    <span class="font-bold text-slate-900">단품 품목:</span>
-                    <span id="statTotalMasters" class="font-bold text-indigo-700">38개</span>
+                    <span class="text-slate-500">단품</span>
+                    <span id="statTotalMasters" class="font-bold text-slate-900">38개</span>
                     <span id="statMasterSubtext" class="text-slate-400 text-[11px]">(수입 11 / 사입 27)</span>
                 </div>
-                <span class="text-slate-300">|</span>
+                <span class="text-slate-200 hidden sm:inline">|</span>
                 <div class="flex items-center space-x-1.5">
-                    <span class="font-bold text-slate-900">총 가용재고:</span>
-                    <span id="statTotalStock" class="font-bold text-emerald-700 text-sm">0개</span>
-                    <span class="text-slate-400 text-[11px]">(개미 <span id="statGaemiStock" class="font-semibold text-amber-700">0</span> + 쿠팡실물 <span id="statCoupangStock" class="font-semibold text-blue-700">0</span><span id="statCoupangReturnWrap" class="hidden text-rose-600 font-semibold"> · 🔄반품 <span id="statCoupangReturnStock">0개</span></span>)</span>
+                    <span class="text-slate-500">가용재고</span>
+                    <span id="statTotalStock" class="font-bold font-mono text-slate-900 text-sm">0개</span>
+                    <span class="text-slate-400 text-[11px]">(개미 <span id="statGaemiStock" class="font-mono text-slate-700">0</span> + 쿠팡 <span id="statCoupangStock" class="font-mono text-slate-700">0</span><span id="statCoupangReturnWrap" class="hidden text-rose-600 font-semibold"> · 🔄 반품 <span id="statCoupangReturnStock">0개</span></span>)</span>
                 </div>
-                <span class="text-slate-300">|</span>
+                <span class="text-slate-200 hidden sm:inline">|</span>
                 <div class="flex items-center space-x-1.5">
-                    <span class="font-bold text-slate-900">총 출고량:</span>
-                    <span id="statTotalSales7d" class="font-bold text-indigo-700 text-sm">7일 0개</span>
-                    <span class="text-slate-400 text-[11px]">/ 30일: <span id="statTotalSales30d" class="font-semibold text-slate-700">0</span>개</span>
-                    <span id="statSalesSubtext" class="text-slate-400 text-[11px]">(쿠팡 0 + 외 0)</span>
+                    <span class="text-slate-500">출고</span>
+                    <span id="statTotalSales7d" class="font-bold font-mono text-slate-900">7일 0개</span>
+                    <span class="text-slate-400 text-[11px]">/ 30일 <span id="statTotalSales30d" class="font-mono text-slate-700">0</span>개</span>
+                    <span id="statSalesSubtext" class="text-slate-400 text-[11px] hidden lg:inline"></span>
                 </div>
             </div>
-            <div class="text-[11px] text-slate-500 flex flex-wrap items-center gap-2">
-                <button type="button" onclick="setStatusFilter('inbound')" class="inline-flex items-center text-teal-900 bg-teal-50 hover:bg-teal-100 border border-teal-300 px-2 py-0.5 rounded font-bold text-[10px] transition cursor-pointer" title="입고 예정일·수량이 등록되어 발주 완료(입고 대기) 상태인 품목만 필터링합니다">
-                    <i class="fa-solid fa-ship mr-1 text-teal-600"></i>발주완료 · 입고대기 <span id="statInboundWait" class="ml-1 font-mono font-black">0</span>개
-                </button>
-                <span class="inline-flex items-center text-indigo-800 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-mono text-[10px]">
-                    <i class="fa-solid fa-scale-balanced mr-1 text-indigo-600"></i>7일(60%)+30일(40%) 가중 일평균 런웨이
-                </span>
-                <span class="inline-flex items-center text-slate-600 bg-slate-100 px-2 py-0.5 rounded font-mono border border-slate-200">
-                    <i class="fa-solid fa-arrow-down-short-wide mr-1 text-slate-400"></i>위험도(Risk Score) 순 우선 정렬됨
-                </span>
-            </div>
+            <span class="text-[11px] text-slate-400">7일(60%)+30일(40%) 가중 일평균 · 위험도순</span>
         </div>
 
-        <!-- 3. 메인 발주 의사결정 액션보드 테이블 (4. 열 칸 드래그 이동 가능) -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            
+        <!-- 2. 통합 KPI · 상태 필터 스트립 (중복 제거 1줄 통합) -->
+        <div id="statusFilterPills" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+            <button type="button" onclick="setStatusFilter('all')" data-stat="all" class="status-pill bg-slate-100/80 border border-slate-900 ring-1 ring-slate-900 rounded-xl px-3 py-2 text-left transition cursor-pointer">
+                <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <span class="w-1.5 h-1.5 rounded-full bg-slate-900 shrink-0"></span>
+                    <span class="truncate">전체 보기</span>
+                </div>
+                <div class="mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight" id="catCountAll">38</div>
+            </button>
+
+            <button type="button" onclick="setStatusFilter('urgent')" data-stat="urgent" id="kpiCardUrgent" title="수입 리드타임 미만 · 결품 초읽기" class="status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
+                <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <span class="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></span>
+                    <span class="truncate">긴급 발주</span>
+                </div>
+                <div class="mt-0.5 flex items-baseline justify-between gap-1">
+                    <span id="statUrgentOrders" class="text-lg font-bold font-mono text-rose-600 leading-tight">0</span>
+                    <span id="kpiBadgeUrgent" class="text-[10px] text-slate-400 font-mono truncate">110일↓</span>
+                </div>
+            </button>
+
+            <button type="button" onclick="setStatusFilter('prepare')" data-stat="prepare" id="kpiCardPrepare" title="안전재고 구간 (발주 기안 준비)" class="status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
+                <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
+                    <span class="truncate">발주 준비</span>
+                </div>
+                <div class="mt-0.5 flex items-baseline justify-between gap-1">
+                    <span id="statOrderPrepare" class="text-lg font-bold font-mono text-amber-600 leading-tight">0</span>
+                    <span id="kpiBadgePrepare" class="text-[10px] text-slate-400 font-mono truncate">110~130일</span>
+                </div>
+            </button>
+
+            <button type="button" onclick="setStatusFilter('inbound')" data-stat="inbound" title="입고 예정일·수량이 등록된 발주 완료 품목" class="status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
+                <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <span class="w-1.5 h-1.5 rounded-full bg-teal-600 shrink-0"></span>
+                    <span class="truncate">입고 예정</span>
+                </div>
+                <div class="mt-0.5 flex items-baseline justify-between gap-1">
+                    <span id="statInboundWait" class="text-lg font-bold font-mono text-slate-900 leading-tight">0</span>
+                    <span class="text-[10px] text-slate-400 truncate">입고대기</span>
+                </div>
+            </button>
+
+            <button type="button" onclick="setStatusFilter('transfer')" data-stat="transfer" title="개미 실물 보유 · 쿠팡 D-14 이하" class="status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
+                <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <span class="w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0"></span>
+                    <span class="truncate">쿠팡 이동</span>
+                </div>
+                <div class="mt-0.5 flex items-baseline justify-between gap-1">
+                    <span id="statCoupangTransfer" class="text-lg font-bold font-mono text-slate-900 leading-tight">0</span>
+                    <span class="text-[10px] text-slate-400 truncate">D-14↓</span>
+                </div>
+            </button>
+
+            <button type="button" onclick="setStatusFilter('expiry')" data-stat="expiry" id="kpiCardExpiry" title="소비기한 임박 또는 미소진 위험" class="status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
+                <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <span class="w-1.5 h-1.5 rounded-full bg-violet-500 shrink-0"></span>
+                    <span class="truncate">소비기한 주의</span>
+                </div>
+                <div class="mt-0.5 flex items-baseline justify-between gap-1">
+                    <span id="statExpiryWarning" class="text-lg font-bold font-mono text-slate-900 leading-tight">0</span>
+                    <span id="kpiSubExpiry" class="text-[10px] text-slate-400 font-mono truncate">120일↓</span>
+                </div>
+            </button>
+
+            <button type="button" onclick="setStatusFilter('no_sales')" data-stat="no_sales" title="재고 보유 · 최근 7일/30일 판매 0" class="status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
+                <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <span class="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0"></span>
+                    <span class="truncate">판매 정체 (소진무)</span>
+                </div>
+                <div class="mt-0.5 flex items-baseline justify-between gap-1">
+                    <span id="statNoSales" class="text-lg font-bold font-mono text-slate-900 leading-tight">0</span>
+                    <span class="text-[10px] text-slate-400 truncate">미판매</span>
+                </div>
+            </button>
+
+            <button type="button" onclick="setStatusFilter('safe')" data-stat="safe" id="kpiCardSafe" title="안정적 재고 유지 상태" class="status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
+                <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                    <span class="truncate">정상 안전</span>
+                </div>
+                <div class="mt-0.5 flex items-baseline justify-between gap-1">
+                    <span id="statSafeStock" class="text-lg font-bold font-mono text-emerald-700 leading-tight">0</span>
+                    <span id="kpiBadgeSafe" class="text-[10px] text-slate-400 font-mono truncate">130일↑</span>
+                </div>
+            </button>
+        </div>
+
+        <!-- 3. 메인 발주 의사결정 액션보드 테이블 -->
+        <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+
             <!-- 필터 & 검색 툴바 -->
             <div class="p-3 border-b border-slate-200 space-y-2">
-                <div class="flex flex-wrap items-center justify-between gap-2.5">
-                    <div class="flex flex-wrap items-center gap-2">
-                        <span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block animate-ping"></span>
-                        <h2 class="font-bold text-slate-900 text-sm">일쩜오도 단품 재고 & 발주 의사결정 보드</h2>
-                        <span id="filteredCountText" class="text-xs text-slate-400 font-normal">| 총 38개 단품</span>
-                        <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono border border-slate-200">
-                            <i class="fa-solid fa-grip mr-1 text-slate-400"></i>드래그: 순서 변경 · 경계선 드래그: 열 너비 조정
-                        </span>
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex items-center gap-2">
+                        <h2 class="font-bold text-slate-900 text-sm">단품 발주 보드</h2>
+                        <span id="filteredCountText" class="text-xs text-slate-400">총 38개</span>
                     </div>
 
                     <div class="flex flex-wrap items-center gap-1.5">
                         <!-- 검색창 -->
                         <div class="relative">
-                            <i class="fa-solid fa-search absolute left-2.5 top-2.5 text-slate-400 text-xs"></i>
-                            <input type="text" id="searchInput" oninput="applyFilters()" placeholder="상품명 또는 관리코드 검색..." class="text-xs pl-7 pr-3 py-1.5 border border-slate-200 rounded-lg w-44 sm:w-56 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                            <i class="fa-solid fa-search absolute left-2.5 top-2 text-slate-400 text-xs"></i>
+                            <input type="text" id="searchInput" oninput="applyFilters()" placeholder="상품명·코드 검색..." class="text-xs pl-7 pr-3 py-1.5 border border-slate-200 rounded-lg w-40 sm:w-52 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400">
                         </div>
 
+                        <!-- 카테고리 선택 -->
+                        <select id="categorySelect" onchange="setCategoryFilter(this.value)" class="text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-slate-400" title="구분 / 카테고리 필터">
+                            <option value="all" id="catOptionAll">전체 카테고리 (38)</option>
+                            <option value="수입" id="catOptionImport">수입 제품 (11)</option>
+                            <option value="사입" id="catOptionPurchase">사입 제품 (27)</option>
+                            <option value="오일/식용유">오일/식용유</option>
+                            <option value="파스타">파스타</option>
+                            <option value="식초/애사비">식초/애사비</option>
+                            <option value="발사믹">발사믹</option>
+                            <option value="쿠키/스낵">쿠키/스낵</option>
+                        </select>
+
+                        <!-- 전체 펼치기/접기 -->
+                        <button type="button" onclick="toggleAllOptionDetails()" class="text-xs px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium transition flex items-center gap-1">
+                            <i class="fa-solid fa-list-ul text-slate-400"></i>
+                            <span id="expandBtnText">소비기한 세부내역</span>
+                        </button>
+
                         <!-- 열 너비 조정 패널 토글 -->
-                        <button type="button" onclick="toggleColWidthPanel()" id="btnColWidthToggle" title="각 열의 가로 너비를 직접 조정합니다 (헤더 경계선 드래그도 가능)" class="text-xs px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg font-semibold transition flex items-center space-x-1">
-                            <i class="fa-solid fa-arrows-left-right"></i>
+                        <button type="button" onclick="toggleColWidthPanel()" id="btnColWidthToggle" title="각 열의 가로 너비 조정 (헤더 경계선 드래그 가능)" class="text-xs px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium transition flex items-center gap-1">
+                            <i class="fa-solid fa-arrows-left-right text-slate-400"></i>
                             <span>열 너비</span>
                         </button>
 
-                        <!-- 열 순서/너비 리셋 버튼 -->
-                        <button type="button" onclick="resetColumnOrder()" title="열 순서와 가로 너비를 기본값으로 초기화" class="text-xs px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold transition flex items-center space-x-1">
+                        <!-- 열 순서/너비 리셋 -->
+                        <button type="button" onclick="resetColumnOrder()" title="열 순서와 너비를 기본값으로 초기화" class="text-xs p-1.5 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-900 border border-slate-200 rounded-lg transition">
                             <i class="fa-solid fa-rotate-left"></i>
-                            <span>열 초기화</span>
-                        </button>
-
-                        <!-- 전체 펼치기/접기 -->
-                        <button type="button" onclick="toggleAllOptionDetails()" class="text-xs px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold transition flex items-center space-x-1">
-                            <i class="fa-solid fa-list-ul"></i>
-                            <span id="expandBtnText">소비기한 세부내역</span>
                         </button>
                     </div>
                 </div>
 
-                <!-- 열 너비 세부 조정 패널 (모바일/PC 공통 프리셋 + 슬라이더) -->
-                <div id="colWidthAdjustPanel" class="hidden bg-indigo-50/50 border border-indigo-200 rounded-xl p-2.5 space-y-2 text-xs">
-                    <div class="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-indigo-200/70">
-                        <div class="flex items-center gap-1.5 text-[11px] font-bold text-indigo-950">
-                            <i class="fa-solid fa-sliders text-indigo-600"></i>
+                <!-- 열 너비 세부 조정 패널 -->
+                <div id="colWidthAdjustPanel" class="hidden bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-2 text-xs">
+                    <div class="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-slate-200">
+                        <div class="flex items-center gap-1.5 text-[11px] font-bold text-slate-800">
+                            <i class="fa-solid fa-sliders text-slate-500"></i>
                             <span>열 가로 너비 조정</span>
-                            <span class="text-[10px] font-normal text-indigo-700 hidden sm:inline">(표 상단 헤더 경계선을 마우스/터치로 끌어 직접 조절하거나 더블클릭 시 초기화됩니다)</span>
+                            <span class="text-[10px] font-normal text-slate-500 hidden sm:inline">(헤더 경계선 드래그 또는 더블클릭 시 초기화)</span>
                         </div>
                         <div class="flex flex-wrap items-center gap-1">
-                            <button type="button" onclick="applyColWidthPreset('compact')" class="px-2 py-0.5 rounded bg-white hover:bg-indigo-100 border border-indigo-200 text-[10px] font-bold text-indigo-800">좁게(모바일)</button>
-                            <button type="button" onclick="applyColWidthPreset('default')" class="px-2 py-0.5 rounded bg-white hover:bg-indigo-100 border border-indigo-200 text-[10px] font-bold text-indigo-800">기본 너비</button>
-                            <button type="button" onclick="applyColWidthPreset('wide')" class="px-2 py-0.5 rounded bg-white hover:bg-indigo-100 border border-indigo-200 text-[10px] font-bold text-indigo-800">넓게(PC)</button>
-                            <button type="button" onclick="toggleColWidthPanel()" class="px-2 py-0.5 rounded bg-slate-200 hover:bg-slate-300 text-[10px] font-bold text-slate-700 ml-1">닫기</button>
+                            <button type="button" onclick="applyColWidthPreset('compact')" class="px-2 py-0.5 rounded bg-white hover:bg-slate-100 border border-slate-200 text-[10px] font-semibold text-slate-700">좁게(모바일)</button>
+                            <button type="button" onclick="applyColWidthPreset('default')" class="px-2 py-0.5 rounded bg-white hover:bg-slate-100 border border-slate-200 text-[10px] font-semibold text-slate-700">기본 너비</button>
+                            <button type="button" onclick="applyColWidthPreset('wide')" class="px-2 py-0.5 rounded bg-white hover:bg-slate-100 border border-slate-200 text-[10px] font-semibold text-slate-700">넓게(PC)</button>
+                            <button type="button" onclick="toggleColWidthPanel()" class="px-2 py-0.5 rounded bg-slate-200 hover:bg-slate-300 text-[10px] font-semibold text-slate-700 ml-1">닫기</button>
                         </div>
                     </div>
                     <div id="colWidthSlidersGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2"></div>
-                </div>
-
-                <!-- 카테고리 및 상태 필터 탭 -->
-                <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-slate-100 text-xs">
-                    <div class="flex flex-wrap items-center gap-1.5" id="categoryPills">
-                        <button onclick="setCategoryFilter('all')" class="category-pill active px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-800 text-white">전체 (<span id="catCountAll">38</span>)</button>
-                        <button onclick="setCategoryFilter('수입')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-purple-100 text-purple-900 border border-purple-200 hover:bg-purple-200">🚢 수입제품 (<span id="catCountImport">11</span>)</button>
-                        <button onclick="setCategoryFilter('사입')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-blue-100 text-blue-900 border border-blue-200 hover:bg-blue-200">📦 사입제품 (<span id="catCountPurchase">27</span>)</button>
-                        <button onclick="setCategoryFilter('오일/식용유')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">오일/식용유</button>
-                        <button onclick="setCategoryFilter('파스타')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">파스타</button>
-                        <button onclick="setCategoryFilter('식초/애사비')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">식초/애사비</button>
-                        <button onclick="setCategoryFilter('발사믹')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">발사믹</button>
-                        <button onclick="setCategoryFilter('쿠키/스낵')" class="category-pill px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">쿠키/스낵</button>
-                    </div>
-
-                    <div class="flex flex-wrap items-center gap-1.5" id="statusFilterPills">
-                        <button onclick="setStatusFilter('all')" class="status-pill active px-2 py-0.5 rounded text-[11px] font-bold bg-slate-800 text-white">전체보기</button>
-                        <button onclick="setStatusFilter('urgent')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200">🔴 긴급 발주</button>
-                        <button onclick="setStatusFilter('prepare')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200">🟡 발주 준비</button>
-                        <button onclick="setStatusFilter('inbound')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-teal-100 text-teal-900 border border-teal-300 hover:bg-teal-200">🚢 입고 예정 (<span id="pillInboundCount">0</span>)</button>
-                        <button onclick="setStatusFilter('transfer')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-300 hover:bg-blue-200">🔵 쿠팡 이동</button>
-                        <button onclick="setStatusFilter('expiry')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-purple-100 text-purple-900 border border-purple-300 hover:bg-purple-200">⏳ 소비기한 주의</button>
-                        <button onclick="setStatusFilter('no_sales')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-orange-100 text-orange-900 border border-orange-300 hover:bg-orange-200">🟠 판매 정체</button>
-                        <button onclick="setStatusFilter('safe')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200">🟢 정상 안전</button>
-                    </div>
                 </div>
             </div>
 
@@ -3279,103 +3160,95 @@ HTML_TEMPLATE = """
             <div id="masterTableScrollWrap" class="overflow-x-auto relative">
                 <table id="masterTable" class="text-left text-xs border-collapse">
                     <colgroup id="masterTableColGroup"></colgroup>
-                    <thead id="masterTableHead" class="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200 select-none">
+                    <thead id="masterTableHead" class="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 select-none">
                         <!-- 동적 열 헤더 -->
                     </thead>
                     <tbody id="masterTableBody" class="divide-y divide-slate-100 font-sans">
                         <!-- 행 렌더링 -->
                     </tbody>
-                    <tfoot id="masterTableFoot" class="bg-slate-100 font-bold border-t-2 border-slate-300 text-slate-800">
+                    <tfoot id="masterTableFoot" class="bg-slate-50 font-bold border-t border-slate-200 text-slate-800">
                         <!-- 하단 합계란 -->
                     </tfoot>
                 </table>
             </div>
         </div>
 
-        <!-- 4. 실시간 로그 콘솔 -->
-        <div class="bg-slate-900 rounded-xl shadow border border-slate-800 p-3">
-            <div class="flex items-center justify-between pb-2 border-b border-slate-800 text-xs text-slate-400">
-                <div class="flex items-center space-x-1.5">
-                    <span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span>
-                    <span class="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>
-                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
-                    <span class="font-mono text-slate-300 font-semibold ml-1.5 text-[11px]">일쩜오도 시스템 처리 로그</span>
-                </div>
-                <button onclick="clearConsoleLogs()" class="hover:text-white transition text-[11px]">
-                    <i class="fa-solid fa-eraser mr-1"></i>로그 초기화
-                </button>
-            </div>
-            <div id="logConsole" class="log-box font-mono text-xs text-emerald-400 h-20 overflow-y-auto mt-2 space-y-0.5">
-                <!-- 콘솔 내용 -->
-            </div>
-        </div>
-
-        <!-- 5. [수정사항 2] CSV 수기 업데이트 존 (화면 최하단에 배치) -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 space-y-3">
-            <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+        <!-- 4. CSV 수기 업데이트 존 -->
+        <div class="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
                 <div class="flex items-center space-x-2">
-                    <i class="fa-solid fa-cloud-arrow-up text-indigo-600 text-sm"></i>
-                    <h3 class="font-bold text-slate-800 text-xs sm:text-sm">재고 및 매출현황 파일 수기 업로드 (최신 데이터 갱신)</h3>
+                    <i class="fa-solid fa-cloud-arrow-up text-slate-600 text-sm"></i>
+                    <h3 class="font-bold text-slate-900 text-xs sm:text-sm">재고 · 매출 파일 업로드</h3>
                 </div>
-                <span class="text-[11px] text-slate-400">파일을 상자에 드래그하거나 클릭하여 등록하면 실시간 자동 분석됩니다.</span>
+                <span class="text-[11px] text-slate-400">CSV 또는 Excel 파일을 드래그하거나 클릭하여 업로드</span>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <!-- 1) 개미창고 파일 업로드 존 -->
-                <div id="dropGaemi" class="bg-amber-50/30 rounded-xl border-2 border-dashed border-amber-300 hover:border-amber-500 p-3 transition cursor-pointer flex items-center space-x-3 group">
+                <!-- 1) 개미창고 -->
+                <div id="dropGaemi" class="bg-slate-50/70 hover:bg-slate-100/70 rounded-xl border border-dashed border-slate-300 hover:border-slate-500 p-3 transition cursor-pointer flex items-center space-x-3">
                     <input type="file" id="fileGaemi" accept=".csv, .xlsx, .xls" class="hidden">
-                    <div class="w-9 h-9 rounded-lg bg-amber-500 text-white flex items-center justify-center text-base shrink-0 shadow-sm group-hover:scale-105 transition">
+                    <div class="w-9 h-9 rounded-lg bg-white border border-slate-200 text-slate-700 flex items-center justify-center text-sm shrink-0">
                         <i class="fa-solid fa-warehouse"></i>
                     </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center space-x-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded">3PL</span>
-                            <h4 class="font-bold text-slate-800 text-xs">개미창고 상품목록 (클릭)</h4>
+                            <span class="text-[10px] font-semibold bg-slate-200/70 text-slate-700 px-1.5 rounded">3PL</span>
+                            <h4 class="font-bold text-slate-800 text-xs">개미창고 상품목록</h4>
                         </div>
-                        <p class="text-[11px] text-slate-500 truncate">
-                            <span class="font-semibold text-amber-800">개미창고_상품목록_....csv</span>
-                        </p>
-                        <span id="gaemiStatusText" class="text-[10px] text-slate-400 font-medium">소비기한 및 재고 파싱 대기 중</span>
+                        <p class="text-[11px] text-slate-400 truncate">개미창고_상품목록_....csv</p>
+                        <span id="gaemiStatusText" class="text-[10px] text-slate-500 font-medium">파싱 대기 중</span>
                     </div>
                 </div>
 
-                <!-- 2) 쿠팡 윙 파일 업로드 존 -->
-                <div id="dropCoupang" class="bg-blue-50/30 rounded-xl border-2 border-dashed border-blue-300 hover:border-blue-500 p-3 transition cursor-pointer flex items-center space-x-3 group">
+                <!-- 2) 쿠팡 윙 -->
+                <div id="dropCoupang" class="bg-slate-50/70 hover:bg-slate-100/70 rounded-xl border border-dashed border-slate-300 hover:border-slate-500 p-3 transition cursor-pointer flex items-center space-x-3">
                     <input type="file" id="fileCoupang" accept=".csv, .xlsx, .xls" class="hidden">
-                    <div class="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center text-base shrink-0 shadow-sm group-hover:scale-105 transition">
+                    <div class="w-9 h-9 rounded-lg bg-white border border-slate-200 text-slate-700 flex items-center justify-center text-sm shrink-0">
                         <i class="fa-solid fa-truck-fast"></i>
                     </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center space-x-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-800 px-1.5 py-0.2 rounded">쿠팡물류</span>
-                            <h4 class="font-bold text-slate-800 text-xs">쿠팡 재고건전성 (클릭)</h4>
+                            <span class="text-[10px] font-semibold bg-slate-200/70 text-slate-700 px-1.5 rounded">쿠팡물류</span>
+                            <h4 class="font-bold text-slate-800 text-xs">쿠팡 재고건전성</h4>
                         </div>
-                        <p class="text-[11px] text-slate-500 truncate">
-                            <span class="font-semibold text-blue-800">쿠팡_inventory_health_....csv</span>
-                        </p>
-                        <span id="coupangStatusText" class="text-[10px] text-slate-400 font-medium">실시간 재고 및 7일 판매량 대기</span>
+                        <p class="text-[11px] text-slate-400 truncate">쿠팡_inventory_health_....csv</p>
+                        <span id="coupangStatusText" class="text-[10px] text-slate-500 font-medium">파싱 대기 중</span>
                     </div>
                 </div>
 
-                <!-- 3) 쿠팡외 통합 매출 파일 업로드 존 -->
-                <div id="dropSales" class="bg-indigo-50/30 rounded-xl border-2 border-dashed border-indigo-300 hover:border-indigo-500 p-3 transition cursor-pointer flex items-center space-x-3 group">
+                <!-- 3) 쿠팡외 통합 매출 -->
+                <div id="dropSales" class="bg-slate-50/70 hover:bg-slate-100/70 rounded-xl border border-dashed border-slate-300 hover:border-slate-500 p-3 transition cursor-pointer flex items-center space-x-3">
                     <input type="file" id="fileSales" accept=".csv, .xlsx, .xls" class="hidden">
-                    <div class="w-9 h-9 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-base shrink-0 shadow-sm group-hover:scale-105 transition">
+                    <div class="w-9 h-9 rounded-lg bg-white border border-slate-200 text-slate-700 flex items-center justify-center text-sm shrink-0">
                         <i class="fa-solid fa-chart-line"></i>
                     </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center space-x-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider bg-indigo-100 text-indigo-800 px-1.5 py-0.2 rounded">통합 매출</span>
-                            <h4 class="font-bold text-slate-800 text-xs">쿠팡외 매출정보 (클릭)</h4>
+                            <span class="text-[10px] font-semibold bg-slate-200/70 text-slate-700 px-1.5 rounded">통합매출</span>
+                            <h4 class="font-bold text-slate-800 text-xs">쿠팡외 매출정보</h4>
                         </div>
-                        <p class="text-[11px] text-slate-500 truncate">
-                            <span class="font-semibold text-indigo-800">매출정보CSV_....csv</span>
-                        </p>
-                        <span id="salesStatusText" class="text-[10px] text-slate-400 font-medium">스마트스토어 등 타채널 매출 대기</span>
+                        <p class="text-[11px] text-slate-400 truncate">매출정보CSV_....csv</p>
+                        <span id="salesStatusText" class="text-[10px] text-slate-500 font-medium">파싱 대기 중</span>
                     </div>
                 </div>
             </div>
         </div>
+
+        <!-- 5. 접이식 시스템 로그 콘솔 -->
+        <details class="bg-white rounded-xl border border-slate-200 px-4 py-2.5">
+            <summary class="cursor-pointer select-none flex items-center justify-between text-xs text-slate-500 font-semibold">
+                <span class="flex items-center gap-2">
+                    <i class="fa-solid fa-terminal text-[10px] text-slate-400"></i>
+                    <span>시스템 처리 로그</span>
+                </span>
+                <button type="button" onclick="event.preventDefault(); clearConsoleLogs();" class="text-[11px] text-slate-400 hover:text-slate-700 transition">
+                    로그 초기화
+                </button>
+            </summary>
+            <div id="logConsole" class="log-box font-mono text-[11px] bg-slate-900 text-slate-200 rounded-lg p-3 h-24 overflow-y-auto mt-2.5 space-y-0.5">
+                <!-- 콘솔 내용 -->
+            </div>
+        </details>
 
     </main>
 
@@ -3392,14 +3265,14 @@ HTML_TEMPLATE = """
     </datalist>
 
     <!-- 1. 관리자 PIN 인증 모달 -->
-    <div id="pinModal" class="hidden fixed inset-0 z-[100] bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden">
-            <div class="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between">
+    <div id="pinModal" class="hidden fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden">
+            <div class="bg-white border-b border-slate-200 px-5 py-3.5 flex items-center justify-between">
                 <div class="flex items-center space-x-2">
-                    <i class="fa-solid fa-shield-halved text-amber-400"></i>
-                    <h3 class="font-bold text-sm">관리자 모드 PIN 인증</h3>
+                    <i class="fa-solid fa-shield-halved text-slate-700"></i>
+                    <h3 class="font-bold text-sm text-slate-900">관리자 모드 PIN 인증</h3>
                 </div>
-                <button onclick="closePinModal()" class="text-slate-400 hover:text-white text-sm">
+                <button onclick="closePinModal()" class="text-slate-400 hover:text-slate-700 text-sm">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
@@ -3410,12 +3283,12 @@ HTML_TEMPLATE = """
                 </p>
                 <div>
                     <label for="pinInput" class="block text-xs font-bold text-slate-700 mb-1.5">관리자 PIN 번호</label>
-                    <input type="password" id="pinInput" inputmode="numeric" autocomplete="current-password" placeholder="PIN 입력 후 Enter" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-amber-500">
+                    <input type="password" id="pinInput" inputmode="numeric" autocomplete="current-password" placeholder="PIN 입력 후 Enter" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-slate-400">
                 </div>
                 <div id="pinErrorMsg" class="hidden text-xs text-rose-600 font-semibold bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"></div>
                 <div class="flex items-center justify-end space-x-2 pt-1">
-                    <button type="button" onclick="closePinModal()" class="px-3.5 py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition">취소</button>
-                    <button type="submit" id="pinSubmitBtn" class="px-4 py-2 rounded-lg text-xs font-extrabold bg-amber-500 hover:bg-amber-600 text-slate-950 transition shadow-sm flex items-center space-x-1.5">
+                    <button type="button" onclick="closePinModal()" class="px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition">취소</button>
+                    <button type="submit" id="pinSubmitBtn" class="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition flex items-center space-x-1.5">
                         <i class="fa-solid fa-unlock-keyhole"></i>
                         <span>잠금 해제</span>
                     </button>
@@ -3425,19 +3298,19 @@ HTML_TEMPLATE = """
     </div>
 
     <!-- 2. 단품 마스터 생성 / 수정 모달 -->
-    <div id="editProductModal" class="hidden fixed inset-0 z-[100] bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl flex flex-col max-h-[92vh] overflow-hidden">
-            <div class="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between shrink-0">
+    <div id="editProductModal" class="hidden fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-3xl flex flex-col max-h-[92vh] overflow-hidden">
+            <div class="bg-white border-b border-slate-200 px-5 py-3.5 flex items-center justify-between shrink-0">
                 <div class="flex items-center space-x-2">
-                    <i class="fa-solid fa-pen-to-square text-amber-400"></i>
-                    <h3 id="ep_modal_title" class="font-bold text-sm sm:text-base">단품 마스터 정보 수정</h3>
+                    <i class="fa-solid fa-pen-to-square text-slate-700"></i>
+                    <h3 id="ep_modal_title" class="font-bold text-sm sm:text-base text-slate-900">단품 마스터 정보 수정</h3>
                 </div>
-                <button onclick="closeEditProductModal()" class="text-slate-400 hover:text-white text-base">
+                <button onclick="closeEditProductModal()" class="text-slate-400 hover:text-slate-700 text-base">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
 
-            <div class="p-4 sm:p-5 overflow-y-auto space-y-5 text-xs">
+            <div class="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs">
                 <input type="hidden" id="ep_is_new" value="0">
                 <input type="hidden" id="ep_id" value="">
                 <input type="hidden" id="ep_orig_seller_code" value="">
@@ -3445,104 +3318,104 @@ HTML_TEMPLATE = """
                 <!-- 섹션 1: 기본 마스터 정보 -->
                 <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
                     <div class="flex items-center justify-between border-b border-slate-200 pb-2">
-                        <span class="font-extrabold text-slate-800 text-xs flex items-center space-x-1.5">
-                            <i class="fa-solid fa-tag text-indigo-600"></i>
-                            <span>1. 기본 마스터 기준 (CSV 재업로드 시에도 고정 유지됨)</span>
+                        <span class="font-bold text-slate-800 text-xs flex items-center space-x-1.5">
+                            <i class="fa-solid fa-tag text-slate-500"></i>
+                            <span>1. 기본 마스터 기준 (CSV 재업로드 시에도 유지)</span>
                         </span>
                         <label class="inline-flex items-center space-x-1.5 cursor-pointer select-none">
-                            <input type="checkbox" id="ep_is_active" checked class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500">
-                            <span class="font-bold text-slate-700 text-[11px]">대시보드 노출</span>
+                            <input type="checkbox" id="ep_is_active" checked class="rounded border-slate-300 text-slate-900 focus:ring-slate-500">
+                            <span class="font-semibold text-slate-700 text-[11px]">대시보드 노출</span>
                         </label>
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1">판매자관리코드 <span class="text-rose-500">*</span></label>
-                            <input type="text" id="ep_seller_code" placeholder="예: 20DC02" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <label class="block font-semibold text-slate-700 mb-1">판매자관리코드 <span class="text-rose-500">*</span></label>
+                            <input type="text" id="ep_seller_code" placeholder="예: 20DC02" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-mono font-bold focus:outline-none focus:ring-2 focus:ring-slate-400">
                         </div>
                         <div class="sm:col-span-2">
-                            <label class="block font-bold text-slate-700 mb-1">마스터 상품명 <span class="text-rose-500">*</span></label>
-                            <input type="text" id="ep_name" placeholder="예: 데체코 엑스트라버진 올리브오일 500ml" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <label class="block font-semibold text-slate-700 mb-1">마스터 상품명 <span class="text-rose-500">*</span></label>
+                            <input type="text" id="ep_name" placeholder="예: 데체코 엑스트라버진 올리브오일 500ml" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-slate-400">
                         </div>
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1">구분</label>
-                            <select id="ep_product_type" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                                <option value="수입">🚢 수입 (장기 리드타임)</option>
-                                <option value="사입">📦 사입 (국내/단기)</option>
+                            <label class="block font-semibold text-slate-700 mb-1">구분</label>
+                            <select id="ep_product_type" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-medium focus:outline-none focus:ring-2 focus:ring-slate-400">
+                                <option value="수입">수입 (장기 리드타임)</option>
+                                <option value="사입">사입 (국내/단기)</option>
                             </select>
                         </div>
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1">카테고리</label>
-                            <input type="text" id="ep_category" list="categorySuggestions" placeholder="예: 오일/식용유" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <label class="block font-semibold text-slate-700 mb-1">카테고리</label>
+                            <input type="text" id="ep_category" list="categorySuggestions" placeholder="예: 오일/식용유" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-400">
                         </div>
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1">참고사항 / 운영 메모</label>
-                            <input type="text" id="ep_note" placeholder="발주·입고·선입선출 특이사항 메모" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <label class="block font-semibold text-slate-700 mb-1">참고사항 / 운영 메모</label>
+                            <input type="text" id="ep_note" placeholder="발주·입고·선입선출 특이사항 메모" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-400">
                         </div>
                     </div>
                 </div>
 
                 <!-- 섹션 2: 발주 기준 & 입고 예정 -->
-                <div class="bg-blue-50/40 rounded-xl border border-blue-200 p-4 space-y-3">
-                    <div class="font-extrabold text-blue-950 text-xs flex items-center space-x-1.5 border-b border-blue-200 pb-2">
-                        <i class="fa-solid fa-ship text-blue-600"></i>
-                        <span>2. 품목별 발주 기준 & 입고 예정 (비워두면 전역 기본값 자동 적용)</span>
+                <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
+                    <div class="font-bold text-slate-800 text-xs flex items-center space-x-1.5 border-b border-slate-200 pb-2">
+                        <i class="fa-solid fa-ship text-slate-500"></i>
+                        <span>2. 품목별 발주 기준 & 입고 예정 (비워두면 전역 기본값 적용)</span>
                     </div>
                     <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">개별 리드타임(일)</label>
-                            <input type="number" min="0" id="ep_lead_time_days" placeholder="기본값" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <label class="block font-semibold text-slate-700 mb-1 text-[11px]">개별 리드타임(일)</label>
+                            <input type="number" min="0" id="ep_lead_time_days" placeholder="기본값" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
                         </div>
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">안전재고 버퍼(일)</label>
-                            <input type="number" min="0" id="ep_safety_buffer_days" placeholder="기본값" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <label class="block font-semibold text-slate-700 mb-1 text-[11px]">안전재고 버퍼(일)</label>
+                            <input type="number" min="0" id="ep_safety_buffer_days" placeholder="기본값" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
                         </div>
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">소비기한 주의(일)</label>
-                            <input type="number" min="0" id="ep_expiry_warn_days" placeholder="기본값" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <label class="block font-semibold text-slate-700 mb-1 text-[11px]">소비기한 주의(일)</label>
+                            <input type="number" min="0" id="ep_expiry_warn_days" placeholder="기본값" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
                         </div>
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">입고 예정 수량(개)</label>
-                            <input type="number" min="0" id="ep_in_transit_qty" value="0" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono font-bold text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <label class="block font-semibold text-slate-700 mb-1 text-[11px]">입고 예정 수량(개)</label>
+                            <input type="number" min="0" id="ep_in_transit_qty" value="0" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400">
                         </div>
                         <div class="col-span-2 sm:col-span-1">
-                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">입고 예정일</label>
-                            <input type="date" id="ep_expected_arrival_date" class="w-full px-2 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <label class="block font-semibold text-slate-700 mb-1 text-[11px]">입고 예정일</label>
+                            <input type="date" id="ep_expected_arrival_date" class="w-full px-2 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
                         </div>
                     </div>
                 </div>
 
                 <!-- 섹션 3: 개미창고 소비기한 & 수동 다중 로트(FIFO) 관리 -->
-                <div class="bg-amber-50/40 rounded-xl border border-amber-200 p-4 space-y-3">
-                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 pb-2">
-                        <span class="font-extrabold text-amber-950 text-xs flex items-center space-x-1.5">
-                            <i class="fa-regular fa-calendar-check text-amber-600"></i>
+                <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                        <span class="font-bold text-slate-800 text-xs flex items-center space-x-1.5">
+                            <i class="fa-regular fa-calendar-check text-slate-500"></i>
                             <span>3. 상품별 소비기한 관리 & 선입선출(FIFO) 로트 분할</span>
                         </span>
-                        <span id="ep_gaemi_summary_bar" class="text-[11px] font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded"></span>
+                        <span id="ep_gaemi_summary_bar" class="text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded"></span>
                     </div>
 
-                    <div id="ep_lot_sync_note" class="hidden text-[11px] bg-indigo-50 text-indigo-900 border border-indigo-200 px-3 py-2 rounded-lg font-semibold"></div>
+                    <div id="ep_lot_sync_note" class="hidden text-[11px] bg-white text-slate-700 border border-slate-200 px-3 py-2 rounded-lg font-medium"></div>
 
                     <!-- 3-A. CSV 개미창고 로트별 소비기한 오버라이드 -->
                     <div class="space-y-1.5">
-                        <div class="text-[11px] font-bold text-slate-700">개미창고 CSV 로트별 소비기한 지정/수정 (새 CSV 업로드 후에도 유지됨)</div>
+                        <div class="text-[11px] font-semibold text-slate-700">개미창고 CSV 로트별 소비기한 지정/수정 (새 CSV 업로드 후에도 유지)</div>
                         <div id="ep_csv_lots_container" class="space-y-1.5">
                             <!-- JS 동적 렌더링 -->
                         </div>
                     </div>
 
                     <!-- 3-B. 수동 다중 소비기한 로트 분할 (FIFO 자동 차감) -->
-                    <div class="pt-2 border-t border-amber-200/70 space-y-2">
+                    <div class="pt-2 border-t border-slate-200 space-y-2">
                         <div class="flex flex-wrap items-center justify-between gap-2">
                             <div>
                                 <div class="text-[11px] font-bold text-slate-800">수동 소비기한 로트 분할 (FIFO 선입선출 자동 차감)</div>
-                                <div class="text-[10px] text-slate-500">예: 개미창고 CSV는 1줄(1,000개)인데 실제 소비기한이 2개로 나뉜 경우 직접 분할 등록하면, 이후 CSV 재업로드 시 감소 수량을 가장 빠른 기한부터 자동 차감합니다.</div>
+                                <div class="text-[10px] text-slate-500">개미창고 CSV가 1줄인데 실제 소비기한이 나뉜 경우 직접 분할 등록하면 재업로드 시 가장 빠른 기한부터 자동 차감합니다.</div>
                             </div>
-                            <button type="button" onclick="addManualLotRow()" class="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold transition shrink-0">
+                            <button type="button" onclick="addManualLotRow()" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-semibold transition shrink-0">
                                 + 로트 분할 추가
                             </button>
                         </div>
@@ -3553,11 +3426,11 @@ HTML_TEMPLATE = """
                     </div>
 
                     <!-- 3-C. 대표/기본 소비기한 -->
-                    <div class="pt-2 border-t border-amber-200/70 flex flex-wrap items-center gap-3">
+                    <div class="pt-2 border-t border-slate-200 flex flex-wrap items-center gap-3">
                         <div class="flex-1 min-w-[200px]">
-                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">기본 소비기한 (개미 CSV 기한이 미기재일 때 대체 사용)</label>
-                            <input type="date" id="ep_default_expiry_date" class="px-3 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-amber-500">
-                            <button type="button" onclick="document.getElementById('ep_default_expiry_date').value=''" class="ml-1.5 px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[10px] font-semibold">지우기</button>
+                            <label class="block font-semibold text-slate-700 mb-1 text-[11px]">기본 소비기한 (개미 CSV 기한이 미기재일 때 대체 사용)</label>
+                            <input type="date" id="ep_default_expiry_date" class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
+                            <button type="button" onclick="document.getElementById('ep_default_expiry_date').value=''" class="ml-1.5 px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded text-[10px] font-semibold">지우기</button>
                         </div>
                     </div>
                 </div>
@@ -3565,39 +3438,39 @@ HTML_TEMPLATE = """
                 <!-- 섹션 4: 창고 코드 & 채널별 코드 매핑 -->
                 <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
                     <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
-                        <span class="font-extrabold text-slate-800 text-xs flex items-center space-x-1.5">
-                            <i class="fa-solid fa-cubes text-slate-600"></i>
-                            <span>4. 채널별 코드 매핑 (쿠팡외 매출코드 · 개미 상품코드+옵션명 · 쿠팡 옵션 ID)</span>
+                        <span class="font-bold text-slate-800 text-xs flex items-center space-x-1.5">
+                            <i class="fa-solid fa-cubes text-slate-500"></i>
+                            <span>4. 채널별 코드 매핑 (매출코드 · 개미 옵션 · 쿠팡 옵션 ID)</span>
                         </span>
-                        <button type="button" id="ep_btn_open_mapping" onclick="openCodeMappingFromEditModal()" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition shadow-xs">
+                        <button type="button" id="ep_btn_open_mapping" onclick="openCodeMappingFromEditModal()" class="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg text-[10px] font-semibold transition">
                             🔗 3채널 코드 매핑 전용창 열기
                         </button>
                     </div>
                     <div>
-                        <label class="block font-bold text-slate-700 mb-1 text-[11px]">① 쿠팡외 매출정보 상품관리코드 (비워두면 판매자관리코드 자동 사용, 여러 개면 쉼표 구분)</label>
-                        <input type="text" id="ep_sales_codes" placeholder="기본값: 판매자관리코드와 동일 (추가/변경 시 쉼표로 구분 입력)" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg font-mono uppercase focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <label class="block font-semibold text-slate-700 mb-1 text-[11px]">① 쿠팡외 매출정보 상품관리코드 (비워두면 판매자관리코드 자동 사용, 쉼표 구분)</label>
+                        <input type="text" id="ep_sales_codes" placeholder="기본값: 판매자관리코드와 동일 (추가/변경 시 쉼표로 구분 입력)" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono uppercase focus:outline-none focus:ring-2 focus:ring-slate-400">
                     </div>
-                    <div id="ep_gaemi_mappings_box" class="hidden bg-amber-50 border border-amber-200 rounded-lg p-2.5 space-y-1.5">
+                    <div id="ep_gaemi_mappings_box" class="hidden bg-white border border-slate-200 rounded-lg p-2.5 space-y-1.5">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <span class="text-[11px] font-bold text-amber-900">② 개미창고 정확 매핑 (상품코드 + 옵션명) 사용 중</span>
-                            <button type="button" onclick="clearEpGaemiMappingsOverride()" class="px-2 py-0.5 bg-white hover:bg-rose-50 border border-amber-300 text-rose-700 rounded text-[10px] font-bold">구방식(코드+키워드)으로 전환</button>
+                            <span class="text-[11px] font-bold text-slate-800">② 개미창고 정확 매핑 (상품코드 + 옵션명) 사용 중</span>
+                            <button type="button" onclick="clearEpGaemiMappingsOverride()" class="px-2 py-0.5 bg-white hover:bg-rose-50 border border-slate-300 text-rose-700 rounded text-[10px] font-semibold">구방식(코드+키워드)으로 전환</button>
                         </div>
                         <div id="ep_gaemi_mappings_badges" class="flex flex-wrap gap-1"></div>
                     </div>
                     <div id="ep_gaemi_legacy_fields" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">② 개미창고 상품코드 (여러 개면 쉼표 구분)</label>
-                            <input type="text" id="ep_gaemi_codes" placeholder="예: PJ1489503" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <label class="block font-semibold text-slate-700 mb-1 text-[11px]">② 개미창고 상품코드 (여러 개면 쉼표 구분)</label>
+                            <input type="text" id="ep_gaemi_codes" placeholder="예: PJ1489503" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
                         </div>
                         <div>
-                            <label class="block font-bold text-slate-700 mb-1 text-[11px]">개미 옵션 필터 키워드 (선택 · 전용창에서 정확 매핑 권장)</label>
-                            <input type="text" id="ep_gaemi_filter" placeholder="특정 옵션명 포함 시만 매칭할 경우 입력" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <label class="block font-semibold text-slate-700 mb-1 text-[11px]">개미 옵션 필터 키워드 (선택)</label>
+                            <input type="text" id="ep_gaemi_filter" placeholder="특정 옵션명 포함 시만 매칭할 경우 입력" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-400">
                         </div>
                     </div>
                     <div class="space-y-1.5">
                         <div class="flex items-center justify-between">
-                            <span class="font-bold text-slate-700 text-[11px]">③ 쿠팡 재고건전성 옵션 ID & 번들(개입수) 연결</span>
-                            <button type="button" onclick="addCoupangOptionRow()" class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold">
+                            <span class="font-semibold text-slate-700 text-[11px]">③ 쿠팡 재고건전성 옵션 ID & 번들(개입수) 연결</span>
+                            <button type="button" onclick="addCoupangOptionRow()" class="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded text-[10px] font-semibold">
                                 + 쿠팡 옵션 추가
                             </button>
                         </div>
@@ -3608,13 +3481,13 @@ HTML_TEMPLATE = """
                 </div>
 
                 <!-- 섹션 5: (접이식) 임시 재고 수동 보정 -->
-                <details id="ep_temp_stocks_details" class="bg-rose-50/40 rounded-xl border border-rose-200 p-3">
-                    <summary class="cursor-pointer font-bold text-rose-900 text-xs select-none flex items-center space-x-1.5">
-                        <i class="fa-solid fa-wrench text-rose-600"></i>
+                <details id="ep_temp_stocks_details" class="bg-slate-50 rounded-xl border border-slate-200 p-3">
+                    <summary class="cursor-pointer font-semibold text-slate-700 text-xs select-none flex items-center space-x-1.5">
+                        <i class="fa-solid fa-wrench text-slate-500"></i>
                         <span>5. (선택) 긴급 실사 재고 수동 임시 보정 — 다음 CSV 업로드 전까지만 유지</span>
                     </summary>
                     <div class="mt-3 space-y-2">
-                        <p class="text-[11px] text-rose-700">재고 수량은 원칙적으로 CSV 업로드를 기준으로 갱신됩니다. 값을 비워두면 수량은 변경되지 않습니다.</p>
+                        <p class="text-[11px] text-slate-500">재고 수량은 원칙적으로 CSV 업로드를 기준으로 갱신됩니다. 값을 비워두면 수량은 변경되지 않습니다.</p>
                         <div id="ep_temp_stocks_container" class="space-y-2"></div>
                     </div>
                 </details>
@@ -3622,16 +3495,16 @@ HTML_TEMPLATE = """
 
             <div class="bg-slate-50 border-t border-slate-200 px-5 py-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <div class="flex items-center space-x-2">
-                    <button type="button" id="ep_btn_toggle_hide" onclick="toggleHideCurrentProduct()" class="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 transition">
+                    <button type="button" id="ep_btn_toggle_hide" onclick="toggleHideCurrentProduct()" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 transition">
                         대시보드 숨김
                     </button>
-                    <button type="button" id="ep_btn_hard_delete" onclick="deleteCurrentProductHard()" class="px-3 py-1.5 rounded-lg text-xs font-bold border border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-700 transition">
+                    <button type="button" id="ep_btn_hard_delete" onclick="deleteCurrentProductHard()" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 transition">
                         영구 삭제
                     </button>
                 </div>
                 <div class="flex items-center space-x-2">
-                    <button type="button" onclick="closeEditProductModal()" class="px-4 py-1.5 rounded-lg text-xs font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 transition">취소</button>
-                    <button type="button" onclick="saveProductModal()" class="px-5 py-1.5 rounded-lg text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white transition shadow-sm flex items-center space-x-1.5">
+                    <button type="button" onclick="closeEditProductModal()" class="px-4 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 transition">취소</button>
+                    <button type="button" onclick="saveProductModal()" class="px-5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition flex items-center space-x-1.5">
                         <i class="fa-solid fa-floppy-disk"></i>
                         <span>저장 및 영구 반영</span>
                     </button>
@@ -3641,26 +3514,26 @@ HTML_TEMPLATE = """
     </div>
 
     <!-- 3. 관리자 통합 관리 센터 모달 -->
-    <div id="adminCenterModal" class="hidden fixed inset-0 z-[100] bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
-        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-6xl flex flex-col max-h-[92vh] overflow-hidden">
-            <div class="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between shrink-0">
+    <div id="adminCenterModal" class="hidden fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-6xl flex flex-col max-h-[92vh] overflow-hidden">
+            <div class="bg-white border-b border-slate-200 px-5 py-3.5 flex items-center justify-between shrink-0">
                 <div class="flex items-center space-x-2">
-                    <i class="fa-solid fa-sliders text-amber-400"></i>
-                    <h3 class="font-bold text-sm sm:text-base">일쩜오도 관리자 통합 센터 (Admin Control Center)</h3>
+                    <i class="fa-solid fa-sliders text-slate-700"></i>
+                    <h3 class="font-bold text-sm sm:text-base text-slate-900">일쩜오도 관리자 통합 센터 (Admin Control Center)</h3>
                 </div>
-                <button onclick="closeAdminCenter()" class="text-slate-400 hover:text-white text-base">
+                <button onclick="closeAdminCenter()" class="text-slate-400 hover:text-slate-700 text-base">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
 
             <!-- 탭 네비게이션 -->
-            <div class="bg-slate-100 border-b border-slate-200 px-4 pt-2 flex flex-wrap gap-1.5 shrink-0 text-xs">
-                <button data-tab="bulk" onclick="switchAdminTab('bulk')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-white text-slate-900">📋 전체 품목 일괄 편집</button>
-                <button data-tab="mapping" onclick="switchAdminTab('mapping')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">🔗 상품 코드 매핑</button>
-                <button data-tab="expiry" onclick="switchAdminTab('expiry')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">⏳ 소비기한 일괄 입력</button>
-                <button data-tab="b2b" onclick="switchAdminTab('b2b')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">📦 B2B/세트(S코드) 매핑</button>
-                <button data-tab="settings" onclick="switchAdminTab('settings')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">⚙️ 전역 기준 & PIN 변경</button>
-                <button data-tab="drive" onclick="switchAdminTab('drive')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-bold border border-b-0 bg-slate-200/60 text-slate-600 hover:bg-white">☁️ Google Drive 연동 · 백업</button>
+            <div class="bg-slate-50 border-b border-slate-200 px-4 pt-2 flex flex-wrap gap-1.5 shrink-0 text-xs">
+                <button data-tab="bulk" onclick="switchAdminTab('bulk')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-semibold border border-b-0 bg-white text-slate-900">전체 품목 일괄 편집</button>
+                <button data-tab="mapping" onclick="switchAdminTab('mapping')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-semibold border border-b-0 bg-slate-100 text-slate-600 hover:bg-white">상품 코드 매핑</button>
+                <button data-tab="expiry" onclick="switchAdminTab('expiry')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-semibold border border-b-0 bg-slate-100 text-slate-600 hover:bg-white">소비기한 일괄 입력</button>
+                <button data-tab="b2b" onclick="switchAdminTab('b2b')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-semibold border border-b-0 bg-slate-100 text-slate-600 hover:bg-white">B2B/세트(S코드)</button>
+                <button data-tab="settings" onclick="switchAdminTab('settings')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-semibold border border-b-0 bg-slate-100 text-slate-600 hover:bg-white">전역 기준 & PIN</button>
+                <button data-tab="drive" onclick="switchAdminTab('drive')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-semibold border border-b-0 bg-slate-100 text-slate-600 hover:bg-white">Google Drive · 백업</button>
             </div>
 
             <!-- 탭 컨텐츠 -->
@@ -3670,13 +3543,13 @@ HTML_TEMPLATE = """
                 <div id="acTab_bulk" class="space-y-3">
                     <div class="flex flex-wrap items-center justify-between gap-2">
                         <div class="flex flex-wrap items-center gap-2">
-                            <input type="text" id="acBulkSearch" oninput="renderAdminBulkTable()" placeholder="상품명 또는 관리코드 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg w-56 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                            <label class="inline-flex items-center space-x-1.5 cursor-pointer bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200">
+                            <input type="text" id="acBulkSearch" oninput="renderAdminBulkTable()" placeholder="상품명 또는 관리코드 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg w-56 focus:outline-none focus:ring-1 focus:ring-slate-400">
+                            <label class="inline-flex items-center space-x-1.5 cursor-pointer bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200">
                                 <input type="checkbox" id="acBulkShowInactive" onchange="renderAdminBulkTable()" checked>
-                                <span class="font-semibold text-slate-700">숨김 품목 포함 보기</span>
+                                <span class="font-medium text-slate-700">숨김 품목 포함 보기</span>
                             </label>
                         </div>
-                        <button onclick="saveAdminBulkProducts()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold shadow-sm flex items-center space-x-1.5">
+                        <button onclick="saveAdminBulkProducts()" class="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold flex items-center space-x-1.5">
                             <i class="fa-solid fa-floppy-disk"></i>
                             <span>표 변경사항 일괄 저장</span>
                         </button>
@@ -3704,46 +3577,46 @@ HTML_TEMPLATE = """
 
                 <!-- TAB 2: 상품 3채널 코드 매핑 수동 지정 -->
                 <div id="acTab_mapping" class="hidden space-y-4">
-                    <div id="acMapToast" class="hidden px-3 py-2 rounded-lg text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900"></div>
-                    <div id="acMapCoupangLegacyAlert" class="hidden px-3 py-2 rounded-lg text-[11px] font-semibold bg-amber-50 border border-amber-300 text-amber-950"></div>
+                    <div id="acMapToast" class="hidden px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-900"></div>
+                    <div id="acMapCoupangLegacyAlert" class="hidden px-3 py-2 rounded-lg text-[11px] font-semibold bg-amber-50 border border-amber-200 text-amber-950"></div>
 
                     <!-- 상단: 업로드된 CSV 미매핑/전체 코드 탐색기 -->
-                    <details open id="acMapExplorerDetails" class="bg-sky-50/50 border border-sky-200 rounded-xl p-3 space-y-2.5">
-                        <summary class="cursor-pointer font-extrabold text-sky-950 text-xs select-none flex flex-wrap items-center justify-between gap-2">
+                    <details open id="acMapExplorerDetails" class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5">
+                        <summary class="cursor-pointer font-bold text-slate-900 text-xs select-none flex flex-wrap items-center justify-between gap-2">
                             <span class="flex items-center space-x-1.5">
-                                <i class="fa-solid fa-magnifying-glass-chart text-sky-600"></i>
+                                <i class="fa-solid fa-magnifying-glass-chart text-slate-500"></i>
                                 <span>업로드된 CSV 미매핑 / 전체 코드 탐색기 (클릭하여 접기/펼치기)</span>
                             </span>
-                            <span id="acMapCsvCounts" class="text-[11px] font-semibold text-sky-900"></span>
+                            <span id="acMapCsvCounts" class="text-[11px] font-medium text-slate-600"></span>
                         </summary>
-                        <div class="pt-2 border-t border-sky-200/70 space-y-2.5">
+                        <div class="pt-2 border-t border-slate-200 space-y-2.5">
                             <div class="flex flex-wrap items-center justify-between gap-2">
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <select id="acMapCsvChannel" onchange="renderAdminMappingExplorer()" class="px-2.5 py-1.5 border border-sky-300 rounded-lg bg-white font-bold text-sky-950 text-[11px]">
+                                    <select id="acMapCsvChannel" onchange="renderAdminMappingExplorer()" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-semibold text-slate-800 text-[11px]">
                                         <option value="all">전체 (3개 채널 CSV)</option>
                                         <option value="sales">① 쿠팡외 매출정보 (상품관리코드)</option>
                                         <option value="gaemi">② 개미창고 (상품코드 + 옵션명)</option>
                                         <option value="coupang">③ 쿠팡 재고건전성 (쿠팡 옵션 ID)</option>
                                         <option value="coupang_return">③-1 쿠팡 반품 재고만 (G열 '반품')</option>
                                     </select>
-                                    <label class="inline-flex items-center space-x-1.5 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-sky-200 text-[11px]">
+                                    <label class="inline-flex items-center space-x-1.5 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px]">
                                         <input type="checkbox" id="acMapCsvOnlyUnmapped" onchange="renderAdminMappingExplorer()" checked>
-                                        <span class="font-bold text-slate-700">미매핑 코드만 보기</span>
+                                        <span class="font-semibold text-slate-700">미매핑 코드만 보기</span>
                                     </label>
-                                    <select id="acMapCsvHiddenMode" onchange="renderAdminMappingExplorer()" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-slate-700 text-[11px]" title="숨김 처리된 미매핑 상품 표시 방식">
+                                    <select id="acMapCsvHiddenMode" onchange="renderAdminMappingExplorer()" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-semibold text-slate-700 text-[11px]" title="숨김 처리된 미매핑 상품 표시 방식">
                                         <option value="exclude">숨김 제외 (필요한 항목만)</option>
                                         <option value="only_hidden">숨김 항목만 보기</option>
                                         <option value="include">숨김 항목 포함 전체</option>
                                     </select>
-                                    <span id="acMapCsvHiddenSummary" class="hidden inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-700">
+                                    <span id="acMapCsvHiddenSummary" class="hidden inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[10px] font-semibold text-slate-700">
                                         <button type="button" onclick="toggleAcMapOnlyHiddenQuick()" class="hover:underline text-slate-700" title="클릭하여 숨김 항목만 보기/제외 전환">숨김 <span id="acMapCsvHiddenCountBadge" class="font-mono text-slate-950">0</span>건</button>
-                                        <button type="button" onclick="clearAllHiddenUnmappedCsvRows()" class="px-1.5 py-0.5 rounded bg-white hover:bg-indigo-50 border border-slate-300 text-indigo-700 font-bold text-[10px]" title="숨김 처리된 모든 미매핑 항목을 다시 표시합니다">전체복원</button>
+                                        <button type="button" onclick="clearAllHiddenUnmappedCsvRows()" class="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-[10px]" title="숨김 처리된 모든 미매핑 항목을 다시 표시합니다">전체복원</button>
                                     </span>
                                     <input type="text" id="acMapCsvSearch" oninput="renderAdminMappingExplorer()" placeholder="CSV 코드, 옵션명, 상품명 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white w-52 text-[11px]">
                                 </div>
-                                <span class="text-[10px] text-slate-500">* B2B S코드는 'B2B/세트' 탭 규칙으로 별도 판정됩니다.</span>
+                                <span class="text-[10px] text-slate-500">* B2B S코드는 'B2B/세트' 탭 규칙으로 별도 판정</span>
                             </div>
-                            <div class="max-h-60 overflow-x-auto overflow-y-auto bg-white border border-sky-200 rounded-lg">
+                            <div class="max-h-60 overflow-x-auto overflow-y-auto bg-white border border-slate-200 rounded-lg">
                                 <table class="w-full text-left border-collapse text-[11px]">
                                     <thead class="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
                                         <tr>
@@ -3762,20 +3635,20 @@ HTML_TEMPLATE = """
 
                     <!-- 하단: 마스터 단품별 3채널 코드 매핑 현황표 -->
                     <div class="space-y-2.5">
-                        <div class="flex flex-wrap items-center justify-between gap-2 bg-indigo-50/70 border border-indigo-200 rounded-xl p-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl p-3">
                             <div class="flex flex-wrap items-center gap-2">
                                 <input type="text" id="acMapMasterSearch" oninput="renderAdminMappingMasterTable()" placeholder="마스터 상품명 또는 코드 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white w-52">
-                                <select id="acMapMasterFilter" onchange="renderAdminMappingMasterTable()" class="px-2.5 py-1.5 border border-indigo-300 rounded-lg bg-white font-bold text-indigo-950">
+                                <select id="acMapMasterFilter" onchange="renderAdminMappingMasterTable()" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-semibold text-slate-800">
                                     <option value="all">전체 단품 보기</option>
                                     <option value="missing">매핑 누락/0건 확인 필요만</option>
                                     <option value="custom">수동 매핑 지정 완료만</option>
                                 </select>
-                                <label class="inline-flex items-center space-x-1.5 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-indigo-200">
+                                <label class="inline-flex items-center space-x-1.5 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-slate-200">
                                     <input type="checkbox" id="acMapMasterShowInactive" onchange="renderAdminMappingMasterTable()">
-                                    <span class="font-semibold text-slate-700">숨김 품목 포함</span>
+                                    <span class="font-medium text-slate-700">숨김 품목 포함</span>
                                 </label>
                             </div>
-                            <span class="text-[11px] text-indigo-900 font-semibold">상품명·소비기한 등 다른 정보는 그대로 두고 <strong>코드 매핑만 단독 수정</strong>할 수 있습니다.</span>
+                            <span class="text-[11px] text-slate-500">상품명·소비기한 유지 · <strong>코드 매핑만 단독 수정</strong></span>
                         </div>
                         <div class="overflow-x-auto border border-slate-200 rounded-xl">
                             <table class="w-full text-left border-collapse text-xs">
@@ -3796,22 +3669,22 @@ HTML_TEMPLATE = """
 
                 <!-- TAB 2: 소비기한 일괄 입력 -->
                 <div id="acTab_expiry" class="hidden space-y-3">
-                    <div class="flex flex-wrap items-center justify-between gap-2 bg-purple-50 border border-purple-200 rounded-xl p-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl p-3">
                         <div class="flex flex-wrap items-center gap-2">
-                            <select id="acExpiryFilterMode" onchange="renderAdminExpiryTable()" class="px-3 py-1.5 border border-purple-300 rounded-lg bg-white font-bold text-purple-950">
+                            <select id="acExpiryFilterMode" onchange="renderAdminExpiryTable()" class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-semibold text-slate-800">
                                 <option value="missing">소비기한 미등록 품목만</option>
                                 <option value="soon">소비기한 180일 이내 임박만</option>
                                 <option value="all">전체 단품 보기</option>
                             </select>
                             <input type="text" id="acExpirySearch" oninput="renderAdminExpiryTable()" placeholder="상품명 또는 코드 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white w-52">
                         </div>
-                        <button onclick="saveAdminExpiryBulk()" class="px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-extrabold shadow-sm flex items-center space-x-1.5">
+                        <button onclick="saveAdminExpiryBulk()" class="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold flex items-center space-x-1.5">
                             <i class="fa-regular fa-calendar-check"></i>
                             <span>소비기한 일괄 저장</span>
                         </button>
                     </div>
-                    <p class="text-[11px] text-slate-600">
-                        * 개미 CSV 로트가 여러 개인 경우 각 로트별 소비기한을 바로 수정하거나, 여러 개 로트로 쪼개야 할 때는 우측 <strong>[상세 분할]</strong> 버튼을 눌러 로트 분할 모달을 여세요.
+                    <p class="text-[11px] text-slate-500">
+                        * 로트별 소비기한을 수정하거나 로트를 쪼개야 할 때는 우측 <strong>[상세 분할]</strong> 버튼을 사용하세요.
                     </p>
                     <div class="overflow-x-auto border border-slate-200 rounded-xl">
                         <table class="w-full text-left border-collapse text-xs">
@@ -3831,13 +3704,13 @@ HTML_TEMPLATE = """
 
                 <!-- TAB 3: B2B/세트(S코드) 매핑 -->
                 <div id="acTab_b2b" class="hidden space-y-3">
-                    <div class="flex flex-wrap items-center justify-between gap-2 bg-indigo-50 border border-indigo-200 rounded-xl p-3">
-                        <div class="text-indigo-950 font-semibold">
-                            S코드(B2B/세트 상품)는 메인 보드에서 숨겨지고, 해당 S코드 주문이 들어오면 아래 지정한 <strong>단품 관리코드</strong> 출고량에 배수만큼 자동 합산됩니다.
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                        <div class="text-slate-700 font-medium">
+                            S코드(B2B/세트)는 메인 보드에서 숨겨지며, 주문 시 지정한 <strong>단품 관리코드</strong> 출고량에 배수만큼 자동 합산됩니다.
                         </div>
                         <div class="flex items-center space-x-2">
-                            <button onclick="addAdminB2bRow()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold">+ S코드 매핑 추가</button>
-                            <button onclick="saveAdminB2bMappings()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold">매핑 저장</button>
+                            <button onclick="addAdminB2bRow()" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-semibold">+ S코드 매핑 추가</button>
+                            <button onclick="saveAdminB2bMappings()" class="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">매핑 저장</button>
                         </div>
                     </div>
                     <div class="overflow-x-auto border border-slate-200 rounded-xl">
@@ -3860,43 +3733,43 @@ HTML_TEMPLATE = """
                 <div id="acTab_settings" class="hidden space-y-4">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                            <h4 class="font-extrabold text-slate-800 text-sm border-b border-slate-200 pb-2">전역 발주 / 소비기한 판정 기준 (일)</h4>
+                            <h4 class="font-bold text-slate-800 text-sm border-b border-slate-200 pb-2">전역 발주 / 소비기한 판정 기준 (일)</h4>
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label class="block font-bold text-slate-700 mb-1">수입 기본 리드타임(일)</label>
-                                    <input type="number" min="1" id="acSetImportLt" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold">
+                                    <label class="block font-semibold text-slate-700 mb-1">수입 기본 리드타임(일)</label>
+                                    <input type="number" min="1" id="acSetImportLt" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-mono font-bold">
                                 </div>
                                 <div>
-                                    <label class="block font-bold text-slate-700 mb-1">수입 안전재고 버퍼(일)</label>
-                                    <input type="number" min="0" id="acSetImportBuf" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold">
+                                    <label class="block font-semibold text-slate-700 mb-1">수입 안전재고 버퍼(일)</label>
+                                    <input type="number" min="0" id="acSetImportBuf" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-mono font-bold">
                                 </div>
                                 <div>
-                                    <label class="block font-bold text-slate-700 mb-1">사입 기본 리드타임(일)</label>
-                                    <input type="number" min="1" id="acSetPurchaseLt" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold">
+                                    <label class="block font-semibold text-slate-700 mb-1">사입 기본 리드타임(일)</label>
+                                    <input type="number" min="1" id="acSetPurchaseLt" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-mono font-bold">
                                 </div>
                                 <div>
-                                    <label class="block font-bold text-slate-700 mb-1">사입 안전재고 버퍼(일)</label>
-                                    <input type="number" min="0" id="acSetPurchaseBuf" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold">
+                                    <label class="block font-semibold text-slate-700 mb-1">사입 안전재고 버퍼(일)</label>
+                                    <input type="number" min="0" id="acSetPurchaseBuf" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-mono font-bold">
                                 </div>
                                 <div class="col-span-2">
-                                    <label class="block font-bold text-slate-700 mb-1">소비기한 임박 경고 기준(일)</label>
-                                    <input type="number" min="1" id="acSetExpWarn" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold">
+                                    <label class="block font-semibold text-slate-700 mb-1">소비기한 임박 경고 기준(일)</label>
+                                    <input type="number" min="1" id="acSetExpWarn" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-mono font-bold">
                                 </div>
                             </div>
                         </div>
 
-                        <div class="bg-amber-50/50 border border-amber-200 rounded-xl p-4 space-y-3">
-                            <h4 class="font-extrabold text-amber-950 text-sm border-b border-amber-200 pb-2">관리자 PIN 보안 설정</h4>
-                            <div id="acSetPinSourceInfo" class="text-[11px] bg-white border border-amber-200 rounded-lg p-2.5 text-slate-700"></div>
+                        <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                            <h4 class="font-bold text-slate-800 text-sm border-b border-slate-200 pb-2">관리자 PIN 보안 설정</h4>
+                            <div id="acSetPinSourceInfo" class="text-[11px] bg-white border border-slate-200 rounded-lg p-2.5 text-slate-700"></div>
                             <div>
-                                <label class="block font-bold text-slate-700 mb-1">새 관리자 PIN 변경 (선택, 4자리 이상)</label>
-                                <input type="password" id="acSetNewPin" inputmode="numeric" placeholder="변경 시에만 입력하세요" class="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono">
+                                <label class="block font-semibold text-slate-700 mb-1">새 관리자 PIN 변경 (선택, 4자리 이상)</label>
+                                <input type="password" id="acSetNewPin" inputmode="numeric" placeholder="변경 시에만 입력하세요" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-mono">
                                 <p class="text-[10px] text-slate-500 mt-1">* Render 환경변수 <code>ADMIN_PIN</code>이 설정되어 있으면 환경변수 PIN이 최우선 적용됩니다.</p>
                             </div>
                         </div>
                     </div>
                     <div class="flex justify-end">
-                        <button onclick="saveAdminSettings()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold shadow-sm">
+                        <button onclick="saveAdminSettings()" class="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">
                             전역 기준 & PIN 저장
                         </button>
                     </div>
@@ -3906,19 +3779,19 @@ HTML_TEMPLATE = """
                 <div id="acTab_drive" class="hidden space-y-4">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <!-- Google Drive 실시간 연동 제어 -->
-                        <div class="bg-emerald-50/50 border border-emerald-200 rounded-xl p-4 space-y-3">
-                            <div class="flex items-center justify-between border-b border-emerald-200 pb-2">
-                                <h4 class="font-extrabold text-emerald-950 text-sm flex items-center space-x-1.5">
-                                    <i class="fa-brands fa-google-drive text-emerald-600"></i>
+                        <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                            <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+                                <h4 class="font-bold text-slate-900 text-sm flex items-center space-x-1.5">
+                                    <i class="fa-brands fa-google-drive text-slate-600"></i>
                                     <span>Google Drive 영구 저장소 상태</span>
                                 </h4>
                             </div>
-                            <div id="acDriveStatusBox" class="text-xs bg-white border border-emerald-200 rounded-lg p-3 space-y-1"></div>
+                            <div id="acDriveStatusBox" class="text-xs bg-white border border-slate-200 rounded-lg p-3 space-y-1"></div>
                             <div class="flex flex-wrap gap-2">
-                                <button onclick="syncDriveNow()" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-sm">
+                                <button onclick="syncDriveNow()" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">
                                     ☁️ Drive에 즉시 저장
                                 </button>
-                                <button onclick="pullDriveNow()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-sm">
+                                <button onclick="pullDriveNow()" class="px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-semibold">
                                     ⬇️ Drive에서 즉시 복원
                                 </button>
                             </div>
@@ -3926,22 +3799,22 @@ HTML_TEMPLATE = """
 
                         <!-- 수동 JSON 백업/복원 & 테스트 샘플 로드 -->
                         <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                            <h4 class="font-extrabold text-slate-800 text-sm border-b border-slate-200 pb-2">로컬 JSON 백업 파일 & 시스템 도구</h4>
+                            <h4 class="font-bold text-slate-900 text-sm border-b border-slate-200 pb-2">로컬 JSON 백업 파일 & 시스템 도구</h4>
                             <div class="flex flex-wrap gap-2">
-                                <button onclick="downloadBackupJson()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-bold">
+                                <button onclick="downloadBackupJson()" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">
                                     📥 전체 데이터 JSON 다운로드
                                 </button>
-                                <button onclick="document.getElementById('acBackupFileInput').click()" class="px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-bold">
+                                <button onclick="document.getElementById('acBackupFileInput').click()" class="px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-semibold">
                                     📤 JSON 백업 파일 복원
                                 </button>
                                 <input type="file" id="acBackupFileInput" accept=".json" class="hidden" onchange="importBackupJsonFile(this)">
                             </div>
                             <div class="pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
                                 <div class="text-[11px] text-slate-500">
-                                    <strong class="text-indigo-700">[테스트용] 샘플 CSV 로드</strong>: 실데이터가 샘플 CSV로 덮어씌워집니다.
+                                    <strong class="text-slate-700">[테스트용] 샘플 CSV 로드</strong>: 실데이터가 샘플 CSV로 덮어씌워집니다.
                                 </div>
-                                <button onclick="loadSampleData()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shrink-0">
-                                    ✨ 샘플 데이터 즉시 로드
+                                <button onclick="loadSampleData()" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-semibold shrink-0">
+                                    샘플 데이터 로드
                                 </button>
                             </div>
                         </div>
@@ -3950,15 +3823,15 @@ HTML_TEMPLATE = """
                     <!-- Google Apps Script 설치 안내 & 원클릭 복사 -->
                     <div class="bg-slate-900 text-slate-100 rounded-xl p-4 space-y-2.5">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <h4 class="font-bold text-xs sm:text-sm text-emerald-300">Google Workspace 드라이브 24시간 영구 연동 스크립트 (1회 설치)</h4>
-                            <button onclick="copyGasScript()" class="px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-slate-950 rounded-lg text-xs font-extrabold">
+                            <h4 class="font-bold text-xs sm:text-sm text-white">Google Workspace 드라이브 연동 스크립트 (1회 설치)</h4>
+                            <button onclick="copyGasScript()" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-900 rounded-lg text-xs font-semibold">
                                 📋 Apps Script (.gs) 코드 복사
                             </button>
                         </div>
                         <ol class="list-decimal list-inside text-[11px] text-slate-300 space-y-1 leading-relaxed">
                             <li>Google Drive(<code>script.google.com</code>)에서 <strong>새 프로젝트</strong> 생성 후 아래 코드를 붙여넣고 <code>API_TOKEN</code>을 임의의 비밀번호로 바꿉니다.</li>
                             <li><strong>배포 → 새 배포 → 웹 앱</strong> 선택 (실행 주체: <strong>나(Me)</strong> / 액세스 권한: <strong>모든 사용자(Anyone)</strong>) 후 생성된 <strong>웹 앱 URL(/exec)</strong>을 복사합니다.</li>
-                            <li>Render 대시보드 → <strong>Environment</strong>에 <code>GOOGLE_APPS_SCRIPT_URL</code>, <code>GOOGLE_APPS_SCRIPT_TOKEN</code>, <code>ADMIN_PIN</code>을 저장하면 서버가 재시작되어도 관리자 수정사항이 영구 보존됩니다.</li>
+                            <li>Render 대시보드 → <strong>Environment</strong>에 <code>GOOGLE_APPS_SCRIPT_URL</code>, <code>GOOGLE_APPS_SCRIPT_TOKEN</code>, <code>ADMIN_PIN</code>을 저장합니다.</li>
                         </ol>
                         <pre id="acGasCodePreview" class="bg-slate-950 text-emerald-300 p-3 rounded-lg text-[10px] font-mono max-h-48 overflow-auto border border-slate-800"></pre>
                     </div>
@@ -3969,50 +3842,50 @@ HTML_TEMPLATE = """
     </div>
 
     <!-- 4. 상품별 3채널 코드 매핑 수동 지정 전용 모달 (z-[110]) -->
-    <div id="codeMappingModal" class="hidden fixed inset-0 z-[110] bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
-        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-5xl flex flex-col max-h-[92vh] overflow-hidden">
-            <div class="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between shrink-0">
+    <div id="codeMappingModal" class="hidden fixed inset-0 z-[110] bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-5xl flex flex-col max-h-[92vh] overflow-hidden">
+            <div class="bg-white border-b border-slate-200 px-5 py-3.5 flex items-center justify-between shrink-0">
                 <div class="flex items-center space-x-2">
-                    <i class="fa-solid fa-link text-sky-400"></i>
-                    <h3 id="cm_modal_title" class="font-bold text-sm sm:text-base">3채널 코드 매핑 수동 지정</h3>
+                    <i class="fa-solid fa-link text-slate-700"></i>
+                    <h3 id="cm_modal_title" class="font-bold text-sm sm:text-base text-slate-900">3채널 코드 매핑 수동 지정</h3>
                 </div>
-                <button onclick="closeCodeMappingModal()" class="text-slate-400 hover:text-white text-base">
+                <button onclick="closeCodeMappingModal()" class="text-slate-400 hover:text-slate-700 text-base">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
 
-            <div class="p-4 sm:p-5 overflow-y-auto flex-1 text-xs space-y-5">
-                <div class="bg-sky-50 border border-sky-200 rounded-xl px-3.5 py-2.5 text-[11px] text-sky-950 font-semibold flex flex-wrap items-center justify-between gap-2">
-                    <span>💡 상품명·소비기한·리드타임 등은 변경하지 않고 <strong>① 쿠팡외 매출(상품관리코드) · ② 개미창고(상품코드+옵션명) · ③ 쿠팡(쿠팡 옵션 ID)</strong> 코드 매핑만 저장합니다.</span>
-                    <span id="cm_target_badge" class="font-mono bg-white border border-sky-300 px-2 py-0.5 rounded text-sky-900"></span>
+            <div class="p-4 sm:p-5 overflow-y-auto flex-1 text-xs space-y-4">
+                <div class="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-[11px] text-slate-700 font-medium flex flex-wrap items-center justify-between gap-2">
+                    <span>상품명·소비기한·리드타임 유지 · <strong>① 쿠팡외 매출(상품관리코드) · ② 개미창고(상품코드+옵션명) · ③ 쿠팡(쿠팡 옵션 ID)</strong> 매핑만 저장합니다.</span>
+                    <span id="cm_target_badge" class="font-mono bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-800"></span>
                 </div>
 
                 <!-- ① 쿠팡외 매출정보: 상품관리코드 -->
-                <div class="bg-indigo-50/40 border border-indigo-200 rounded-xl p-4 space-y-3">
-                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-200 pb-2">
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
                         <div>
-                            <div class="font-extrabold text-indigo-950 text-xs flex items-center space-x-1.5">
-                                <span class="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px]">①</span>
+                            <div class="font-bold text-slate-900 text-xs flex items-center space-x-1.5">
+                                <span class="px-1.5 py-0.5 rounded bg-slate-900 text-white text-[10px]">①</span>
                                 <span>쿠팡외 매출정보 — 상품관리코드 매핑</span>
                             </div>
-                            <div id="cm_sales_status_text" class="text-[11px] text-indigo-800 mt-0.5"></div>
+                            <div id="cm_sales_status_text" class="text-[11px] text-slate-600 mt-0.5"></div>
                         </div>
                         <div class="flex items-center space-x-1.5">
-                            <button type="button" onclick="resetCmSalesDefault()" class="px-2.5 py-1 bg-white hover:bg-indigo-100 border border-indigo-300 text-indigo-900 rounded-lg text-[11px] font-bold">대표코드로 기본 복원</button>
-                            <button type="button" onclick="clearCmSalesAll()" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-bold">모두 비우기</button>
+                            <button type="button" onclick="resetCmSalesDefault()" class="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 rounded-lg text-[11px] font-semibold">대표코드 복원</button>
+                            <button type="button" onclick="clearCmSalesAll()" class="px-2.5 py-1 bg-white hover:bg-rose-50 border border-slate-300 text-rose-700 rounded-lg text-[11px] font-semibold">비우기</button>
                         </div>
                     </div>
 
                     <div id="cm_sales_chips" class="flex flex-wrap gap-1.5 min-h-[28px] items-center"></div>
 
                     <div class="flex flex-wrap items-center gap-2">
-                        <input type="text" id="cm_sales_add_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmSalesManual();}" placeholder="직접 입력 (예: 20DC02 또는 스마트스토어 상품관리코드, 쉼표 구분 가능)" class="flex-1 min-w-[220px] px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono uppercase focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                        <button type="button" onclick="addCmSalesManual()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold">+ 직접 추가</button>
+                        <input type="text" id="cm_sales_add_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmSalesManual();}" placeholder="직접 입력 (예: 20DC02, 쉼표 구분 가능)" class="flex-1 min-w-[220px] px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono uppercase focus:outline-none focus:ring-2 focus:ring-slate-400">
+                        <button type="button" onclick="addCmSalesManual()" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">+ 직접 추가</button>
                     </div>
 
-                    <div class="bg-white border border-indigo-200 rounded-lg p-2.5 space-y-2">
+                    <div class="bg-white border border-slate-200 rounded-lg p-2.5 space-y-2">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <span class="font-bold text-slate-700 text-[11px]">업로드된 쿠팡외 매출 CSV에서 선택</span>
+                            <span class="font-semibold text-slate-700 text-[11px]">업로드된 쿠팡외 매출 CSV에서 선택</span>
                             <input type="text" id="cm_sales_csv_search" oninput="renderCmSalesCsvList()" placeholder="매출 코드, 상품명, 쇼핑몰 검색..." class="px-2.5 py-1 border border-slate-300 rounded-lg text-[11px] w-56">
                         </div>
                         <div id="cm_sales_csv_list" class="max-h-44 overflow-y-auto divide-y divide-slate-100"></div>
@@ -4020,16 +3893,16 @@ HTML_TEMPLATE = """
                 </div>
 
                 <!-- ② 개미창고 상품목록: 상품코드 + 옵션명 -->
-                <div class="bg-amber-50/40 border border-amber-200 rounded-xl p-4 space-y-3">
-                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 pb-2">
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
                         <div>
-                            <div class="font-extrabold text-amber-950 text-xs flex items-center space-x-1.5">
-                                <span class="px-1.5 py-0.5 rounded bg-amber-600 text-white text-[10px]">②</span>
+                            <div class="font-bold text-slate-900 text-xs flex items-center space-x-1.5">
+                                <span class="px-1.5 py-0.5 rounded bg-slate-900 text-white text-[10px]">②</span>
                                 <span>개미창고 상품목록 — 상품코드 + 옵션명 매핑</span>
                             </div>
-                            <div class="text-[11px] text-amber-800 mt-0.5">같은 상품코드 안에 여러 옵션명이 섞여 있어도 <strong>상품코드 + 옵션명 정확 일치</strong>로 분리 매핑됩니다. (동일 옵션명의 다중 등록일 로트 자동 합산)</div>
+                            <div class="text-[11px] text-slate-600 mt-0.5">같은 상품코드에 여러 옵션명이 있어도 <strong>상품코드 + 옵션명</strong> 일치로 분리 매핑됩니다.</div>
                         </div>
-                        <button type="button" onclick="clearCmGaemiAll()" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-bold">매핑 모두 비우기</button>
+                        <button type="button" onclick="clearCmGaemiAll()" class="px-2.5 py-1 bg-white hover:bg-rose-50 border border-slate-300 text-rose-700 rounded-lg text-[11px] font-semibold">비우기</button>
                     </div>
 
                     <div id="cm_gaemi_legacy_banner" class="hidden rounded-lg border px-3 py-2 text-[11px] space-y-1.5"></div>
@@ -4037,14 +3910,14 @@ HTML_TEMPLATE = """
                     <div id="cm_gaemi_chips" class="flex flex-wrap gap-1.5 min-h-[28px] items-center"></div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-                        <input type="text" id="cm_gaemi_code_input" placeholder="개미 상품코드 (예: PJ1491144)" class="sm:col-span-4 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-amber-500">
-                        <input type="text" id="cm_gaemi_opt_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmGaemiManual();}" placeholder="옵션명 (예: 정제 1L · 빈칸 또는 * 입력 시 해당 코드 전체 옵션)" class="sm:col-span-6 px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500">
-                        <button type="button" onclick="addCmGaemiManual()" class="sm:col-span-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold">+ 직접 추가</button>
+                        <input type="text" id="cm_gaemi_code_input" placeholder="개미 상품코드 (예: PJ1491144)" class="sm:col-span-4 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
+                        <input type="text" id="cm_gaemi_opt_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmGaemiManual();}" placeholder="옵션명 (예: 정제 1L · 빈칸 또는 * 전체)" class="sm:col-span-6 px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-400">
+                        <button type="button" onclick="addCmGaemiManual()" class="sm:col-span-2 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">+ 직접 추가</button>
                     </div>
 
-                    <div class="bg-white border border-amber-200 rounded-lg p-2.5 space-y-2">
+                    <div class="bg-white border border-slate-200 rounded-lg p-2.5 space-y-2">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <span class="font-bold text-slate-700 text-[11px]">업로드된 개미창고 CSV (상품코드 + 옵션명 그룹)에서 선택</span>
+                            <span class="font-semibold text-slate-700 text-[11px]">업로드된 개미창고 CSV (상품코드 + 옵션명 그룹)에서 선택</span>
                             <input type="text" id="cm_gaemi_csv_search" oninput="renderCmGaemiCsvList()" placeholder="개미 상품코드, 옵션명, 상품명 검색..." class="px-2.5 py-1 border border-slate-300 rounded-lg text-[11px] w-56">
                         </div>
                         <div id="cm_gaemi_csv_list" class="max-h-52 overflow-y-auto divide-y divide-slate-100"></div>
@@ -4052,37 +3925,37 @@ HTML_TEMPLATE = """
                 </div>
 
                 <!-- ③ 쿠팡 재고건전성: 쿠팡 옵션 ID -->
-                <div class="bg-blue-50/40 border border-blue-200 rounded-xl p-4 space-y-3">
-                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200 pb-2">
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
                         <div>
-                            <div class="font-extrabold text-blue-950 text-xs flex items-center space-x-1.5">
-                                <span class="px-1.5 py-0.5 rounded bg-blue-600 text-white text-[10px]">③</span>
+                            <div class="font-bold text-slate-900 text-xs flex items-center space-x-1.5">
+                                <span class="px-1.5 py-0.5 rounded bg-slate-900 text-white text-[10px]">③</span>
                                 <span>쿠팡 재고건전성 — 쿠팡 옵션 ID & 번들(개입수) 매핑</span>
                             </div>
-                            <div class="text-[11px] text-blue-800 mt-0.5">연결된 각 옵션 ID의 세트 재고·7일 출고량에 개입(배수)을 곱해 단품 실물 재고로 환산합니다.</div>
+                            <div class="text-[11px] text-slate-600 mt-0.5">각 옵션 ID의 세트 재고·7일 출고량에 개입(배수)을 곱해 단품 실물 재고로 환산합니다.</div>
                         </div>
-                        <button type="button" onclick="clearCmCoupangAll()" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-bold">모두 비우기</button>
+                        <button type="button" onclick="clearCmCoupangAll()" class="px-2.5 py-1 bg-white hover:bg-rose-50 border border-slate-300 text-rose-700 rounded-lg text-[11px] font-semibold">비우기</button>
                     </div>
 
                     <div id="cm_coupang_rows" class="space-y-1.5"></div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-                        <input type="text" id="cm_coupang_id_input" placeholder="쿠팡 옵션 ID (예: 95844803290)" class="sm:col-span-3 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <input type="text" id="cm_coupang_id_input" placeholder="쿠팡 옵션 ID (예: 95844803290)" class="sm:col-span-3 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
                         <div class="sm:col-span-2 flex items-center space-x-1">
-                            <input type="number" min="1" id="cm_coupang_bundle_input" value="1" class="w-full px-2 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-right focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <input type="number" min="1" id="cm_coupang_bundle_input" value="1" class="w-full px-2 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-right focus:outline-none focus:ring-2 focus:ring-slate-400">
                             <span class="text-[11px] text-slate-600 shrink-0">개입</span>
                         </div>
-                        <input type="text" id="cm_coupang_name_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmCoupangManual();}" placeholder="옵션명 (예: 2개 500ml)" class="sm:col-span-3 px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <label class="sm:col-span-2 inline-flex items-center justify-center space-x-1 px-2 py-1.5 rounded-lg border border-rose-200 bg-rose-50/70 cursor-pointer text-[11px] font-bold text-rose-800" title="체크 시 정상 가용재고에서 제외되고 번들별 반품 재고로 관리됩니다">
+                        <input type="text" id="cm_coupang_name_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmCoupangManual();}" placeholder="옵션명 (예: 2개 500ml)" class="sm:col-span-3 px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-400">
+                        <label class="sm:col-span-2 inline-flex items-center justify-center space-x-1 px-2 py-1.5 rounded-lg border border-rose-200 bg-rose-50/70 cursor-pointer text-[11px] font-semibold text-rose-800" title="체크 시 정상 가용재고에서 제외되고 번들별 반품 재고로 관리됩니다">
                             <input type="checkbox" id="cm_coupang_return_input">
                             <span>🔄 반품</span>
                         </label>
-                        <button type="button" onclick="addCmCoupangManual()" class="sm:col-span-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold">+ 직접 추가</button>
+                        <button type="button" onclick="addCmCoupangManual()" class="sm:col-span-2 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">+ 직접 추가</button>
                     </div>
 
-                    <div class="bg-white border border-blue-200 rounded-lg p-2.5 space-y-2">
+                    <div class="bg-white border border-slate-200 rounded-lg p-2.5 space-y-2">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <span class="font-bold text-slate-700 text-[11px]">업로드된 쿠팡 재고건전성 CSV에서 선택 (개입수 자동 추정)</span>
+                            <span class="font-semibold text-slate-700 text-[11px]">업로드된 쿠팡 재고건전성 CSV에서 선택 (개입수 자동 추정)</span>
                             <input type="text" id="cm_coupang_csv_search" oninput="renderCmCoupangCsvList()" placeholder="옵션 ID, 옵션명, 쿠팡 상품명 검색..." class="px-2.5 py-1 border border-slate-300 rounded-lg text-[11px] w-56">
                         </div>
                         <div id="cm_coupang_csv_list" class="max-h-48 overflow-y-auto divide-y divide-slate-100"></div>
@@ -4091,8 +3964,8 @@ HTML_TEMPLATE = """
             </div>
 
             <div class="bg-slate-50 border-t border-slate-200 px-5 py-3 flex items-center justify-end space-x-2 shrink-0">
-                <button type="button" onclick="closeCodeMappingModal()" class="px-4 py-1.5 rounded-lg text-xs font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 transition">취소</button>
-                <button type="button" onclick="saveCodeMappingModal()" class="px-5 py-1.5 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-700 text-white transition shadow-sm flex items-center space-x-1.5">
+                <button type="button" onclick="closeCodeMappingModal()" class="px-4 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 transition">취소</button>
+                <button type="button" onclick="saveCodeMappingModal()" class="px-5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition flex items-center space-x-1.5">
                     <i class="fa-solid fa-link"></i>
                     <span>코드 매핑 저장 및 반영</span>
                 </button>
@@ -4109,14 +3982,14 @@ HTML_TEMPLATE = """
             'type':          { id: 'type',          label: '구분',             width: 58,  minWidth: 46,  thClass: 'text-center', tdClass: 'py-2 px-1.5 text-center' },
             'code':          { id: 'code',          label: '관리코드',          width: 96,  minWidth: 68,  thClass: 'text-center font-mono text-[11px]', tdClass: 'py-2 px-1.5 text-center font-mono font-semibold text-slate-600 text-[11px]' },
             'name':          { id: 'name',          label: '마스터 상품명',     width: 230, minWidth: 110, thClass: 'text-left', tdClass: 'py-2 px-2 text-left' },
-            'total_stock':   { id: 'total_stock',   label: '총 가용재고',       width: 96,  minWidth: 68,  thClass: 'text-right font-black bg-emerald-50/60 text-emerald-950 text-xs', tdClass: 'py-2 px-2 text-right font-mono font-black text-xs bg-emerald-50/30 text-emerald-950' },
-            'gaemi_stock':   { id: 'gaemi_stock',   label: '개미창고(3PL)',     width: 140, minWidth: 85,  thClass: 'text-right font-bold bg-amber-50/60 text-amber-900', tdClass: 'py-2 px-2 text-right bg-amber-50/20 text-amber-900' },
-            'gaemi_runway':  { id: 'gaemi_runway',  label: '개미 런웨이',       width: 84,  minWidth: 62,  thClass: 'text-center text-amber-800 text-[11px] font-bold', tdClass: 'py-2 px-1.5 text-center font-mono font-semibold text-amber-800 text-[11px]' },
-            'coupang_stock': { id: 'coupang_stock', label: '쿠팡창고(실물)',    width: 98,  minWidth: 68,  thClass: 'text-right font-bold bg-blue-50/60 text-blue-900', tdClass: 'py-2 px-2 text-right bg-blue-50/20 text-blue-900' },
-            'coupang_runway':{ id: 'coupang_runway',label: '쿠팡 런웨이',       width: 88,  minWidth: 62,  thClass: 'text-center text-blue-800 text-[11px] font-bold', tdClass: 'py-2 px-1.5 text-center font-mono font-semibold text-blue-800 text-[11px]' },
-            'total_sales':   { id: 'total_sales',   label: '출고량 (7일/30일)', width: 152, minWidth: 96,  thClass: 'text-right font-black bg-indigo-50/60 text-indigo-950', tdClass: 'py-2 px-2 text-right font-mono font-bold text-indigo-900 bg-indigo-50/20' },
-            'total_runway':  { id: 'total_runway',  label: '통합 런웨이(D-Day)',width: 112, minWidth: 78,  thClass: 'text-center font-black text-slate-800', tdClass: 'py-2 px-1.5 text-center' },
-            'action_cta':    { id: 'action_cta',    label: '추천 조치 (Action)',width: 150, minWidth: 96,  thClass: 'text-center font-bold', tdClass: 'py-2 px-1.5 text-center' }
+            'total_stock':   { id: 'total_stock',   label: '총 가용재고',       width: 96,  minWidth: 68,  thClass: 'text-right font-bold text-slate-800 text-xs', tdClass: 'py-2 px-2 text-right font-mono font-bold text-xs text-slate-900' },
+            'gaemi_stock':   { id: 'gaemi_stock',   label: '개미창고(3PL)',     width: 140, minWidth: 85,  thClass: 'text-right font-semibold text-slate-700', tdClass: 'py-2 px-2 text-right text-slate-800' },
+            'gaemi_runway':  { id: 'gaemi_runway',  label: '개미 런웨이',       width: 84,  minWidth: 62,  thClass: 'text-center text-slate-600 text-[11px] font-semibold', tdClass: 'py-2 px-1.5 text-center font-mono text-slate-700 text-[11px]' },
+            'coupang_stock': { id: 'coupang_stock', label: '쿠팡창고(실물)',    width: 98,  minWidth: 68,  thClass: 'text-right font-semibold text-slate-700', tdClass: 'py-2 px-2 text-right text-slate-800' },
+            'coupang_runway':{ id: 'coupang_runway',label: '쿠팡 런웨이',       width: 88,  minWidth: 62,  thClass: 'text-center text-slate-600 text-[11px] font-semibold', tdClass: 'py-2 px-1.5 text-center font-mono text-slate-700 text-[11px]' },
+            'total_sales':   { id: 'total_sales',   label: '출고량 (7일/30일)', width: 152, minWidth: 96,  thClass: 'text-right font-semibold text-slate-800', tdClass: 'py-2 px-2 text-right font-mono font-semibold text-slate-800' },
+            'total_runway':  { id: 'total_runway',  label: '통합 런웨이(D-Day)',width: 112, minWidth: 78,  thClass: 'text-center font-semibold text-slate-800', tdClass: 'py-2 px-1.5 text-center' },
+            'action_cta':    { id: 'action_cta',    label: '추천 조치 (Action)',width: 150, minWidth: 96,  thClass: 'text-center font-semibold text-slate-700', tdClass: 'py-2 px-1.5 text-center' }
         };
 
         const DEFAULT_COLUMN_ORDER = [
@@ -4222,14 +4095,14 @@ HTML_TEMPLATE = """
                 const curW = getColWidth(colId);
                 const minW = col.minWidth || 42;
                 return `
-                    <div class="bg-white rounded-lg border border-indigo-100 px-2.5 py-1.5 flex flex-col gap-1">
+                    <div class="bg-white rounded-lg border border-slate-200 px-2.5 py-1.5 flex flex-col gap-1">
                         <div class="flex items-center justify-between text-[10px]">
                             <span class="font-bold text-slate-700 truncate pr-2">${escapeHtml(col.label)}</span>
-                            <span id="colWidthVal_${colId}" class="font-mono font-bold text-indigo-700 shrink-0">${curW}px</span>
+                            <span id="colWidthVal_${colId}" class="font-mono font-bold text-slate-700 shrink-0">${curW}px</span>
                         </div>
                         <input id="colWidthSlider_${colId}" type="range" min="${minW}" max="480" step="2" value="${curW}"
                             oninput="onColWidthSliderInput('${colId}', this.value)"
-                            class="w-full h-1.5 accent-indigo-600 cursor-pointer">
+                            class="w-full h-1.5 accent-slate-800 cursor-pointer">
                     </div>
                 `;
             }).join('');
@@ -4301,18 +4174,35 @@ HTML_TEMPLATE = """
                    (m4 && !m4.classList.contains('hidden'));
         }
 
+        function closeAdminMenu() {
+            const dd = document.getElementById('adminMenuDropdown');
+            if (dd) dd.classList.add('hidden');
+        }
+
+        function toggleAdminMenu(e) {
+            if (e) e.stopPropagation();
+            const dd = document.getElementById('adminMenuDropdown');
+            if (!dd) return;
+            dd.classList.toggle('hidden');
+        }
+
+        document.addEventListener('click', (e) => {
+            const toolbar = document.getElementById('adminToolbarBtns');
+            if (toolbar && !toolbar.contains(e.target)) {
+                closeAdminMenu();
+            }
+        });
+
         function updateAdminUI() {
             const btnUnlock = document.getElementById('btnAdminUnlock');
             const toolbar = document.getElementById('adminToolbarBtns');
-            const banner = document.getElementById('adminModeBanner');
             if (isAdminMode) {
                 if (btnUnlock) btnUnlock.classList.add('hidden');
                 if (toolbar) toolbar.classList.remove('hidden');
-                if (banner) banner.classList.remove('hidden');
             } else {
+                closeAdminMenu();
                 if (btnUnlock) btnUnlock.classList.remove('hidden');
                 if (toolbar) toolbar.classList.add('hidden');
-                if (banner) banner.classList.add('hidden');
             }
             if (allMasterData.length > 0) renderMasterTable();
         }
@@ -4429,10 +4319,10 @@ HTML_TEMPLATE = """
             dropEl.addEventListener('click', () => fileEl.click());
 
             ['dragover', 'dragenter'].forEach(ev => {
-                dropEl.addEventListener(ev, (e) => { e.preventDefault(); dropEl.classList.add('border-emerald-500', 'bg-emerald-50/30'); });
+                dropEl.addEventListener(ev, (e) => { e.preventDefault(); dropEl.classList.add('border-slate-600', 'bg-slate-100'); });
             });
             ['dragleave', 'drop'].forEach(ev => {
-                dropEl.addEventListener(ev, (e) => { e.preventDefault(); dropEl.classList.remove('border-emerald-500', 'bg-emerald-50/30'); });
+                dropEl.addEventListener(ev, (e) => { e.preventDefault(); dropEl.classList.remove('border-slate-600', 'bg-slate-100'); });
             });
             dropEl.addEventListener('drop', (e) => {
                 if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0], source);
@@ -4584,7 +4474,7 @@ HTML_TEMPLATE = """
             const chev = document.getElementById(`chev_${prodId}`);
             if (chev) {
                 chev.classList.toggle('rotate-90', willOpen);
-                chev.classList.toggle('text-indigo-600', willOpen);
+                chev.classList.toggle('text-slate-900', willOpen);
                 chev.classList.toggle('text-slate-400', !willOpen);
             }
             if (willOpen) {
@@ -4652,17 +4542,10 @@ HTML_TEMPLATE = """
         }
 
         function setCategoryFilter(cat) {
-            activeCategory = cat;
-            document.querySelectorAll('#categoryPills .category-pill').forEach(btn => {
-                btn.classList.remove('bg-slate-800', 'text-white');
-                btn.classList.add('bg-slate-100', 'text-slate-600');
-            });
-            const btn = (typeof event !== 'undefined' && event && event.target)
-                ? event.target.closest('.category-pill')
-                : null;
-            if (btn) {
-                btn.classList.remove('bg-slate-100', 'text-slate-600');
-                btn.classList.add('bg-slate-800', 'text-white');
+            activeCategory = cat || 'all';
+            const sel = document.getElementById('categorySelect');
+            if (sel && sel.value !== activeCategory) {
+                sel.value = activeCategory;
             }
             applyFilters();
         }
@@ -4670,13 +4553,19 @@ HTML_TEMPLATE = """
         function setStatusFilter(stat) {
             activeStatus = stat;
             document.querySelectorAll('#statusFilterPills .status-pill').forEach(btn => {
-                btn.classList.remove('bg-slate-800', 'text-white');
+                btn.classList.remove('bg-slate-100/80', 'border-slate-900', 'ring-1', 'ring-slate-900');
+                btn.classList.add('bg-white', 'hover:bg-slate-50', 'border-slate-200');
             });
             const targetBtn = Array.from(document.querySelectorAll('#statusFilterPills .status-pill')).find(b => {
+                const ds = b.getAttribute('data-stat');
+                if (ds) return ds === stat;
                 const oc = b.getAttribute('onclick') || '';
                 return oc.includes(`'${stat}'`);
             });
-            if (targetBtn) targetBtn.classList.add('bg-slate-800', 'text-white');
+            if (targetBtn) {
+                targetBtn.classList.remove('bg-white', 'hover:bg-slate-50', 'border-slate-200');
+                targetBtn.classList.add('bg-slate-100/80', 'border-slate-900', 'ring-1', 'ring-slate-900');
+            }
             applyFilters();
         }
 
@@ -4865,25 +4754,35 @@ HTML_TEMPLATE = """
 
         function updateDriveSyncBadge(ds) {
             const badge = document.getElementById('driveSyncBadge');
+            const dot = document.getElementById('driveSyncDot');
             const text = document.getElementById('driveSyncBadgeText');
             if (!badge || !text) return;
             const info = ds || {};
             if (!info.configured) {
-                badge.className = "inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-slate-800 text-slate-300 border-slate-700";
-                text.innerText = "로컬 저장 모드 (Drive 미연동)";
+                badge.className = "inline-flex items-center gap-1 text-[11px] font-medium text-slate-500";
+                if (dot) dot.className = "w-1.5 h-1.5 rounded-full bg-slate-400";
+                text.innerText = "로컬 저장";
+                badge.title = "로컬 저장 모드 (Google Drive 미연동)";
             } else if (info.status === 'synced') {
-                badge.className = "inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-emerald-950/70 text-emerald-300 border-emerald-500/40";
-                text.innerText = "Google Drive 동기화 완료";
+                badge.className = "inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700";
+                if (dot) dot.className = "w-1.5 h-1.5 rounded-full bg-emerald-500";
+                text.innerText = "Drive 동기화";
+                badge.title = "Google Drive 동기화 완료";
             } else if (info.status === 'syncing') {
-                badge.className = "inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-amber-950/70 text-amber-300 border-amber-500/40";
-                text.innerText = "Google Drive 동기화 중...";
+                badge.className = "inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700";
+                if (dot) dot.className = "w-1.5 h-1.5 rounded-full bg-amber-500";
+                text.innerText = "Drive 동기화 중...";
+                badge.title = "Google Drive 동기화 진행 중";
             } else if (info.status === 'error') {
-                badge.className = "inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-rose-950/70 text-rose-300 border-rose-500/40";
-                text.innerText = "Drive 동기화 오류";
+                badge.className = "inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600";
+                if (dot) dot.className = "w-1.5 h-1.5 rounded-full bg-rose-500";
+                text.innerText = "Drive 오류";
                 badge.title = info.last_error || "Google Drive 연결 오류";
             } else {
-                badge.className = "inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-blue-950/70 text-blue-300 border-blue-500/40";
-                text.innerText = "Google Drive 연결됨";
+                badge.className = "inline-flex items-center gap-1 text-[11px] font-medium text-slate-700";
+                if (dot) dot.className = "w-1.5 h-1.5 rounded-full bg-sky-500";
+                text.innerText = "Drive 연결됨";
+                badge.title = "Google Drive 연결됨";
             }
         }
 
@@ -4900,15 +4799,23 @@ HTML_TEMPLATE = """
                     const expWarn = globalSettings.default_expiry_warn_days || 120;
                     const prepLim = impLt + impBuf;
                     const elSub = document.getElementById('headerSubtitleText');
-                    if (elSub) elSub.innerText = `수입 리드타임 ${impLt}일 발주 경보 · 창고 간 불균형 해소 · 소비기한 선입선출(FIFO) 관리`;
+                    if (elSub) elSub.innerText = `· 수입 ${impLt}일 기준`;
                     const elU = document.getElementById('kpiBadgeUrgent');
-                    if (elU) elU.innerText = `${impLt}일 미만/결품`;
+                    if (elU) elU.innerText = `${impLt}일↓`;
+                    const elUC = document.getElementById('kpiCardUrgent');
+                    if (elUC) elUC.title = `수입 리드타임 ${impLt}일 미만 · 결품 초읽기`;
                     const elP = document.getElementById('kpiBadgePrepare');
                     if (elP) elP.innerText = `${impLt}~${prepLim}일`;
+                    const elPC = document.getElementById('kpiCardPrepare');
+                    if (elPC) elPC.title = `안전재고 구간 (${impLt}~${prepLim}일 · 발주 기안 준비)`;
                     const elE = document.getElementById('kpiSubExpiry');
-                    if (elE) elE.innerText = `잔여 ${expWarn}일 미만 or 미소진 위험`;
+                    if (elE) elE.innerText = `${expWarn}일↓`;
+                    const elEC = document.getElementById('kpiCardExpiry');
+                    if (elEC) elEC.title = `잔여 ${expWarn}일 미만 or 미소진 위험`;
                     const elS = document.getElementById('kpiBadgeSafe');
-                    if (elS) elS.innerText = `${prepLim}일 이상`;
+                    if (elS) elS.innerText = `${prepLim}일↑`;
+                    const elSC = document.getElementById('kpiCardSafe');
+                    if (elSC) elSC.title = `${prepLim}일 이상 · 안정적 재고 유지 상태`;
                 }
                 updateDriveSyncBadge(data.drive_sync);
 
@@ -4920,7 +4827,7 @@ HTML_TEMPLATE = """
                         : '파일 업로드 대기 중';
                 }
 
-                // 2. 6대 Action KPI 통계 갱신
+                // 2. 통합 Action KPI 통계 갱신
                 document.getElementById('statUrgentOrders').innerText = (data.stats.urgent_order_count || 0);
                 document.getElementById('statOrderPrepare').innerText = (data.stats.order_prepare_count || 0);
                 document.getElementById('statCoupangTransfer').innerText = (data.stats.coupang_transfer_count || 0);
@@ -4931,22 +4838,26 @@ HTML_TEMPLATE = """
                 const inboundCnt = data.stats.in_transit_count || 0;
                 const elInboundWait = document.getElementById('statInboundWait');
                 if (elInboundWait) elInboundWait.innerText = inboundCnt;
-                const elInboundPill = document.getElementById('pillInboundCount');
-                if (elInboundPill) elInboundPill.innerText = inboundCnt;
 
-                // 3. 재고 요약 바 및 카테고리별 단품 수 갱신
+                // 3. 재고 요약 스트립 및 카테고리 드롭다운 단품 수 갱신
                 const totalMasters = data.stats.total_masters || allMasterData.length;
                 const importCount = allMasterData.filter(m => m.product_type === '수입').length;
                 const purchaseCount = allMasterData.filter(m => m.product_type === '사입').length;
 
                 document.getElementById('statTotalMasters').innerText = totalMasters + '개';
-                if (document.getElementById('statMasterSubtext')) {
+                const elMasterSub = document.getElementById('statMasterSubtext');
+                if (elMasterSub) {
                     const inactiveTxt = data.stats.inactive_count > 0 ? ` / 숨김 ${data.stats.inactive_count}` : '';
-                    document.getElementById('statMasterSubtext').innerText = `(수입 ${importCount} / 사입 ${purchaseCount}${inactiveTxt})`;
+                    elMasterSub.innerText = `(수입 ${importCount} / 사입 ${purchaseCount}${inactiveTxt})`;
                 }
-                if (document.getElementById('catCountAll')) document.getElementById('catCountAll').innerText = totalMasters;
-                if (document.getElementById('catCountImport')) document.getElementById('catCountImport').innerText = importCount;
-                if (document.getElementById('catCountPurchase')) document.getElementById('catCountPurchase').innerText = purchaseCount;
+                const elCatAll = document.getElementById('catCountAll');
+                if (elCatAll) elCatAll.innerText = totalMasters;
+                const elOptAll = document.getElementById('catOptionAll');
+                if (elOptAll) elOptAll.innerText = `전체 카테고리 (${totalMasters})`;
+                const elOptImp = document.getElementById('catOptionImport');
+                if (elOptImp) elOptImp.innerText = `수입 제품 (${importCount})`;
+                const elOptPur = document.getElementById('catOptionPurchase');
+                if (elOptPur) elOptPur.innerText = `사입 제품 (${purchaseCount})`;
 
                 document.getElementById('statGaemiStock').innerText = data.stats.total_gaemi_stock.toLocaleString() + '개';
                 document.getElementById('statCoupangStock').innerText = data.stats.total_coupang_stock.toLocaleString() + '개';
@@ -4963,20 +4874,22 @@ HTML_TEMPLATE = """
                 }
                 document.getElementById('statTotalStock').innerText = data.stats.total_physical_stock.toLocaleString() + '개';
                 document.getElementById('statTotalSales7d').innerText = `7일 ${data.stats.total_sales_7d.toLocaleString()}개`;
-                if (document.getElementById('statTotalSales30d')) {
-                    document.getElementById('statTotalSales30d').innerText = (data.stats.total_sales_30d || 0).toLocaleString();
+                const elSales30 = document.getElementById('statTotalSales30d');
+                if (elSales30) elSales30.innerText = (data.stats.total_sales_30d || 0).toLocaleString();
+                const elSalesSub = document.getElementById('statSalesSubtext');
+                if (elSalesSub) {
+                    const c7 = data.stats.total_coupang_7d || 0;
+                    const c30 = data.stats.total_coupang_30d || 0;
+                    const o7 = data.stats.total_other_7d || 0;
+                    const o30 = data.stats.total_other_30d || 0;
+                    elSalesSub.innerText = `(쿠팡 7일 ${c7}/${c30} + 타채널 7일 ${o7}/${o30})`;
                 }
-                const c7 = data.stats.total_coupang_7d || 0;
-                const c30 = data.stats.total_coupang_30d || 0;
-                const o7 = data.stats.total_other_7d || 0;
-                const o30 = data.stats.total_other_30d || 0;
-                document.getElementById('statSalesSubtext').innerText = `(쿠팡 7일 ${c7} / 30일 ${c30} + 타채널 7일 ${o7} / 30일 ${o30})`;
 
                 // 4. 하단 소스 상태 배지
                 const ut = data.stats.upload_timestamps || {};
                 if (data.stats.has_gaemi_data) {
                     document.getElementById('gaemiStatusText').innerText = "✅ 개미창고 소비기한 & 재고 로드됨" + (ut.gaemi ? ` (${ut.gaemi})` : "");
-                    document.getElementById('gaemiStatusText').className = "text-[10px] text-amber-700 font-semibold";
+                    document.getElementById('gaemiStatusText').className = "text-[10px] text-slate-700 font-semibold";
                 }
                 if (data.stats.has_coupang_data) {
                     const missGrade = data.stats.coupang_missing_grade_count || 0;
@@ -4988,18 +4901,17 @@ HTML_TEMPLATE = """
                     } else {
                         const retBadgeTxt = retOptCnt > 0 ? ` · 🔄 반품옵션 ${retOptCnt}건` : "";
                         document.getElementById('coupangStatusText').innerText = `✅ 쿠팡 윙 재고 로드됨${retBadgeTxt}${tsSuffix}`;
-                        document.getElementById('coupangStatusText').className = "text-[10px] text-blue-700 font-semibold";
+                        document.getElementById('coupangStatusText').className = "text-[10px] text-slate-700 font-semibold";
                     }
                 }
                 if (data.stats.has_sales_data) {
                     document.getElementById('salesStatusText').innerText = "✅ 쿠팡외 통합 매출 로드됨" + (ut.sales ? ` (${ut.sales})` : "");
-                    document.getElementById('salesStatusText').className = "text-[10px] text-indigo-700 font-semibold";
+                    document.getElementById('salesStatusText').className = "text-[10px] text-slate-700 font-semibold";
                 }
 
-                // 5. 터널 주소
+                // 5. 공개 연동 주소 저장
                 if (data.public_url) {
                     publicTunnelUrl = data.public_url;
-                    document.getElementById('publicUrlText').innerText = data.public_url;
                 }
 
                 // 6. 로그
@@ -5013,6 +4925,19 @@ HTML_TEMPLATE = """
             } catch (err) {
                 console.error("데이터 로드 실패:", err);
             }
+        }
+
+        function getStatusTheme(statusColor) {
+            const themes = {
+                red:    { dot: 'bg-rose-500',    pill: 'bg-rose-50 text-rose-700 border-rose-200 font-semibold',       actionPill: 'bg-rose-50 text-rose-700 border-rose-200 font-semibold' },
+                amber:  { dot: 'bg-amber-500',   pill: 'bg-amber-50 text-amber-800 border-amber-200 font-semibold',    actionPill: 'bg-amber-50 text-amber-800 border-amber-200 font-semibold' },
+                teal:   { dot: 'bg-teal-600',    pill: 'bg-teal-50 text-teal-800 border-teal-200 font-semibold',       actionPill: 'bg-teal-50 text-teal-800 border-teal-200 font-semibold' },
+                blue:   { dot: 'bg-sky-500',     pill: 'bg-sky-50 text-sky-800 border-sky-200 font-semibold',          actionPill: 'bg-sky-50 text-sky-800 border-sky-200 font-semibold' },
+                purple: { dot: 'bg-violet-500',  pill: 'bg-violet-50 text-violet-800 border-violet-200 font-semibold', actionPill: 'bg-violet-50 text-violet-800 border-violet-200 font-semibold' },
+                orange: { dot: 'bg-orange-500',  pill: 'bg-orange-50 text-orange-800 border-orange-200 font-semibold', actionPill: 'bg-orange-50 text-orange-800 border-orange-200 font-semibold' },
+                green:  { dot: 'bg-emerald-500', pill: 'bg-slate-50 text-slate-700 border-slate-200 font-medium',      actionPill: 'bg-slate-50 text-slate-600 border-slate-200 font-medium' }
+            };
+            return themes[statusColor] || { dot: 'bg-slate-400', pill: 'bg-slate-50 text-slate-700 border-slate-200 font-medium', actionPill: 'bg-slate-50 text-slate-600 border-slate-200 font-medium' };
         }
 
         function renderMasterTable() {
@@ -5056,7 +4981,9 @@ HTML_TEMPLATE = """
                 return true;
             });
 
-            document.getElementById('filteredCountText').innerText = `| ${filtered.length}개 단품 표시 (총 ${allMasterData.length}개)`;
+            document.getElementById('filteredCountText').innerText = filtered.length === allMasterData.length
+                ? `총 ${filtered.length}개`
+                : `${filtered.length}개 표시 / ${allMasterData.length}`;
 
             if (filtered.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="${currentColumnOrder.length}" class="py-12 text-center text-slate-400">선택하신 조건에 일치하는 품목이 없습니다.</td></tr>`;
@@ -5091,21 +5018,15 @@ HTML_TEMPLATE = """
                 sumTotalSales30d += (m.total_sales_30d || 0);
                 sumDailySales += m.daily_sales;
 
-                let badgeClass = "bg-slate-100 text-slate-700";
-                if (m.status_color === 'red') badgeClass = "bg-rose-100 text-rose-800 font-bold border border-rose-300 animate-pulse";
-                else if (m.status_color === 'blue') badgeClass = "bg-blue-100 text-blue-900 font-bold border border-blue-300";
-                else if (m.status_color === 'teal') badgeClass = "bg-teal-100 text-teal-900 font-bold border border-teal-300";
-                else if (m.status_color === 'amber') badgeClass = "bg-amber-100 text-amber-900 font-bold border border-amber-300";
-                else if (m.status_color === 'purple') badgeClass = "bg-purple-100 text-purple-900 font-bold border border-purple-300";
-                else if (m.status_color === 'orange') badgeClass = "bg-orange-100 text-orange-950 font-bold border border-orange-300";
-                else if (m.status_color === 'green') badgeClass = "bg-emerald-100 text-emerald-800 font-semibold border border-emerald-200";
+                const theme = getStatusTheme(m.status_color);
+                const badgeClass = theme.pill;
 
                 let ptypeBadge = m.product_type === '수입'
-                    ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-200 whitespace-nowrap">수입</span>'
-                    : '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap">사입</span>';
+                    ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200/80 text-slate-800 border border-slate-300 whitespace-nowrap">수입</span>'
+                    : '<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-50 text-slate-600 border border-slate-200 whitespace-nowrap">사입</span>';
 
                 let b2bBadge = (m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0)
-                    ? `<span class="px-1 py-0.2 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap" title="B2B/세트 출고 연동: ${escapeHtml(m.b2b_linked_codes.map(b => b.s_code + ' (x' + b.multiplier + ')').join(', '))}">B2B연동</span>`
+                    ? `<span class="px-1 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap" title="B2B/세트 출고 연동: ${escapeHtml(m.b2b_linked_codes.map(b => b.s_code + ' (x' + b.multiplier + ')').join(', '))}">B2B연동</span>`
                     : '';
 
                 // 개미 소비기한 미니 태그
@@ -5113,11 +5034,11 @@ HTML_TEMPLATE = """
                 if (m.nearest_expiry_date || m.has_unassigned_stock) {
                     let tags = "";
                     if (m.nearest_expiry_date) {
-                        let dDayColor = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                        let dDayColor = "bg-slate-50 text-slate-600 border-slate-200";
                         if (m.nearest_days_left <= 90 || m.expiry_risk) {
-                            dDayColor = "bg-rose-100 text-rose-800 border-rose-300 font-bold";
+                            dDayColor = "bg-rose-50 text-rose-700 border-rose-200 font-semibold";
                         } else if (m.nearest_days_left <= 180) {
-                            dDayColor = "bg-amber-100 text-amber-800 border-amber-300 font-semibold";
+                            dDayColor = "bg-amber-50 text-amber-800 border-amber-200 font-semibold";
                         }
                         const expShort = m.nearest_expiry_date.length >= 10 ? m.nearest_expiry_date.slice(2) : m.nearest_expiry_date;
                         const adminMark = m.has_admin_expiry ? '✏️ ' : '';
@@ -5131,21 +5052,21 @@ HTML_TEMPLATE = """
                         tags += `<span class="text-[9px] bg-slate-100 text-slate-600 border border-slate-200 px-1 rounded font-mono whitespace-nowrap" title="${m.lot_count}개 로트/기한 혼합">${m.lot_count}개 기한</span>`;
                     }
                     if (m.has_unassigned_stock) {
-                        tags += `<span class="text-[9px] bg-rose-100 text-rose-800 border border-rose-300 px-1 rounded font-bold whitespace-nowrap" title="신규 입고분의 소비기한 지정 필요">⚠️ 기한미지정</span>`;
+                        tags += `<span class="text-[9px] bg-rose-50 text-rose-700 border border-rose-200 px-1 rounded font-semibold whitespace-nowrap" title="신규 입고분의 소비기한 지정 필요">⚠️ 기한미지정</span>`;
                     }
                     expBadgeHtml = `<div class="mt-0.5 flex flex-wrap justify-end gap-1">${tags}</div>`;
                 }
 
                 // 개미 & 쿠팡 런웨이 경고 / 소진무 알람
                 let gaemiRunwayHtml = m.gaemi_runway_str === '소진무'
-                    ? `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-50 text-orange-800 border border-orange-200 font-bold text-[10px] whitespace-nowrap" title="개미창고 재고가 있으나 출고량 0건">소진무</span>`
+                    ? `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-50 text-orange-800 border border-orange-200 font-semibold text-[10px] whitespace-nowrap" title="개미창고 재고가 있으나 출고량 0건">소진무</span>`
                     : escapeHtml(m.gaemi_runway_str);
 
                 let coupangRunwayHtml = escapeHtml(m.coupang_runway_str);
                 if (m.coupang_runway <= 7 && m.coupang_physical_total > 0) {
-                    coupangRunwayHtml = `<span class="text-rose-600 font-bold animate-pulse whitespace-nowrap">🚨 ${m.coupang_runway_str}</span>`;
+                    coupangRunwayHtml = `<span class="text-rose-600 font-bold whitespace-nowrap">🚨 ${m.coupang_runway_str}</span>`;
                 } else if (m.coupang_runway_str === '소진무') {
-                    coupangRunwayHtml = `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-100 text-orange-900 border border-orange-300 font-bold text-[10px] whitespace-nowrap" title="쿠팡 창고 실물이 있으나 최근 7/30일 쿠팡 판매가 0건입니다">🔕 소진무</span>`;
+                    coupangRunwayHtml = `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-50 text-orange-800 border border-orange-200 font-semibold text-[10px] whitespace-nowrap" title="쿠팡 창고 실물이 있으나 최근 7/30일 쿠팡 판매가 0건입니다">🔕 소진무</span>`;
                 }
 
                 // 통합 런웨이 프로그레스 바 시각화 (품목별/전역 기준 + 입고 예정 반영)
@@ -5155,7 +5076,7 @@ HTML_TEMPLATE = """
                 const isOutOfStockTotal = (m.total_runway_str === '재고없음');
                 const hasInboundCover = (m.status_color === 'teal' && m.in_transit_qty > 0);
                 let runwayBarColor = "bg-emerald-500";
-                if (hasInboundCover) runwayBarColor = "bg-teal-500";
+                if (hasInboundCover) runwayBarColor = "bg-teal-600";
                 else if (isOutOfStockTotal || (!isStagnantTotal && m.total_runway < effLt)) runwayBarColor = "bg-rose-500";
                 else if (isStagnantTotal) runwayBarColor = "bg-orange-500";
                 else if (m.total_runway <= effPrep) runwayBarColor = "bg-amber-500";
@@ -5164,14 +5085,14 @@ HTML_TEMPLATE = """
                 const barPercent = (isOutOfStockTotal && !hasInboundCover) ? 8 : ((isStagnantTotal || (hasInboundCover && m.daily_sales <= 0)) ? 100 : Math.min(100, Math.max(8, (barMetric / barBase) * 100)));
 
                 const inTransitHtml = (m.in_transit_qty && m.in_transit_qty > 0)
-                    ? `<div class="text-[9px] font-bold text-blue-700 mt-0.5 whitespace-nowrap" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 +${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
+                    ? `<div class="text-[9px] font-semibold text-teal-700 mt-0.5 whitespace-nowrap" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 +${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
                     : '';
 
                 const isSubExpanded = expandAllOptions || expandedRowIds.has(m.id);
                 const activeGaemiLots = (m.gaemi_lots || []).filter(lot => (lot.stock || 0) > 0);
 
                 html += `
-                    <tr draggable="true" data-row-idx="${allMasterData.indexOf(m)}" class="hover:bg-slate-50 transition cursor-pointer select-none" onclick="toggleSingleOption('${escapeHtml(m.id)}')">
+                    <tr draggable="true" data-row-idx="${allMasterData.indexOf(m)}" class="hover:bg-slate-50/80 transition cursor-pointer select-none" onclick="toggleSingleOption('${escapeHtml(m.id)}')">
                 `;
 
                 currentColumnOrder.forEach(colId => {
@@ -5179,19 +5100,19 @@ HTML_TEMPLATE = """
                     if (colId === 'no') {
                         html += `<td class="${col.tdClass} overflow-hidden"><i class="fa-solid fa-grip-vertical text-slate-300 mr-1 text-[9px]"></i>${idx + 1}</td>`;
                     } else if (colId === 'status') {
-                        html += `<td class="${col.tdClass} overflow-hidden"><span class="inline-block max-w-full truncate align-middle px-2 py-0.5 rounded-full text-[10px] break-keep ${badgeClass}" title="${escapeHtml(m.status)}">${escapeHtml(m.status)}</span></td>`;
+                        html += `<td class="${col.tdClass} overflow-hidden"><span class="inline-block max-w-full truncate align-middle px-2 py-0.5 rounded-full text-[10px] border break-keep ${badgeClass}" title="${escapeHtml(m.status)}">${escapeHtml(m.status)}</span></td>`;
                     } else if (colId === 'type') {
                         html += `<td class="${col.tdClass} overflow-hidden">${ptypeBadge}</td>`;
                     } else if (colId === 'code') {
                         html += `<td class="${col.tdClass} overflow-hidden"><div class="flex flex-wrap items-center justify-center gap-0.5 min-w-0"><span class="truncate">${escapeHtml(m.seller_code)}</span>${b2bBadge}</div></td>`;
                     } else if (colId === 'name') {
                         const customLtBadge = (m.lead_time_days !== null && m.lead_time_days !== undefined)
-                            ? `<span class="text-[9px] bg-blue-50 text-blue-700 border border-blue-200 px-1 rounded font-mono shrink-0" title="품목 개별 리드타임">LT ${m.lead_time_days}일</span>`
+                            ? `<span class="text-[9px] bg-slate-100 text-slate-700 border border-slate-200 px-1 rounded font-mono shrink-0" title="품목 개별 리드타임">LT ${m.lead_time_days}일</span>`
                             : '';
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
-                                <div class="font-bold text-slate-800 flex items-center gap-1 min-w-0">
-                                    <i id="chev_${escapeHtml(m.id)}" class="fa-solid fa-angle-right text-[10px] shrink-0 transition-transform ${isSubExpanded ? 'rotate-90 text-indigo-600' : 'text-slate-400'}"></i>
+                                <div class="font-bold text-slate-900 flex items-center gap-1 min-w-0">
+                                    <i id="chev_${escapeHtml(m.id)}" class="fa-solid fa-angle-right text-[10px] shrink-0 transition-transform ${isSubExpanded ? 'rotate-90 text-slate-900' : 'text-slate-400'}"></i>
                                     <span class="truncate" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</span>
                                     ${customLtBadge}
                                 </div>
@@ -5220,7 +5141,7 @@ HTML_TEMPLATE = """
                         const retPhys = m.coupang_return_physical_total || 0;
                         const retPkg = m.coupang_return_package_total || 0;
                         const retBadgeHtml = retPhys > 0
-                            ? `<div class="mt-0.5"><span class="inline-block text-[9px] px-1 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold whitespace-nowrap" title="쿠팡 반품 재고 (정상 가용재고 합산 제외 · ${retPkg}세트)">🔄 반품 ${retPhys.toLocaleString()}</span></div>`
+                            ? `<div class="mt-0.5"><span class="inline-block text-[9px] px-1 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 font-semibold whitespace-nowrap" title="쿠팡 반품 재고 (정상 가용재고 합산 제외 · ${retPkg}세트)">🔄 반품 ${retPhys.toLocaleString()}</span></div>`
                             : '';
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
@@ -5236,21 +5157,21 @@ HTML_TEMPLATE = """
                         const s30 = (m.total_sales_30d || 0).toLocaleString();
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
-                                <div class="font-bold font-mono text-indigo-950 truncate">${s7}개 <span class="text-slate-400 font-normal text-[10px]">/ 30일 ${s30}개</span></div>
-                                <div class="text-[9px] text-slate-500 font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
+                                <div class="font-bold font-mono text-slate-900 truncate">${s7}개 <span class="text-slate-400 font-normal text-[10px]">/ 30일 ${s30}개</span></div>
+                                <div class="text-[9px] text-slate-400 font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
                             </td>
                         `;
                     } else if (colId === 'total_runway') {
                         const totalRunwayBadge = isStagnantTotal
-                            ? `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-100 text-orange-950 border border-orange-300 font-bold font-mono text-[10px] whitespace-nowrap" title="재고 보유 중 최근 7/30일 출고량 0">🔕 소진무</span>`
-                            : `<div class="font-bold font-mono text-[11px] ${isOutOfStockTotal && !hasInboundCover ? 'text-rose-700' : 'text-slate-800'} truncate">${escapeHtml(m.total_runway_str)}</div>`;
+                            ? `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-50 text-orange-800 border border-orange-200 font-semibold font-mono text-[10px] whitespace-nowrap" title="재고 보유 중 최근 7/30일 출고량 0">🔕 소진무</span>`
+                            : `<div class="font-bold font-mono text-[11px] ${isOutOfStockTotal && !hasInboundCover ? 'text-rose-600' : 'text-slate-800'} truncate">${escapeHtml(m.total_runway_str)}</div>`;
                         const inboundRunwaySub = (m.in_transit_qty > 0 && m.daily_sales > 0 && m.effective_runway)
-                            ? `<div class="text-[9px] text-teal-700 font-bold mt-0.5 truncate" title="입고 예정(+${m.in_transit_qty.toLocaleString()}개) 합산 기준 런웨이">입고포함 ${Math.floor(m.effective_runway)}일</div>`
+                            ? `<div class="text-[9px] text-teal-700 font-semibold mt-0.5 truncate" title="입고 예정(+${m.in_transit_qty.toLocaleString()}개) 합산 기준 런웨이">입고포함 ${Math.floor(m.effective_runway)}일</div>`
                             : '';
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
                                 ${totalRunwayBadge}
-                                <div class="w-full max-w-[68px] h-1.5 bg-slate-200 rounded-full mx-auto mt-1 overflow-hidden">
+                                <div class="w-full max-w-[68px] h-1 bg-slate-200 rounded-full mx-auto mt-1 overflow-hidden">
                                     <div class="${runwayBarColor} h-full rounded-full" style="width: ${barPercent}%"></div>
                                 </div>
                                 ${inboundRunwaySub}
@@ -5258,17 +5179,17 @@ HTML_TEMPLATE = """
                         `;
                     } else if (colId === 'action_cta') {
                         const mapBtn = isAdminMode
-                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="px-2 py-1 rounded-md text-[10px] font-extrabold bg-indigo-100 hover:bg-indigo-200 text-indigo-900 border border-indigo-300 shadow-xs transition whitespace-nowrap" title="3채널 코드 매핑 수동 지정">🔗 매핑</button>`
+                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition whitespace-nowrap" title="3채널 코드 매핑 수동 지정">🔗</button>`
                             : '';
                         const editBtn = isAdminMode
-                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="px-2 py-1 rounded-md text-[10px] font-extrabold bg-amber-400 hover:bg-amber-500 text-slate-950 shadow-xs transition whitespace-nowrap" title="관리자 수정">✏️ 수정</button>`
+                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition whitespace-nowrap" title="관리자 수정">✏️</button>`
                             : '';
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
                                 <div class="inline-flex items-center justify-center flex-wrap gap-1 max-w-full">
-                                    <button type="button" class="px-2.5 py-1 rounded-md text-[10px] font-bold transition shadow-xs whitespace-nowrap break-keep ${m.action_cta_class}">
+                                    <span class="px-2 py-0.5 rounded-md border text-[10px] whitespace-nowrap break-keep ${theme.actionPill}">
                                         ${escapeHtml(m.action_cta)}
-                                    </button>
+                                    </span>
                                     ${mapBtn}
                                     ${editBtn}
                                 </div>
@@ -5281,33 +5202,33 @@ HTML_TEMPLATE = """
 
                 // 세부 확장 행 (컴팩트 sticky 폭 · 모바일/PC 한눈 보기 UI)
                 html += `
-                    <tr id="subrow_${escapeHtml(m.id)}" class="subrow-tr ${isSubExpanded ? '' : 'hidden'} bg-slate-100/70 border-b border-slate-200">
+                    <tr id="subrow_${escapeHtml(m.id)}" class="subrow-tr ${isSubExpanded ? '' : 'hidden'} bg-slate-50/90 border-b border-slate-200">
                         <td colspan="${currentColumnOrder.length}" class="subrow-cell p-0 align-top">
                             <div class="subrow-sticky-shell px-2 sm:px-3.5 py-2.5" style="width: min(var(--subrow-view-w, 100%), 680px); max-width: 100%;">
-                                <div class="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden divide-y divide-slate-100">
+                                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden divide-y divide-slate-100">
 
                                     <!-- 0. 한눈에 보는 상단 품목/수량 요약 Strip -->
-                                    <div class="p-2.5 sm:p-3 bg-slate-50/90 space-y-2">
+                                    <div class="p-2.5 sm:p-3 bg-slate-50/80 space-y-2">
                                         <div class="flex items-start justify-between gap-2">
                                             <div class="min-w-0 flex-1">
                                                 <div class="flex flex-wrap items-center gap-1.5">
                                                     ${ptypeBadge}
-                                                    <span class="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">${escapeHtml(m.seller_code)}</span>
-                                                    <span class="px-2 py-0.5 rounded-full text-[10px] break-keep ${badgeClass}">${escapeHtml(m.status)}</span>
+                                                    <span class="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">${escapeHtml(m.seller_code)}</span>
+                                                    <span class="px-2 py-0.5 rounded-full text-[10px] border break-keep ${badgeClass}">${escapeHtml(m.status)}</span>
                                                 </div>
-                                                <div class="font-extrabold text-slate-900 text-xs sm:text-sm mt-1 break-words">${escapeHtml(m.name)}</div>
+                                                <div class="font-bold text-slate-900 text-xs sm:text-sm mt-1 break-words">${escapeHtml(m.name)}</div>
                                             </div>
-                                            <button type="button" onclick="event.stopPropagation(); toggleSingleOption('${escapeHtml(m.id)}')" class="shrink-0 px-2 py-1 rounded-lg bg-white hover:bg-slate-200 border border-slate-200 text-slate-600 text-[10px] font-bold flex items-center gap-1 shadow-xs">
+                                            <button type="button" onclick="event.stopPropagation(); toggleSingleOption('${escapeHtml(m.id)}')" class="shrink-0 px-2 py-1 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 text-[10px] font-semibold flex items-center gap-1">
                                                 <i class="fa-solid fa-xmark"></i>
                                                 <span>접기</span>
                                             </button>
                                         </div>
 
                                         ${m.in_transit_qty > 0 ? `
-                                            <div class="bg-teal-50 border border-teal-300 rounded-lg px-2.5 py-2 text-[11px] text-teal-950 flex items-start gap-2">
+                                            <div class="bg-teal-50/70 border border-teal-200 rounded-lg px-2.5 py-2 text-[11px] text-teal-950 flex items-start gap-2">
                                                 <i class="fa-solid fa-ship text-teal-600 mt-0.5 shrink-0"></i>
                                                 <div class="min-w-0 break-words">
-                                                    <span class="font-extrabold">발주 완료 · 입고 예정:</span>
+                                                    <span class="font-bold">발주 완료 · 입고 예정:</span>
                                                     <span>
                                                         ${m.expected_arrival_date ? `<strong>${escapeHtml(m.expected_arrival_date)}</strong>에 ` : ''}<strong>+${m.in_transit_qty.toLocaleString()}개</strong> 입고 예정입니다.
                                                         ${m.daily_sales > 0
@@ -5319,41 +5240,41 @@ HTML_TEMPLATE = """
                                         ` : ''}
 
                                         ${m.is_no_sales ? `
-                                            <div class="bg-orange-50 border border-orange-300 rounded-lg px-2.5 py-2 text-[11px] text-orange-950 flex items-start gap-2">
+                                            <div class="bg-orange-50/70 border border-orange-200 rounded-lg px-2.5 py-2 text-[11px] text-orange-950 flex items-start gap-2">
                                                 <i class="fa-solid fa-bell text-orange-600 mt-0.5 shrink-0"></i>
                                                 <div class="min-w-0 break-words">
-                                                    <span class="font-extrabold">판매 정체(소진무) 알람:</span>
+                                                    <span class="font-bold">판매 정체(소진무) 알람:</span>
                                                     <span>현재 재고 <strong>${m.master_physical_total.toLocaleString()}개</strong> 보유 중이나 최근 7일·30일 출고량이 <strong>0개</strong>입니다. 상품 노출·프로모션 또는 채널 코드 매핑을 점검하세요.</span>
                                                 </div>
                                             </div>
                                         ` : ''}
 
-                                        <!-- 핵심 수량 4칸 그리드 (모바일 2x2 / PC 4열: 스크롤 없이 즉시 확인) -->
+                                        <!-- 핵심 수량 4칸 그리드 -->
                                         <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[11px]">
-                                            <div class="bg-emerald-50/70 border border-emerald-200 rounded-lg px-2.5 py-1.5">
-                                                <div class="text-[10px] font-bold text-emerald-800">총 가용재고</div>
-                                                <div class="font-black font-mono text-sm text-emerald-950">${m.master_physical_total.toLocaleString()}개</div>
+                                            <div class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
+                                                <div class="text-[10px] font-semibold text-slate-500">총 가용재고</div>
+                                                <div class="font-bold font-mono text-sm text-slate-900">${m.master_physical_total.toLocaleString()}개</div>
                                                 ${m.in_transit_qty > 0
-                                                    ? `<div class="text-[9px] font-bold text-blue-700 truncate">🚢 예정 +${m.in_transit_qty.toLocaleString()}개</div>`
-                                                    : `<div class="text-[9px] text-emerald-700/80">전체 창고 합산</div>`}
+                                                    ? `<div class="text-[9px] font-semibold text-teal-700 truncate">🚢 예정 +${m.in_transit_qty.toLocaleString()}개</div>`
+                                                    : `<div class="text-[9px] text-slate-400">전체 창고 합산</div>`}
                                             </div>
-                                            <div class="bg-amber-50/70 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                                                <div class="text-[10px] font-bold text-amber-800">개미창고(3PL)</div>
-                                                <div class="font-black font-mono text-sm text-amber-950">${m.gaemi_total.toLocaleString()}개</div>
-                                                <div class="text-[9px] font-semibold text-amber-800 truncate">런웨이 ${escapeHtml(m.gaemi_runway_str)}</div>
+                                            <div class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
+                                                <div class="text-[10px] font-semibold text-slate-500">개미창고(3PL)</div>
+                                                <div class="font-bold font-mono text-sm text-slate-900">${m.gaemi_total.toLocaleString()}개</div>
+                                                <div class="text-[9px] text-slate-500 truncate">런웨이 ${escapeHtml(m.gaemi_runway_str)}</div>
                                             </div>
-                                            <div class="bg-blue-50/70 border border-blue-200 rounded-lg px-2.5 py-1.5">
-                                                <div class="text-[10px] font-bold text-blue-800">쿠팡(실물)</div>
-                                                <div class="font-black font-mono text-sm text-blue-950">${m.coupang_physical_total.toLocaleString()}개</div>
-                                                <div class="text-[9px] font-semibold text-blue-800 truncate">${m.coupang_package_total}세트 · ${escapeHtml(m.coupang_runway_str)}</div>
+                                            <div class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
+                                                <div class="text-[10px] font-semibold text-slate-500">쿠팡(실물)</div>
+                                                <div class="font-bold font-mono text-sm text-slate-900">${m.coupang_physical_total.toLocaleString()}개</div>
+                                                <div class="text-[9px] text-slate-500 truncate">${m.coupang_package_total}세트 · ${escapeHtml(m.coupang_runway_str)}</div>
                                                 ${(m.coupang_return_physical_total || 0) > 0
-                                                    ? `<div class="text-[9px] font-bold text-rose-700 truncate mt-0.5">🔄 반품 ${m.coupang_return_physical_total.toLocaleString()}개 (${m.coupang_return_package_total || 0}세트)</div>`
+                                                    ? `<div class="text-[9px] font-semibold text-rose-600 truncate mt-0.5">🔄 반품 ${m.coupang_return_physical_total.toLocaleString()}개 (${m.coupang_return_package_total || 0}세트)</div>`
                                                     : ''}
                                             </div>
-                                            <div class="${m.is_no_sales ? 'bg-orange-50/80 border-orange-300' : 'bg-indigo-50/70 border-indigo-200'} border rounded-lg px-2.5 py-1.5">
-                                                <div class="text-[10px] font-bold ${m.is_no_sales ? 'text-orange-900' : 'text-indigo-800'}">출고 속도 · 통합</div>
-                                                <div class="font-black font-mono text-sm ${m.is_no_sales ? 'text-orange-950' : 'text-indigo-950'}">일 ${m.daily_sales}개</div>
-                                                <div class="text-[9px] font-semibold ${m.is_no_sales ? 'text-orange-800' : 'text-indigo-700'} truncate">7일 ${m.total_sales_7d} · 30일 ${m.total_sales_30d || 0}</div>
+                                            <div class="${m.is_no_sales ? 'bg-orange-50/50 border-orange-200' : 'bg-white border-slate-200'} border rounded-lg px-2.5 py-1.5">
+                                                <div class="text-[10px] font-semibold ${m.is_no_sales ? 'text-orange-800' : 'text-slate-500'}">출고 속도 · 통합</div>
+                                                <div class="font-bold font-mono text-sm ${m.is_no_sales ? 'text-orange-950' : 'text-slate-900'}">일 ${m.daily_sales}개</div>
+                                                <div class="text-[9px] ${m.is_no_sales ? 'text-orange-700' : 'text-slate-500'} truncate">7일 ${m.total_sales_7d} · 30일 ${m.total_sales_30d || 0}</div>
                                             </div>
                                         </div>
                                     </div>
@@ -5361,24 +5282,24 @@ HTML_TEMPLATE = """
                                     ${(isAdminMode || m.in_transit_qty > 0 || m.lot_sync_note) ? `
                                         <div class="p-2.5 sm:p-3 space-y-1.5 text-[11px]">
                                             ${isAdminMode ? `
-                                                <div class="flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
-                                                    <span class="font-bold text-amber-950 break-words">⚙️ 리드타임 ${effLt}일 (안전 +${effPrep - effLt}일) · 기한경고 ${m.effective_expiry_warn || 120}일${m.in_transit_qty > 0 ? ` · 입고예정 +${m.in_transit_qty}개 (${escapeHtml(m.expected_arrival_date || '미정')})` : ''}</span>
+                                                <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2">
+                                                    <span class="font-medium text-slate-700 break-words">⚙️ 리드타임 ${effLt}일 (안전 +${effPrep - effLt}일) · 기한경고 ${m.effective_expiry_warn || 120}일${m.in_transit_qty > 0 ? ` · 입고예정 +${m.in_transit_qty}개 (${escapeHtml(m.expected_arrival_date || '미정')})` : ''}</span>
                                                     <div class="flex flex-wrap items-center gap-1.5">
-                                                        <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-extrabold shadow-xs">
+                                                        <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-md font-semibold">
                                                             🔗 코드 매핑
                                                         </button>
-                                                        <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md font-extrabold shadow-xs">
+                                                        <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-md font-semibold">
                                                             ✏️ 정보 · 소비기한 수정
                                                         </button>
                                                     </div>
                                                 </div>
                                             ` : (m.in_transit_qty > 0 ? `
-                                                <div class="bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5 text-blue-900 font-semibold break-words">
+                                                <div class="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium break-words">
                                                     🚢 입고 예정: <strong>+${m.in_transit_qty.toLocaleString()}개</strong>${m.expected_arrival_date ? ` (예상일: <strong>${escapeHtml(m.expected_arrival_date)}</strong>)` : ''}
                                                 </div>
                                             ` : '')}
                                             ${m.lot_sync_note ? `
-                                                <div class="bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1.5 text-indigo-900 font-semibold break-words">
+                                                <div class="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium break-words">
                                                     🔄 <strong>로트 동기화:</strong> ${escapeHtml(m.lot_sync_note)}
                                                 </div>
                                             ` : ''}
@@ -5389,11 +5310,11 @@ HTML_TEMPLATE = """
                                     ${activeGaemiLots.length > 0 ? `
                                         <div class="p-2.5 sm:p-3 space-y-2">
                                             <div class="flex items-center justify-between gap-2">
-                                                <div class="flex items-center space-x-1.5 text-xs font-bold text-amber-900">
-                                                    <i class="fa-solid fa-clock-rotate-left text-amber-600"></i>
+                                                <div class="flex items-center space-x-1.5 text-xs font-bold text-slate-800">
+                                                    <i class="fa-solid fa-clock-rotate-left text-slate-500"></i>
                                                     <span>개미창고 소비기한 · FIFO</span>
                                                 </div>
-                                                <span class="text-[10px] bg-amber-100 text-amber-900 font-semibold px-2 py-0.5 rounded shrink-0">
+                                                <span class="text-[10px] bg-slate-100 text-slate-700 font-semibold px-2 py-0.5 rounded shrink-0">
                                                     ${activeGaemiLots.length}개 로트
                                                 </span>
                                             </div>
@@ -5405,15 +5326,15 @@ HTML_TEMPLATE = """
                                                     let cardBorder = 'border-slate-200 bg-slate-50/50';
 
                                                     if (lot.source === 'unassigned') {
-                                                        fifoBadge = '<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-2 py-0.5 rounded-full border border-rose-200">⚠️ 기한 필요</span>';
-                                                        cardBorder = 'border-rose-300 bg-rose-50/40';
+                                                        fifoBadge = '<span class="text-[9px] bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded-full border border-rose-200">⚠️ 기한 필요</span>';
+                                                        cardBorder = 'border-rose-200 bg-rose-50/40';
                                                     } else if (isNearest && lot.stock > 0) {
-                                                        fifoBadge = '<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-2 py-0.5 rounded-full border border-rose-200 animate-pulse">🥇 1순위 출고</span>';
-                                                        cardBorder = 'border-rose-300 bg-rose-50/40 ring-1 ring-rose-200';
+                                                        fifoBadge = '<span class="text-[9px] bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded-full border border-rose-200">🥇 1순위 출고</span>';
+                                                        cardBorder = 'border-rose-200 bg-rose-50/40';
                                                     }
 
                                                     const expText = lot.expiry_date ? `${lot.expiry_date} (D-${lot.days_left}일)` : '미기재/로트명';
-                                                    const adminLotBadge = lot.is_admin_expiry ? ' <span class="text-[9px] bg-amber-100 text-amber-900 px-1 rounded font-bold">관리자</span>' : '';
+                                                    const adminLotBadge = lot.is_admin_expiry ? ' <span class="text-[9px] bg-slate-200/70 text-slate-700 px-1 rounded font-semibold">관리자</span>' : '';
 
                                                     return `
                                                         <div class="p-2 rounded-lg border ${cardBorder} flex justify-between items-center gap-2">
@@ -5435,21 +5356,21 @@ HTML_TEMPLATE = """
 
                                             <!-- 소비기한 vs 판매속도 소진 시뮬레이션 카드 -->
                                             ${m.nearest_expiry_date ? `
-                                                <div class="p-2.5 rounded-lg bg-amber-50/70 border border-amber-200 text-[11px] text-amber-950 space-y-1.5">
+                                                <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[11px] text-slate-700 space-y-1.5">
                                                     <div class="flex items-start gap-1.5">
-                                                        <i class="fa-solid fa-chart-pie text-amber-600 mt-0.5 shrink-0"></i>
+                                                        <i class="fa-solid fa-chart-pie text-slate-500 mt-0.5 shrink-0"></i>
                                                         <div class="min-w-0 break-words leading-relaxed">
-                                                            <span class="font-bold">소진 시뮬레이션:</span>
+                                                            <span class="font-bold text-slate-800">소진 시뮬레이션:</span>
                                                             <span>일평균 <strong>${m.daily_sales}개</strong> 기준, 최단기한(<strong>${escapeHtml(m.nearest_expiry_date)}</strong>, D-${m.nearest_days_left}일)까지 <strong>${m.projected_sales_to_exp}개</strong> 소진 예상 (로트 ${m.nearest_lot_stock}개)</span>
                                                         </div>
                                                     </div>
                                                     <div>
                                                         ${m.expiry_risk_qty > 0 ? `
-                                                            <span class="inline-block w-full sm:w-auto text-center bg-rose-600 text-white font-bold px-2.5 py-1 rounded text-[11px] shadow-xs">
+                                                            <span class="inline-block w-full sm:w-auto text-center bg-rose-50 border border-rose-200 text-rose-800 font-bold px-2.5 py-1 rounded text-[11px]">
                                                                 🚨 기한 내 약 ${m.expiry_risk_qty}개 미소진 위험 (특가/번들 할인 필요)
                                                             </span>
                                                         ` : `
-                                                            <span class="inline-block w-full sm:w-auto text-center bg-emerald-600 text-white font-bold px-2.5 py-1 rounded text-[11px] shadow-xs">
+                                                            <span class="inline-block w-full sm:w-auto text-center bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold px-2.5 py-1 rounded text-[11px]">
                                                                 ✅ 기한 내 100% 정상 소진 예상
                                                             </span>
                                                         `}
@@ -5459,48 +5380,17 @@ HTML_TEMPLATE = """
                                         </div>
                                     ` : ''}
 
-                                    <!-- 2. 쿠팡 옵션 번들 내역 (한눈에 비교 가능한 컴팩트 리스트 · 번들별 정상/반품 분리 표시) -->
+                                    <!-- 2. 쿠팡 옵션 번들 내역 (번들별 정상/반품 분리 표시) -->
                                     ${(() => {
                                         const opts = m.options || [];
                                         if (opts.length === 0) return '';
-                                        let bundleGroups = Array.isArray(m.coupang_bundle_groups) && m.coupang_bundle_groups.length > 0
-                                            ? m.coupang_bundle_groups
-                                            : null;
-                                        if (!bundleGroups) {
-                                            const gMap = new Map();
-                                            opts.forEach(opt => {
-                                                const b = Math.max(1, parseInt(opt.bundle || 1, 10) || 1);
-                                                if (!gMap.has(b)) {
-                                                    gMap.set(b, {
-                                                        bundle: b,
-                                                        label: `${b}개입`,
-                                                        normal_options: [],
-                                                        return_options: [],
-                                                        normal_package_stock: 0,
-                                                        normal_physical_stock: 0,
-                                                        return_package_stock: 0,
-                                                        return_physical_stock: 0
-                                                    });
-                                                }
-                                                const g = gMap.get(b);
-                                                if (opt.is_return) {
-                                                    g.return_options.push(opt);
-                                                    g.return_package_stock += (opt.coupang_stock || 0);
-                                                    g.return_physical_stock += (opt.physical_stock || 0);
-                                                } else {
-                                                    g.normal_options.push(opt);
-                                                    g.normal_package_stock += (opt.coupang_stock || 0);
-                                                    g.normal_physical_stock += (opt.physical_stock || 0);
-                                                }
-                                            });
-                                            bundleGroups = Array.from(gMap.values()).sort((a, b) => a.bundle - b.bundle);
-                                        }
+                                        const bundleGroups = Array.isArray(m.coupang_bundle_groups) ? m.coupang_bundle_groups : [];
                                         const retPkgTot = m.coupang_return_package_total || 0;
                                         const retPhysTot = m.coupang_return_physical_total || 0;
                                         const hasAnyReturn = retPhysTot > 0 || m.has_coupang_return || bundleGroups.some(g => (g.return_options || []).length > 0);
                                         const headerSummary = hasAnyReturn
-                                            ? `<span class="text-[10px] font-mono text-blue-700">정상 ${m.coupang_physical_total.toLocaleString()}개 · <span class="text-rose-700 font-extrabold">🔄 반품 ${retPhysTot.toLocaleString()}개 (${retPkgTot.toLocaleString()}세트)</span></span>`
-                                            : `<span class="text-[10px] font-mono text-blue-600">총 ${opts.length}개 옵션</span>`;
+                                            ? `<span class="text-[10px] font-mono text-slate-600">정상 ${m.coupang_physical_total.toLocaleString()}개 · <span class="text-rose-700 font-bold">🔄 반품 ${retPhysTot.toLocaleString()}개 (${retPkgTot.toLocaleString()}세트)</span></span>`
+                                            : `<span class="text-[10px] font-mono text-slate-500">총 ${opts.length}개 옵션</span>`;
 
                                         const groupsHtml = bundleGroups.map(grp => {
                                             const nOpts = grp.normal_options || [];
@@ -5512,12 +5402,12 @@ HTML_TEMPLATE = """
                                             const showGroupHeader = hasAnyReturn || nOpts.length > 1 || rOpts.length > 0;
 
                                             const groupHeaderHtml = showGroupHeader ? `
-                                                <div class="px-2.5 py-1 bg-slate-100/80 flex flex-wrap items-center justify-between gap-1.5 text-[10px]">
-                                                    <span class="font-extrabold font-mono text-slate-800">${grp.bundle}개입 번들</span>
+                                                <div class="px-2.5 py-1 bg-slate-50 flex flex-wrap items-center justify-between gap-1.5 text-[10px]">
+                                                    <span class="font-bold font-mono text-slate-800">${grp.bundle}개입 번들</span>
                                                     <div class="flex flex-wrap items-center gap-1 font-mono">
-                                                        <span class="px-1.5 py-0.2 rounded bg-blue-100/80 text-blue-900 font-bold">정상 ${nPkg.toLocaleString()}세트 (${nPhys.toLocaleString()}개)</span>
+                                                        <span class="px-1.5 py-0.2 rounded bg-white border border-slate-200 text-slate-700 font-semibold">정상 ${nPkg.toLocaleString()}세트 (${nPhys.toLocaleString()}개)</span>
                                                         ${(rOpts.length > 0 || rPhys > 0)
-                                                            ? `<span class="px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-200 font-extrabold">🔄 반품 ${rPkg.toLocaleString()}세트 (${rPhys.toLocaleString()}개)</span>`
+                                                            ? `<span class="px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 font-bold">🔄 반품 ${rPkg.toLocaleString()}세트 (${rPhys.toLocaleString()}개)</span>`
                                                             : `<span class="px-1.5 py-0.2 rounded bg-white text-slate-400 border border-slate-200">반품 0개</span>`}
                                                     </div>
                                                 </div>
@@ -5525,13 +5415,13 @@ HTML_TEMPLATE = """
 
                                             const normalRowsHtml = nOpts.map(opt => {
                                                 const missBadge = opt.grade_missing
-                                                    ? `<span class="px-1 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-bold text-[9px] shrink-0" title="기존 업로드 데이터에 상품등급(G열) 정보가 없어 정상으로 표시될 수 있습니다. 쿠팡 파일 재업로드 또는 관리자 반품 지정을 이용하세요.">등급미확인</span>`
+                                                    ? `<span class="px-1 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[9px] shrink-0" title="기존 업로드 데이터에 상품등급(G열) 정보가 없어 정상으로 표시될 수 있습니다. 쿠팡 파일 재업로드 또는 관리자 반품 지정을 이용하세요.">등급미확인</span>`
                                                     : '';
                                                 const toggleBtnHtml = isAdminMode
-                                                    ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, true, this)" class="px-1.5 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[9px] font-bold transition shrink-0" title="이 옵션 ID를 정상 재고에서 제외하고 반품 재고로 지정합니다">🔄 반품 지정</button>`
+                                                    ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, true, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-rose-50 text-rose-700 border border-slate-200 hover:border-rose-200 text-[9px] font-semibold transition shrink-0" title="이 옵션 ID를 정상 재고에서 제외하고 반품 재고로 지정합니다">🔄 반품 지정</button>`
                                                     : '';
                                                 return `
-                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-blue-50/20">
+                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-white">
                                                         <div class="min-w-0 flex-1">
                                                             <div class="flex flex-wrap items-center gap-1">
                                                                 <span class="font-bold text-slate-800 truncate">${escapeHtml(opt.name)}</span>
@@ -5543,7 +5433,7 @@ HTML_TEMPLATE = """
                                                             </div>
                                                         </div>
                                                         <div class="text-right shrink-0 font-mono">
-                                                            <div class="font-extrabold text-blue-700">${opt.coupang_stock}세트 <span class="text-slate-600 font-semibold">(실물 ${opt.physical_stock}개)</span></div>
+                                                            <div class="font-bold text-slate-900">${opt.coupang_stock}세트 <span class="text-slate-500 font-normal">(실물 ${opt.physical_stock}개)</span></div>
                                                             <div class="text-[10px] text-slate-500">7일 출고: <strong class="text-slate-700">${opt.sales_7d_physical}개</strong></div>
                                                         </div>
                                                     </div>
@@ -5553,16 +5443,16 @@ HTML_TEMPLATE = """
                                             const returnRowsHtml = rOpts.map(opt => {
                                                 let retActionHtml = '';
                                                 if (opt.csv_is_return) {
-                                                    retActionHtml = `<span class="px-1 py-0.2 rounded bg-rose-100 text-rose-800 text-[9px] font-semibold shrink-0">CSV G열 반품 자동감지</span>`;
+                                                    retActionHtml = `<span class="px-1 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[9px] font-semibold shrink-0">CSV G열 반품 자동감지</span>`;
                                                 } else if (isAdminMode && opt.option_is_return_flag) {
-                                                    retActionHtml = `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, false, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-[9px] font-bold transition shrink-0" title="수동 반품 지정을 해제하고 정상 재고로 복귀합니다">↩️ 정상 복귀</button>`;
+                                                    retActionHtml = `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, false, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-[9px] font-semibold transition shrink-0" title="수동 반품 지정을 해제하고 정상 재고로 복귀합니다">↩️ 정상 복귀</button>`;
                                                 }
                                                 return `
-                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-rose-50/60">
+                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-rose-50/40">
                                                         <div class="min-w-0 flex-1">
                                                             <div class="flex flex-wrap items-center gap-1">
-                                                                <span class="px-1.5 py-0.2 rounded bg-rose-600 text-white font-bold text-[9px] shrink-0">🔄 반품</span>
-                                                                ${opt.grade ? `<span class="px-1.5 py-0.2 rounded bg-rose-100 text-rose-900 border border-rose-200 font-mono font-bold text-[9px] shrink-0">${escapeHtml(opt.grade)}</span>` : ''}
+                                                                <span class="px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[9px] shrink-0">🔄 반품</span>
+                                                                ${opt.grade ? `<span class="px-1.5 py-0.2 rounded bg-white text-rose-800 border border-rose-200 font-mono font-semibold text-[9px] shrink-0">${escapeHtml(opt.grade)}</span>` : ''}
                                                                 <span class="font-bold text-rose-950 truncate">${escapeHtml(opt.name)}</span>
                                                             </div>
                                                             <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
@@ -5571,33 +5461,33 @@ HTML_TEMPLATE = """
                                                             </div>
                                                         </div>
                                                         <div class="text-right shrink-0 font-mono">
-                                                            <div class="font-extrabold text-rose-700">${opt.coupang_stock}세트 <span class="text-rose-950 font-semibold">(반품 실물 ${opt.physical_stock}개)</span></div>
+                                                            <div class="font-bold text-rose-700">${opt.coupang_stock}세트 <span class="text-rose-950 font-semibold">(반품 실물 ${opt.physical_stock}개)</span></div>
                                                             <div class="text-[10px] text-rose-700/80">7일 출고: <strong class="text-rose-900">${opt.sales_7d_physical}개</strong></div>
                                                         </div>
                                                     </div>
                                                 `;
                                             }).join('');
 
-                                            return `<div class="divide-y divide-blue-100/70">${groupHeaderHtml}${normalRowsHtml}${returnRowsHtml}</div>`;
+                                            return `<div class="divide-y divide-slate-100">${groupHeaderHtml}${normalRowsHtml}${returnRowsHtml}</div>`;
                                         }).join('');
 
                                         const hasGradeMissingNormal = opts.some(o => o.grade_missing && !o.is_return);
                                         const gradeMissingHintHtml = hasGradeMissingNormal ? `
-                                            <div class="px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-950 font-semibold break-words">
+                                            <div class="px-2.5 py-1.5 bg-amber-50/70 border border-amber-200 rounded-lg text-[10px] text-amber-900 font-medium break-words">
                                                 ⚠️ 기존 쿠팡 업로드 데이터에 G열(상품등급) 정보가 누락되어 반품이 정상으로 합산될 수 있습니다. <strong>쿠팡 재고건전성 파일 재업로드</strong> 시 자동 분리되며${isAdminMode ? ', 위 <strong>[🔄 반품 지정]</strong> 버튼으로 즉시 변경 가능합니다.' : ', 관리자 모드에서도 수동 지정 가능합니다.'}
                                             </div>
                                         ` : '';
 
                                         return `
                                             <div class="p-2.5 sm:p-3 space-y-1.5">
-                                                <div class="flex flex-wrap items-center justify-between gap-1 text-[11px] font-bold text-blue-800">
+                                                <div class="flex flex-wrap items-center justify-between gap-1 text-[11px] font-bold text-slate-800">
                                                     <div class="flex items-center space-x-1">
-                                                        <i class="fa-solid fa-cubes"></i>
+                                                        <i class="fa-solid fa-cubes text-slate-500"></i>
                                                         <span>쿠팡 윙 옵션별 번들 · 실물 재고</span>
                                                     </div>
                                                     ${headerSummary}
                                                 </div>
-                                                <div class="rounded-lg border border-blue-200 divide-y divide-blue-200 bg-white overflow-hidden">
+                                                <div class="rounded-lg border border-slate-200 divide-y divide-slate-200 bg-white overflow-hidden">
                                                     ${groupsHtml}
                                                 </div>
                                                 ${gradeMissingHintHtml}
@@ -5609,17 +5499,17 @@ HTML_TEMPLATE = """
                                     ${((m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0) || m.note || (m.recent_orders && m.recent_orders.length > 0)) ? `
                                         <div class="p-2.5 sm:p-3 space-y-2">
                                             ${m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0 ? `
-                                                <div class="bg-indigo-50/70 rounded-lg border border-indigo-200 p-2 text-[11px] text-indigo-900 space-y-1">
+                                                <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 text-[11px] text-slate-700 space-y-1">
                                                     <div class="flex items-start gap-1.5 break-words">
-                                                        <i class="fa-solid fa-boxes-stacked text-indigo-600 mt-0.5 shrink-0"></i>
+                                                        <i class="fa-solid fa-boxes-stacked text-slate-500 mt-0.5 shrink-0"></i>
                                                         <div>
-                                                            <span class="font-bold">B2B/세트 연동:</span>
+                                                            <span class="font-bold text-slate-900">B2B/세트 연동:</span>
                                                             <span><strong>${escapeHtml(m.b2b_linked_codes.map(b => `${b.s_code} (${b.desc})`).join(', '))}</strong> 주문 시 실물 재고 차감 및 출고 합산</span>
                                                         </div>
                                                     </div>
                                                     <div>
                                                         ${m.b2b_shared_sales && m.b2b_shared_sales.length > 0 ? `
-                                                            <span class="inline-block text-[10px] bg-indigo-100 text-indigo-800 font-semibold px-2 py-0.5 rounded border border-indigo-200">
+                                                            <span class="inline-block text-[10px] bg-white text-slate-700 font-semibold px-2 py-0.5 rounded border border-slate-200">
                                                                 B2B 출고량: 7일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_7d, 0)}개 / 30일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_30d, 0)}개
                                                             </span>
                                                         ` : `
@@ -5630,22 +5520,22 @@ HTML_TEMPLATE = """
                                             ` : ''}
 
                                             ${m.note ? `
-                                                <div class="bg-purple-50/50 rounded-lg border border-purple-200 p-2 text-[11px] text-purple-900 break-words">
-                                                    <i class="fa-solid fa-circle-info mr-1 text-purple-600"></i>
-                                                    <span class="font-bold">참고사항:</span> ${escapeHtml(m.note)}
+                                                <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 text-[11px] text-slate-700 break-words">
+                                                    <i class="fa-solid fa-circle-info mr-1 text-slate-500"></i>
+                                                    <span class="font-bold text-slate-900">참고사항:</span> ${escapeHtml(m.note)}
                                                 </div>
                                             ` : ''}
 
                                             ${m.recent_orders && m.recent_orders.length > 0 ? `
                                                 <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 space-y-1">
-                                                    <div class="text-[11px] font-bold text-indigo-700 flex flex-wrap items-center justify-between gap-1">
-                                                        <span><i class="fa-solid fa-receipt mr-1"></i>쿠팡외 출고: 7일 <strong>${m.other_sales_7d}개</strong> / 30일 <strong>${m.other_sales_30d || m.other_sales_7d}개</strong></span>
+                                                    <div class="text-[11px] font-bold text-slate-800 flex flex-wrap items-center justify-between gap-1">
+                                                        <span><i class="fa-solid fa-receipt mr-1 text-slate-500"></i>쿠팡외 출고: 7일 <strong>${m.other_sales_7d}개</strong> / 30일 <strong>${m.other_sales_30d || m.other_sales_7d}개</strong></span>
                                                         <span class="text-[10px] text-slate-400 font-normal">최근 주문 5건</span>
                                                     </div>
                                                     <div class="flex flex-wrap gap-1 text-[10px]">
                                                         ${m.recent_orders.map(ord => `
-                                                            <span class="bg-white border border-indigo-100 px-2 py-0.5 rounded text-slate-700">
-                                                                <span class="font-semibold text-indigo-800">${escapeHtml(ord.mall || '스마트스토어')}</span>: ${ord.qty}개 (${escapeHtml(ord.date)})
+                                                            <span class="bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-700">
+                                                                <span class="font-semibold text-slate-900">${escapeHtml(ord.mall || '스마트스토어')}</span>: ${ord.qty}개 (${escapeHtml(ord.date)})
                                                             </span>
                                                         `).join('')}
                                                     </div>
@@ -5671,24 +5561,24 @@ HTML_TEMPLATE = """
                 if (colId === 'no') {
                     footHtml += `<td class="py-2.5 px-1.5 text-center text-[11px] font-bold overflow-hidden">합계</td>`;
                 } else if (colId === 'status') {
-                    footHtml += `<td class="py-2.5 px-1.5 text-center text-[11px] font-bold text-slate-600 overflow-hidden">위험도 정렬</td>`;
+                    footHtml += `<td class="py-2.5 px-1.5 text-center text-[11px] font-medium text-slate-500 overflow-hidden">위험도순</td>`;
                 } else if (colId === 'name') {
-                    footHtml += `<td class="py-2.5 px-2 text-left font-black text-slate-900 truncate overflow-hidden">총 ${filtered.length}개 단품 (실물 합계)</td>`;
+                    footHtml += `<td class="py-2.5 px-2 text-left font-bold text-slate-900 truncate overflow-hidden">총 ${filtered.length}개 단품 (실물 합계)</td>`;
                 } else if (colId === 'total_stock') {
-                    footHtml += `<td class="py-2.5 px-2 text-right font-black text-emerald-800 text-xs bg-emerald-100/60 overflow-hidden" title="단품 실물 기준 합계">${sumTotalStock.toLocaleString()}</td>`;
+                    footHtml += `<td class="py-2.5 px-2 text-right font-bold font-mono text-slate-900 text-xs overflow-hidden" title="단품 실물 기준 합계">${sumTotalStock.toLocaleString()}</td>`;
                 } else if (colId === 'gaemi_stock') {
-                    footHtml += `<td class="py-2.5 px-2 text-right font-black text-amber-800 text-xs bg-amber-100/60 overflow-hidden">${sumGaemiStock.toLocaleString()}</td>`;
+                    footHtml += `<td class="py-2.5 px-2 text-right font-bold font-mono text-slate-800 text-xs overflow-hidden">${sumGaemiStock.toLocaleString()}</td>`;
                 } else if (colId === 'gaemi_runway') {
                     const avgGRunway = sumDailySales > 0 ? (sumGaemiStock / sumDailySales).toFixed(1) + '일' : (sumGaemiStock > 0 ? '소진무' : '-');
-                    footHtml += `<td class="py-2.5 px-1.5 text-center font-bold text-amber-900 text-[11px] overflow-hidden">${avgGRunway}</td>`;
+                    footHtml += `<td class="py-2.5 px-1.5 text-center font-semibold font-mono text-slate-700 text-[11px] overflow-hidden">${avgGRunway}</td>`;
                 } else if (colId === 'coupang_stock') {
-                    footHtml += `<td class="py-2.5 px-2 text-right font-black text-blue-800 text-xs bg-blue-100/60 overflow-hidden"><div>${sumCoupangStock.toLocaleString()}</div>${sumCoupangReturnStock > 0 ? `<div class="text-[9px] font-bold text-rose-700">🔄 반품 ${sumCoupangReturnStock.toLocaleString()}</div>` : ''}</td>`;
+                    footHtml += `<td class="py-2.5 px-2 text-right font-bold font-mono text-slate-800 text-xs overflow-hidden"><div>${sumCoupangStock.toLocaleString()}</div>${sumCoupangReturnStock > 0 ? `<div class="text-[9px] font-semibold text-rose-600">🔄 반품 ${sumCoupangReturnStock.toLocaleString()}</div>` : ''}</td>`;
                 } else if (colId === 'coupang_runway') {
                     const avgCRunway = sumCoupangSales > 0 ? (sumCoupangStock / (sumCoupangSales / 7.0)).toFixed(1) + '일' : (sumCoupangStock > 0 ? '소진무' : '-');
-                    footHtml += `<td class="py-2.5 px-1.5 text-center font-bold text-blue-900 text-[11px] overflow-hidden">${avgCRunway}</td>`;
+                    footHtml += `<td class="py-2.5 px-1.5 text-center font-semibold font-mono text-slate-700 text-[11px] overflow-hidden">${avgCRunway}</td>`;
                 } else if (colId === 'total_sales') {
                     footHtml += `
-                        <td class="py-2.5 px-2 text-right font-black text-indigo-950 text-xs bg-indigo-100/60 overflow-hidden">
+                        <td class="py-2.5 px-2 text-right font-bold font-mono text-slate-900 text-xs overflow-hidden">
                             <div class="truncate">7일 ${sumTotalSales.toLocaleString()}개</div>
                             <div class="text-[10px] text-slate-500 font-normal truncate">30일 ${sumTotalSales30d.toLocaleString()}개</div>
                         </td>
@@ -5697,7 +5587,7 @@ HTML_TEMPLATE = """
                     const avgDoc = sumDailySales > 0 ? (sumTotalStock / sumDailySales).toFixed(1) + '일' : (sumTotalStock > 0 ? '소진무' : '재고없음');
                     footHtml += `<td class="py-2.5 px-1.5 text-center font-bold text-slate-800 text-[11px] overflow-hidden truncate">평균 ${avgDoc}</td>`;
                 } else if (colId === 'action_cta') {
-                    footHtml += `<td class="py-2.5 px-1.5 text-center text-slate-500 font-semibold text-[10px] overflow-hidden">결품 0 목표</td>`;
+                    footHtml += `<td class="py-2.5 px-1.5 text-center text-slate-400 font-medium text-[10px] overflow-hidden">결품 0 목표</td>`;
                 } else {
                     footHtml += `<td class="py-2.5 px-1.5 text-center text-slate-400 overflow-hidden">-</td>`;
                 }
@@ -5757,12 +5647,6 @@ HTML_TEMPLATE = """
 
         function openInNewTab() {
             window.open(window.location.href, '_blank');
-        }
-
-        // 구글 사이트 등 iframe 내부에 삽입된 경우 세로 공간 절약을 위해 상단 배너 자동 숨김
-        if (window.self !== window.top) {
-            const banner = document.getElementById('tunnelBanner');
-            if (banner) banner.classList.add('hidden');
         }
 
         // -------------------------------------------------------------
@@ -6121,15 +6005,15 @@ HTML_TEMPLATE = """
                 const initMode = (lot.is_admin_expiry && !lot.expiry_date) ? '__CLEAR__' : '';
                 const rawHint = lot.raw_expiry_date ? `CSV원본: ${escapeHtml(lot.raw_expiry_date)}` : 'CSV원본: 미기재';
                 return `
-                    <div class="flex flex-wrap items-center justify-between gap-2 bg-white border ${muted ? 'border-slate-200 opacity-80' : 'border-amber-200'} rounded-lg p-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-white border ${muted ? 'border-slate-200 opacity-75' : 'border-slate-200'} rounded-lg p-2">
                         <div class="min-w-0 flex-1">
-                            <div class="font-bold text-slate-800 truncate">${escapeHtml(lot.option_name || '옵션명 없음')} <span class="${muted ? 'text-slate-500' : 'text-amber-700'} font-mono">(${(lot.stock || 0).toLocaleString()}개)</span></div>
+                            <div class="font-bold text-slate-800 truncate">${escapeHtml(lot.option_name || '옵션명 없음')} <span class="${muted ? 'text-slate-500' : 'text-slate-700'} font-mono">(${(lot.stock || 0).toLocaleString()}개)</span></div>
                             <div class="text-[10px] text-slate-400 font-mono">${escapeHtml(lot.gaemi_code)} · ${lot.reg_date ? '등록 ' + escapeHtml(lot.reg_date) + ' · ' : ''}${rawHint}</div>
                         </div>
                         <div class="flex items-center space-x-1.5 shrink-0">
                             <input type="date" class="ep-csv-lot-input px-2 py-1 border border-slate-300 rounded text-[11px] font-mono" data-lot-key="${escapeHtml(lot.lot_key)}" data-raw-expiry="${escapeHtml(lot.raw_expiry_date || '')}" data-was-admin="${lot.is_admin_expiry ? '1' : '0'}" data-mode="${initMode}" value="${escapeHtml(lot.expiry_date || '')}" oninput="this.dataset.mode=''">
-                            <button type="button" onclick="restoreCsvLotInput(this)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold" title="CSV 원본 소비기한으로 복원">원복</button>
-                            <button type="button" onclick="clearCsvLotInput(this)" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-bold" title="이 로트 소비기한 표시 제거">제거</button>
+                            <button type="button" onclick="restoreCsvLotInput(this)" class="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded text-[10px] font-semibold" title="CSV 원본 소비기한으로 복원">원복</button>
+                            <button type="button" onclick="clearCsvLotInput(this)" class="px-2 py-1 bg-white hover:bg-rose-50 border border-slate-200 text-rose-600 rounded text-[10px] font-semibold" title="이 로트 소비기한 표시 제거">제거</button>
                         </div>
                     </div>
                 `;
@@ -6170,7 +6054,7 @@ HTML_TEMPLATE = """
         function addManualLotRow(lot = {}) {
             const container = document.getElementById('ep_manual_lots_container');
             const row = document.createElement('div');
-            row.className = 'ep-manual-lot-row flex flex-wrap items-center gap-2 bg-white border border-amber-300 rounded-lg p-2';
+            row.className = 'ep-manual-lot-row flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg p-2';
             row.innerHTML = `
                 <input type="hidden" class="ep-ml-id" value="${escapeHtml(lot.lot_id || '')}">
                 <input type="text" class="ep-ml-label flex-1 min-w-[120px] px-2.5 py-1 border border-slate-300 rounded text-[11px]" placeholder="로트명 (예: 1차 입고분)" value="${escapeHtml(lot.label || '')}">
@@ -6179,7 +6063,7 @@ HTML_TEMPLATE = """
                     <input type="number" min="0" class="ep-ml-qty w-24 px-2.5 py-1 border border-slate-300 rounded text-[11px] font-mono font-bold text-right" placeholder="수량" value="${lot.qty !== undefined ? lot.qty : 0}" oninput="updateManualLotsSum()">
                     <span class="text-[11px] text-slate-500">개</span>
                 </div>
-                <button type="button" onclick="this.closest('.ep-manual-lot-row').remove(); updateManualLotsSum();" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-bold">삭제</button>
+                <button type="button" onclick="this.closest('.ep-manual-lot-row').remove(); updateManualLotsSum();" class="px-2 py-1 bg-white hover:bg-rose-50 border border-slate-200 text-rose-600 rounded text-[10px] font-semibold">삭제</button>
             `;
             container.appendChild(row);
             updateManualLotsSum();
@@ -6198,14 +6082,14 @@ HTML_TEMPLATE = """
             });
             bar.classList.remove('hidden');
             if (currentEditGaemiCsvTotal === 0) {
-                bar.className = 'text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border bg-blue-50 border-blue-200 text-blue-900';
+                bar.className = 'text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border bg-white border-slate-200 text-slate-700';
                 bar.innerText = `수동 로트 합계: ${sum.toLocaleString()}개 (CSV 업로드 시 이 수량 기준으로 선입선출 FIFO 자동 차감됩니다)`;
             } else if (sum === currentEditGaemiCsvTotal) {
                 bar.className = 'text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border bg-emerald-50 border-emerald-200 text-emerald-900';
                 bar.innerText = `✅ 개미 CSV 재고(${currentEditGaemiCsvTotal.toLocaleString()}개)와 수동 분할 합계(${sum.toLocaleString()}개)가 정확히 일치합니다.`;
             } else if (sum < currentEditGaemiCsvTotal) {
                 const diff = currentEditGaemiCsvTotal - sum;
-                bar.className = 'text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border bg-amber-50 border-amber-300 text-amber-950';
+                bar.className = 'text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border bg-amber-50 border-amber-200 text-amber-900';
                 bar.innerText = `⚠️ 개미 CSV ${currentEditGaemiCsvTotal.toLocaleString()}개 중 ${sum.toLocaleString()}개만 로트 배정됨 → 나머지 ${diff.toLocaleString()}개는 '미지정 재고'로 경고 표시됩니다.`;
             } else {
                 bar.className = 'text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border bg-rose-50 border-rose-200 text-rose-900';
@@ -6232,7 +6116,7 @@ HTML_TEMPLATE = """
                     <input type="checkbox" class="ep-opt-return" ${isRet ? 'checked' : ''}>
                     <span>🔄 반품${csvIsRet && cGrade ? ` (${escapeHtml(cGrade)})` : ''}</span>
                 </label>
-                <button type="button" onclick="this.closest('.ep-opt-row').remove()" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-bold">삭제</button>
+                <button type="button" onclick="this.closest('.ep-opt-row').remove()" class="px-2 py-1 bg-white hover:bg-rose-50 border border-slate-200 text-rose-600 rounded text-[10px] font-semibold">삭제</button>
             `;
             container.appendChild(row);
         }
@@ -6241,18 +6125,18 @@ HTML_TEMPLATE = """
             const box = document.getElementById('ep_temp_stocks_container');
             let html = '';
             if (csvLots && csvLots.length > 0) {
-                html += `<div class="text-[11px] font-bold text-amber-900">개미창고(3PL) 임시 재고 보정</div>`;
+                html += `<div class="text-[11px] font-bold text-slate-800">개미창고(3PL) 임시 재고 보정</div>`;
                 html += csvLots.map(l => `
-                    <div class="flex items-center justify-between gap-2 bg-white border border-rose-200 rounded px-2.5 py-1.5">
+                    <div class="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded px-2.5 py-1.5">
                         <span class="text-[11px] text-slate-700 truncate">${escapeHtml(l.option_name || l.gaemi_code)} (현재 ${l.stock}개)</span>
                         <input type="number" min="0" class="ep-temp-gaemi w-24 px-2 py-1 border border-slate-300 rounded font-mono text-[11px] text-right" data-lot-key="${escapeHtml(l.lot_key)}" placeholder="${l.stock}">
                     </div>
                 `).join('');
             }
             if (options && options.length > 0) {
-                html += `<div class="text-[11px] font-bold text-blue-900 mt-2">쿠팡 창고(세트 기준) 임시 재고 보정</div>`;
+                html += `<div class="text-[11px] font-bold text-slate-800 mt-2">쿠팡 창고(세트 기준) 임시 재고 보정</div>`;
                 html += options.map(o => `
-                    <div class="flex items-center justify-between gap-2 bg-white border border-rose-200 rounded px-2.5 py-1.5">
+                    <div class="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded px-2.5 py-1.5">
                         <span class="text-[11px] text-slate-700 truncate">${o.is_return ? '<span class="text-rose-700 font-bold mr-1">[반품]</span>' : ''}${escapeHtml(o.name)} [${escapeHtml(o.id)}] (현재 ${o.coupang_stock || 0}세트)</span>
                         <input type="number" min="0" class="ep-temp-coupang w-24 px-2 py-1 border border-slate-300 rounded font-mono text-[11px] text-right" data-opt-id="${escapeHtml(o.id)}" placeholder="${o.coupang_stock || 0}">
                     </div>
@@ -6626,9 +6510,9 @@ HTML_TEMPLATE = """
                     `).join('');
                 } else if (hasManualLots) {
                     lotSummaryHtml = activeManLots.length > 0
-                        ? activeManLots.map(l => `<div class="text-[11px] text-amber-800">• ${escapeHtml(l.label)}: ${(l.qty || 0).toLocaleString()}개 (${escapeHtml(l.expiry_date || '미지정')})</div>`).join('')
+                        ? activeManLots.map(l => `<div class="text-[11px] text-slate-700">• ${escapeHtml(l.label)}: ${(l.qty || 0).toLocaleString()}개 (${escapeHtml(l.expiry_date || '미지정')})</div>`).join('')
                         : '<span class="text-[11px] text-slate-400">수동 로트 보유 재고 0개</span>';
-                    inputColHtml = '<div class="text-[11px] text-amber-800 font-semibold py-1">우측 [상세 분할]에서 로트별 수정</div>';
+                    inputColHtml = '<div class="text-[11px] text-slate-600 font-semibold py-1">우측 [상세 분할]에서 로트별 수정</div>';
                 } else {
                     lotSummaryHtml = rawCsvLots.length > 0
                         ? '<span class="text-[11px] text-slate-400">개미 보유 재고 0개 (기본 소비기한 적용)</span>'
@@ -6638,7 +6522,7 @@ HTML_TEMPLATE = """
                     `;
                 }
                 const dBadge = (nearestDays !== null && nearestDays !== undefined)
-                    ? `<span class="text-[10px] font-mono ${nearestDays <= 120 ? 'text-rose-700 font-bold' : 'text-slate-500'}">(D-${nearestDays}일)</span>`
+                    ? `<span class="text-[10px] font-mono ${nearestDays <= 120 ? 'text-rose-600 font-bold' : 'text-slate-500'}">(D-${nearestDays}일)</span>`
                     : `<span class="text-[10px] text-rose-600 font-bold">미등록</span>`;
 
                 return `
@@ -6651,7 +6535,7 @@ HTML_TEMPLATE = """
                         <td class="p-2 align-top">${lotSummaryHtml}</td>
                         <td class="p-2 align-top">${inputColHtml}</td>
                         <td class="p-2 text-center align-top">
-                            <button type="button" data-prod-id="${escapeHtml(m.id || m.seller_code)}" onclick="openEditProductModal(this.dataset.prodId)" class="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded font-bold text-[11px]">상세 분할</button>
+                            <button type="button" data-prod-id="${escapeHtml(m.id || m.seller_code)}" onclick="openEditProductModal(this.dataset.prodId)" class="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 rounded font-semibold text-[11px]">상세 분할</button>
                         </td>
                     </tr>
                 `;
@@ -6736,7 +6620,7 @@ HTML_TEMPLATE = """
                 <td class="p-2"><input type="text" class="ac-b2b-base w-full px-2 py-1 border border-slate-300 rounded font-mono font-bold uppercase" placeholder="예: 10GL02" value="${escapeHtml(row.base_code || '')}"></td>
                 <td class="p-2"><input type="number" min="1" class="ac-b2b-mult w-full px-2 py-1 border border-slate-300 rounded font-mono text-right font-bold" value="${row.multiplier || 1}"></td>
                 <td class="p-2"><input type="text" class="ac-b2b-desc w-full px-2 py-1 border border-slate-300 rounded" placeholder="설명" value="${escapeHtml(row.desc || '')}"></td>
-                <td class="p-2 text-center"><button type="button" onclick="this.closest('tr').remove()" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded font-bold">삭제</button></td>
+                <td class="p-2 text-center"><button type="button" onclick="this.closest('tr').remove()" class="px-2 py-1 bg-white hover:bg-rose-50 border border-slate-200 text-rose-600 rounded font-semibold">삭제</button></td>
             `;
             tbody.appendChild(tr);
         }
@@ -7405,62 +7289,62 @@ HTML_TEMPLATE = """
                 let codeCell = '';
                 let infoCell = '';
                 if (row.channel === 'sales') {
-                    chBadge = '<span class="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 font-bold text-[10px]">매출코드</span>';
-                    codeCell = `<span class="font-mono font-bold text-indigo-950">${escapeHtml(row.code)}</span>`;
+                    chBadge = '<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-[10px]">매출코드</span>';
+                    codeCell = `<span class="font-mono font-bold text-slate-900">${escapeHtml(row.code)}</span>`;
                     infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.sampleName)}">${escapeHtml(row.sampleName || '상품명 미기재')}</div><div class="text-[10px] text-slate-400">7일 ${row.total_7d}개 · 30일 ${row.total_30d}개${row.malls ? ' · ' + escapeHtml(row.malls) : ''}</div>`;
                 } else if (row.channel === 'gaemi') {
-                    chBadge = '<span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-bold text-[10px]">개미창고</span>';
-                    codeCell = `<div class="font-mono font-bold text-amber-950">${escapeHtml(row.gaemi_code)}</div><div class="text-[11px] font-semibold text-slate-800">${escapeHtml(row.option_name || '(옵션명 없음)')}</div>`;
+                    chBadge = '<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-[10px]">개미창고</span>';
+                    codeCell = `<div class="font-mono font-bold text-slate-900">${escapeHtml(row.gaemi_code)}</div><div class="text-[11px] font-semibold text-slate-700">${escapeHtml(row.option_name || '(옵션명 없음)')}</div>`;
                     infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock.toLocaleString()}개${row.lot_count > 1 ? ` (${row.lot_count}개 로트 합계)` : ''}</div>`;
                 } else {
                     const retBadge = row.isReturn
                         ? `<div class="mt-0.5"><span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[9px]">🔄 반품</span></div>`
                         : '';
-                    chBadge = `<span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px]">쿠팡옵션</span>${retBadge}`;
+                    chBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-[10px]">쿠팡옵션</span>${retBadge}`;
                     let gradeChip = '';
                     if (row.grade && (row.isReturn || row.grade.toUpperCase() !== 'NEW')) {
-                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-rose-50 text-rose-800 border border-rose-200 font-mono font-bold text-[9px]">${escapeHtml(row.grade)}</span></div>`;
+                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-rose-50 text-rose-800 border border-rose-200 font-mono font-semibold text-[9px]">${escapeHtml(row.grade)}</span></div>`;
                     } else if (row.gradeMissing && !row.isReturn) {
-                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-bold text-[9px]" title="등급(G열) 업데이트 이전 업로드 데이터입니다">등급미확인</span></div>`;
+                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[9px]" title="등급(G열) 업데이트 이전 업로드 데이터입니다">등급미확인</span></div>`;
                     }
-                    codeCell = `<div class="font-mono font-bold text-blue-950">${escapeHtml(row.option_id)}</div><div class="text-[10px] text-slate-600">${escapeHtml(row.option_name || '')}</div>${gradeChip}`;
+                    codeCell = `<div class="font-mono font-bold text-slate-900">${escapeHtml(row.option_id)}</div><div class="text-[10px] text-slate-600">${escapeHtml(row.option_name || '')}</div>${gradeChip}`;
                     const pidTxt = row.product_id ? ` · 등록ID ${escapeHtml(row.product_id)}` : '';
                     infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock}세트 · 7일출고 ${row.sales_7d}세트 (추천 ${row.guessedBundle}개입${pidTxt})</div>`;
                 }
 
                 let statusBadge = '';
                 if (row.b2bBase) {
-                    statusBadge = `<span class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200 font-bold text-[10px]">B2B→${escapeHtml(row.b2bBase)}</span>`;
+                    statusBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-[10px]">B2B→${escapeHtml(row.b2bBase)}</span>`;
                 } else if (row.owners && row.owners.length > 0) {
                     statusBadge = row.owners.map(o => `<span class="inline-block px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono text-[10px] mr-0.5">${escapeHtml(o.seller_code)}</span>`).join('');
                 } else if (row.channel === 'sales' && row.code.startsWith('S')) {
                     statusBadge = '<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold text-[10px]">S코드</span>';
                 } else {
-                    statusBadge = '<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[10px]">미매핑</span>';
+                    statusBadge = '<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 font-semibold text-[10px]">미매핑</span>';
                 }
                 if (row.isHidden) {
-                    statusBadge += ' <span class="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 border border-slate-300 font-bold text-[10px]">숨김됨</span>';
+                    statusBadge += ' <span class="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 border border-slate-300 font-semibold text-[10px]">숨김됨</span>';
                 }
 
                 const bundleInputHtml = row.channel === 'coupang'
                     ? `<input type="number" min="1" value="${row.guessedBundle}" class="ac-map-exp-bundle w-12 px-1 py-1 border border-slate-300 rounded font-mono text-[10px] text-right" title="개입(배수)">`
                     : '';
                 const returnCheckHtml = row.channel === 'coupang'
-                    ? `<label class="inline-flex items-center space-x-1 px-1.5 py-1 rounded border ${row.isReturn ? 'bg-rose-100 border-rose-300 text-rose-900' : 'bg-white border-slate-300 text-slate-600'} text-[10px] font-bold cursor-pointer shrink-0" title="체크 시 반품 재고로 연결됩니다"><input type="checkbox" class="ac-map-exp-return" ${row.isReturn ? 'checked' : ''} onchange="this.closest('label').className='inline-flex items-center space-x-1 px-1.5 py-1 rounded border '+(this.checked?'bg-rose-100 border-rose-300 text-rose-900':'bg-white border-slate-300 text-slate-600')+' text-[10px] font-bold cursor-pointer shrink-0'"><span>🔄 반품</span></label>`
+                    ? `<label class="inline-flex items-center space-x-1 px-1.5 py-1 rounded border ${row.isReturn ? 'bg-rose-100 border-rose-300 text-rose-900' : 'bg-white border-slate-300 text-slate-600'} text-[10px] font-semibold cursor-pointer shrink-0" title="체크 시 반품 재고로 연결됩니다"><input type="checkbox" class="ac-map-exp-return" ${row.isReturn ? 'checked' : ''} onchange="this.closest('label').className='inline-flex items-center space-x-1 px-1.5 py-1 rounded border '+(this.checked?'bg-rose-100 border-rose-300 text-rose-900':'bg-white border-slate-300 text-slate-600')+' text-[10px] font-semibold cursor-pointer shrink-0'"><span>🔄 반품</span></label>`
                     : '';
 
                 let hideBtnHtml = '';
                 if (row.isHidden) {
-                    hideBtnHtml = `<button type="button" onclick="toggleHideUnmappedCsvRow(${idx}, false, this)" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded font-bold text-[10px] shrink-0" title="숨김 해제하고 미매핑 목록에 다시 표시">복원</button>`;
+                    hideBtnHtml = `<button type="button" onclick="toggleHideUnmappedCsvRow(${idx}, false, this)" class="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded font-semibold text-[10px] shrink-0" title="숨김 해제하고 미매핑 목록에 다시 표시">복원</button>`;
                 } else if (!row.isMapped) {
-                    hideBtnHtml = `<button type="button" onclick="toggleHideUnmappedCsvRow(${idx}, true, this)" class="px-2 py-1 bg-white hover:bg-rose-50 border border-slate-300 hover:border-rose-300 text-slate-600 hover:text-rose-700 rounded font-bold text-[10px] shrink-0" title="매핑이 불필요한 상품이면 미매핑 목록에서 숨깁니다">숨기기</button>`;
+                    hideBtnHtml = `<button type="button" onclick="toggleHideUnmappedCsvRow(${idx}, true, this)" class="px-2 py-1 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-600 hover:text-rose-700 rounded font-semibold text-[10px] shrink-0" title="매핑이 불필요한 상품이면 미매핑 목록에서 숨깁니다">숨기기</button>`;
                 }
 
                 const suggestedId = (row.suggested && row.suggested.master)
                     ? (row.suggested.master.id || row.suggested.master.seller_code)
                     : '';
                 const suggestedBadge = (row.suggested && row.suggested.master)
-                    ? `<span class="text-[9px] text-emerald-700 font-bold whitespace-nowrap" title="${escapeHtml(row.suggested.reason || '추천 매핑')}">✨ 추천 ${escapeHtml(row.suggested.master.seller_code)}</span>`
+                    ? `<span class="text-[9px] text-emerald-700 font-semibold whitespace-nowrap" title="${escapeHtml(row.suggested.reason || '추천 매핑')}">✨ 추천 ${escapeHtml(row.suggested.master.seller_code)}</span>`
                     : '';
                 const rowBgClass = row.isHidden
                     ? 'bg-slate-50/90 opacity-85 hover:bg-slate-100/80'
@@ -7474,12 +7358,12 @@ HTML_TEMPLATE = """
                         <td class="p-2 align-top">${statusBadge}</td>
                         <td class="p-2 align-top">
                             <div class="flex flex-wrap items-center gap-1">
-                                <select class="ac-map-exp-target flex-1 min-w-[130px] max-w-[185px] px-1.5 py-1 border ${suggestedId ? 'border-emerald-400 bg-emerald-50/40' : 'border-slate-300 bg-white'} rounded text-[10px]" data-suggested="${escapeHtml(suggestedId)}">${masterOptsHtml}</select>
+                                <select class="ac-map-exp-target flex-1 min-w-[130px] max-w-[185px] px-1.5 py-1 border ${suggestedId ? 'border-emerald-500 bg-white' : 'border-slate-300 bg-white'} rounded text-[10px]" data-suggested="${escapeHtml(suggestedId)}">${masterOptsHtml}</select>
                                 ${suggestedBadge}
                                 ${bundleInputHtml}
                                 ${returnCheckHtml}
-                                <button type="button" onclick="quickLinkCsvRow(${idx}, this)" class="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded font-bold text-[10px] shrink-0">연결</button>
-                                <button type="button" onclick="quickCreateFromCsvRow(${idx}, this)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded font-bold text-[10px] shrink-0" title="이 코드로 신규 단품 마스터 생성">+ 신규</button>
+                                <button type="button" onclick="quickLinkCsvRow(${idx}, this)" class="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded font-semibold text-[10px] shrink-0">연결</button>
+                                <button type="button" onclick="quickCreateFromCsvRow(${idx}, this)" class="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 rounded font-semibold text-[10px] shrink-0" title="이 코드로 신규 단품 마스터 생성">+ 신규</button>
                                 ${hideBtnHtml}
                             </div>
                         </td>
@@ -7727,14 +7611,14 @@ HTML_TEMPLATE = """
 
                 let salesHtml = '';
                 if (effSalesCodes.length === 0) {
-                    salesHtml = '<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">매출 연동 해제 (0건)</span>';
+                    salesHtml = '<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-semibold">매출 연동 해제 (0건)</span>';
                 } else {
                     salesHtml = effSalesCodes.map(sc => {
                         const up = String(sc).trim().toUpperCase();
                         const hit = salesInv[up];
-                        const hitTxt = hit ? ` <span class="text-indigo-600">(7일 ${hit.total_7d})</span>` : '';
+                        const hitTxt = hit ? ` <span class="text-slate-500">(7일 ${hit.total_7d})</span>` : '';
                         const cls = hasCustomSales
-                            ? 'bg-indigo-50 text-indigo-900 border-indigo-200'
+                            ? 'bg-slate-100 text-slate-900 border-slate-300'
                             : 'bg-slate-50 text-slate-700 border-slate-200';
                         const tag = hasCustomSales ? '' : '<span class="text-[9px] text-slate-400 mr-0.5">기본</span>';
                         return `<span class="inline-block px-1.5 py-0.5 rounded border font-mono text-[10px] mr-1 mb-1 ${cls}">${tag}${escapeHtml(up)}${hitTxt}</span>`;
@@ -7750,7 +7634,7 @@ HTML_TEMPLATE = """
                         const sumStock = groupedGaemi
                             .filter(e => e.gaemi_code.toUpperCase() === rc.toUpperCase() && (ro === '' || ro === '*' || e.option_name === ro))
                             .reduce((a, b) => a + b.stock, 0);
-                        return `<span class="inline-block px-1.5 py-0.5 rounded bg-amber-50 text-amber-950 border border-amber-300 font-mono text-[10px] mr-1 mb-1"><strong>${escapeHtml(rc)}</strong> · ${escapeHtml(ro || '* 전체')} <span class="text-amber-700">(${sumStock.toLocaleString()}개)</span></span>`;
+                        return `<span class="inline-block px-1.5 py-0.5 rounded bg-slate-50 text-slate-800 border border-slate-200 font-mono text-[10px] mr-1 mb-1"><strong>${escapeHtml(rc)}</strong> · ${escapeHtml(ro || '* 전체')} <span class="text-slate-500">(${sumStock.toLocaleString()}개)</span></span>`;
                     }).join('');
                 } else if ((m.gaemi_codes || []).length > 0) {
                     const legText = `${(m.gaemi_codes || []).join(', ')}${m.gaemi_filter ? ` (키워드: ${m.gaemi_filter})` : ''}`;
@@ -7760,12 +7644,12 @@ HTML_TEMPLATE = """
                         : `<span class="block text-[10px] text-slate-500 mt-0.5">매칭 ${gInfo.matched.length}건 · ${legStock.toLocaleString()}개</span>`;
                     gaemiHtml = `<span class="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-mono text-[10px]">[구방식] ${escapeHtml(legText)}</span>${warnZero}`;
                 } else {
-                    gaemiHtml = '<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">미지정</span>';
+                    gaemiHtml = '<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-semibold">미지정</span>';
                 }
 
                 let coupangHtml = '';
                 if (opts.length === 0) {
-                    coupangHtml = '<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">미지정</span>';
+                    coupangHtml = '<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-semibold">미지정</span>';
                 } else {
                     coupangHtml = opts.map(o => {
                         const oidStr = String(o.id || '').trim();
@@ -7776,8 +7660,8 @@ HTML_TEMPLATE = """
                         const retTag = isRet ? '<span class="px-1 rounded bg-rose-200 text-rose-900 font-bold mr-1">반품</span>' : '';
                         const cls = isRet
                             ? 'bg-rose-50 text-rose-900 border-rose-200'
-                            : 'bg-blue-50 text-blue-900 border-blue-200';
-                        const subCls = isRet ? 'text-rose-700' : 'text-blue-700';
+                            : 'bg-slate-50 text-slate-800 border-slate-200';
+                        const subCls = isRet ? 'text-rose-700' : 'text-slate-500';
                         return `<span class="inline-block px-1.5 py-0.5 rounded border font-mono text-[10px] mr-1 mb-1 ${cls}">${retTag}${escapeHtml(o.id)} <span class="${subCls}">(${o.bundle || 1}개입${stTxt})</span></span>`;
                     }).join('');
                 }
@@ -7792,7 +7676,7 @@ HTML_TEMPLATE = """
                         <td class="p-2.5 align-top">${gaemiHtml}</td>
                         <td class="p-2.5 align-top">${coupangHtml}</td>
                         <td class="p-2.5 text-center align-top">
-                            <button type="button" data-prod-id="${escapeHtml(m.id || m.seller_code)}" onclick="openCodeMappingModal(this.dataset.prodId)" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-[11px] shadow-xs whitespace-nowrap">
+                            <button type="button" data-prod-id="${escapeHtml(m.id || m.seller_code)}" onclick="openCodeMappingModal(this.dataset.prodId)" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold text-[11px] whitespace-nowrap">
                                 🔗 매핑 지정
                             </button>
                         </td>
@@ -7902,10 +7786,10 @@ HTML_TEMPLATE = """
                 const hit = salesInv[sc];
                 const statTxt = hit ? ` · 7일 ${hit.total_7d} / 30일 ${hit.total_30d}` : ' · CSV 미매칭';
                 const defBadge = (!cmState.sales_is_custom && sc === String(cmState.seller_code).toUpperCase())
-                    ? '<span class="text-[9px] bg-indigo-100 text-indigo-800 px-1 rounded mr-1">기본</span>'
+                    ? '<span class="text-[9px] bg-slate-100 text-slate-700 px-1 rounded mr-1">기본</span>'
                     : '';
                 return `
-                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-indigo-300 text-indigo-950 font-mono text-[11px] font-bold shadow-xs">
+                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-900 font-mono text-[11px] font-bold">
                         ${defBadge}${escapeHtml(sc)}<span class="font-sans font-normal text-[10px] text-slate-500">${statTxt}</span>
                         <button type="button" onclick="removeCmSalesCode(${idx})" class="ml-1 text-rose-500 hover:text-rose-700 font-black" title="제거">&times;</button>
                     </span>
@@ -7993,15 +7877,15 @@ HTML_TEMPLATE = """
                 const isSelected = cmState.sales_codes.includes(it.code);
                 let ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px]">미매핑</span>';
                 if (isSelected) {
-                    ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[10px]">연결됨</span>';
+                    ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold text-[10px]">연결됨</span>';
                 } else if (it.b2bBase) {
-                    ownerBadge = `<span class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 text-[10px]">B2B→${escapeHtml(it.b2bBase)}</span>`;
+                    ownerBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px]">B2B→${escapeHtml(it.b2bBase)}</span>`;
                 } else if (it.owners.length > 0) {
                     ownerBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px]">타상품: ${escapeHtml(it.owners.map(o => o.seller_code).join(', '))}</span>`;
                 }
                 const btnHtml = isSelected
-                    ? `<button type="button" onclick="toggleCmSalesCsvItem(${idx})" class="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[10px]">해제</button>`
-                    : `<button type="button" onclick="toggleCmSalesCsvItem(${idx})" class="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px]">+ 연결</button>`;
+                    ? `<button type="button" onclick="toggleCmSalesCsvItem(${idx})" class="px-2 py-0.5 rounded bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 font-semibold text-[10px]">해제</button>`
+                    : `<button type="button" onclick="toggleCmSalesCsvItem(${idx})" class="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-white font-semibold text-[10px]">+ 연결</button>`;
                 return `
                     <div class="py-1.5 px-1 flex items-center justify-between gap-2 hover:bg-slate-50">
                         <div class="min-w-0 flex-1">
@@ -8063,13 +7947,13 @@ HTML_TEMPLATE = """
                     </div>
                 `;
             } else {
-                banner.className = 'rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-950 space-y-1.5';
+                banner.className = 'rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-950 space-y-1.5';
                 banner.innerHTML = `
                     <div class="flex flex-wrap items-center justify-between gap-2">
                         <span>ℹ️ 현재 구방식 규칙 <strong>[${escapeHtml(legTxt)}]</strong> 사용 중 (CSV 일치 ${legRes.matched.length}건).</span>
                         <div class="flex items-center gap-1.5">
-                            ${legRes.matched.length > 0 ? `<button type="button" onclick="importLegacyGaemiMatchesToCm()" class="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-[10px]">✨ 현재 일치 ${legRes.matched.length}건 정확 매핑으로 가져오기</button>` : ''}
-                            <button type="button" onclick="clearLegacyGaemiInCm()" class="px-2 py-0.5 bg-white border border-amber-300 text-slate-700 rounded font-bold text-[10px]">구방식 규칙 비우기</button>
+                            ${legRes.matched.length > 0 ? `<button type="button" onclick="importLegacyGaemiMatchesToCm()" class="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 text-white rounded font-semibold text-[10px]">✨ 현재 일치 ${legRes.matched.length}건 정확 매핑으로 가져오기</button>` : ''}
+                            <button type="button" onclick="clearLegacyGaemiInCm()" class="px-2 py-0.5 bg-white border border-slate-300 text-slate-700 rounded font-semibold text-[10px]">구방식 규칙 비우기</button>
                         </div>
                     </div>
                 `;
@@ -8117,11 +8001,11 @@ HTML_TEMPLATE = """
                 const optLabel = ro ? ro : '* (해당 코드 전체 옵션)';
                 const stockLabel = grouped.length > 0 ? ` · ${sumStock.toLocaleString()}개` : '';
                 return `
-                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-amber-950 text-[11px] font-bold shadow-xs">
+                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-900 text-[11px] font-bold">
                         <span class="font-mono">${escapeHtml(rc)}</span>
                         <span class="text-slate-400">|</span>
                         <span>${escapeHtml(optLabel)}</span>
-                        <span class="font-mono font-normal text-[10px] text-amber-700">${stockLabel}</span>
+                        <span class="font-mono font-normal text-[10px] text-slate-500">${stockLabel}</span>
                         <button type="button" onclick="removeCmGaemiRule(${idx})" class="ml-1 text-rose-500 hover:text-rose-700 font-black" title="제거">&times;</button>
                     </span>
                 `;
@@ -8212,21 +8096,21 @@ HTML_TEMPLATE = """
                 const wildMatch = exactIdx < 0 && isSelectedEntry(it);
                 let ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px]">미매핑</span>';
                 if (exactIdx >= 0 || wildMatch) {
-                    ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[10px]">연결됨</span>';
+                    ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold text-[10px]">연결됨</span>';
                 } else if (it.owners.length > 0) {
                     ownerBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px]">타상품: ${escapeHtml(it.owners.map(o => o.seller_code).join(', '))}</span>`;
                 }
                 const btnHtml = (exactIdx >= 0)
-                    ? `<button type="button" onclick="toggleCmGaemiCsvItem(${idx})" class="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[10px]">해제</button>`
+                    ? `<button type="button" onclick="toggleCmGaemiCsvItem(${idx})" class="px-2 py-0.5 rounded bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 font-semibold text-[10px]">해제</button>`
                     : (wildMatch
                         ? '<span class="text-[10px] text-emerald-700 font-semibold">전체규칙 포함</span>'
-                        : `<button type="button" onclick="toggleCmGaemiCsvItem(${idx})" class="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px]">+ 연결</button>`);
+                        : `<button type="button" onclick="toggleCmGaemiCsvItem(${idx})" class="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-white font-semibold text-[10px]">+ 연결</button>`);
                 return `
                     <div class="py-1.5 px-1 flex items-center justify-between gap-2 hover:bg-slate-50">
                         <div class="min-w-0 flex-1">
                             <div class="flex flex-wrap items-center gap-1.5">
                                 <span class="font-mono font-bold text-slate-900">${escapeHtml(it.gaemi_code)}</span>
-                                <span class="font-bold text-amber-950 bg-amber-100/70 px-1.5 rounded text-[10px]">${escapeHtml(it.option_name || '(옵션명 없음)')}</span>
+                                <span class="font-semibold text-slate-700 bg-slate-100 px-1.5 rounded text-[10px]">${escapeHtml(it.option_name || '(옵션명 없음)')}</span>
                                 ${ownerBadge}
                                 <span class="text-[10px] text-slate-600 font-mono">재고 ${it.stock.toLocaleString()}개${it.lot_count > 1 ? ` (${it.lot_count}로트)` : ''}</span>
                             </div>
@@ -8259,7 +8143,7 @@ HTML_TEMPLATE = """
             const box = document.getElementById('cm_coupang_rows');
             const coupangInv = (adminConfigCache && adminConfigCache.coupang_inventory) || {};
             if (cmState.options.length === 0) {
-                box.innerHTML = '<div class="text-[11px] text-slate-500 bg-white border border-blue-200 rounded-lg p-2.5">연결된 쿠팡 옵션 ID가 없습니다. 아래에서 직접 입력하거나 CSV 목록에서 추가하세요.</div>';
+                box.innerHTML = '<div class="text-[11px] text-slate-500 bg-white border border-slate-200 rounded-lg p-2.5">연결된 쿠팡 옵션 ID가 없습니다. 아래에서 직접 입력하거나 CSV 목록에서 추가하세요.</div>';
                 return;
             }
             box.innerHTML = cmState.options.map((opt, idx) => {
@@ -8272,19 +8156,19 @@ HTML_TEMPLATE = """
                     ? `현재 ${cd.stock || 0}세트 · 7일출고 ${cd.sales_7d || 0}세트${gradeMissing && !isRet ? ' (등급미확인)' : ''}`
                     : 'CSV 미등록';
                 return `
-                    <div class="flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-rose-300 bg-rose-50/35' : 'border-blue-200'} rounded-lg p-2">
-                        <span class="font-mono font-bold ${isRet ? 'text-rose-950' : 'text-blue-950'} w-32 truncate" title="${escapeHtml(opt.id)}">${escapeHtml(opt.id)}</span>
+                    <div class="flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-rose-300 bg-rose-50/35' : 'border-slate-200'} rounded-lg p-2">
+                        <span class="font-mono font-bold ${isRet ? 'text-rose-950' : 'text-slate-900'} w-32 truncate" title="${escapeHtml(opt.id)}">${escapeHtml(opt.id)}</span>
                         <div class="flex items-center space-x-1">
                             <input type="number" min="1" value="${opt.bundle || 1}" oninput="cmState.options[${idx}].bundle = Math.max(1, parseInt(this.value || '1', 10) || 1)" class="w-16 px-2 py-1 border border-slate-300 rounded font-mono text-[11px] text-right font-bold">
                             <span class="text-[11px] text-slate-500">개입</span>
                         </div>
                         <input type="text" value="${escapeHtml(opt.name || '')}" oninput="cmState.options[${idx}].name = this.value" placeholder="옵션명" class="flex-1 min-w-[120px] px-2.5 py-1 border border-slate-300 rounded text-[11px]">
-                        <label class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded border ${isRet ? 'bg-rose-100 border-rose-300 text-rose-900' : 'bg-slate-50 border-slate-200 text-slate-600'} text-[10px] font-bold cursor-pointer shrink-0" title="${csvIsRet ? 'CSV G열(상품등급)에 반품이 포함되어 자동 반품 처리됩니다' : '체크 시 정상 재고에서 제외하고 반품 재고로 관리합니다'}">
+                        <label class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded border ${isRet ? 'bg-rose-100 border-rose-300 text-rose-900' : 'bg-slate-50 border-slate-200 text-slate-600'} text-[10px] font-semibold cursor-pointer shrink-0" title="${csvIsRet ? 'CSV G열(상품등급)에 반품이 포함되어 자동 반품 처리됩니다' : '체크 시 정상 재고에서 제외하고 반품 재고로 관리합니다'}">
                             <input type="checkbox" ${isRet ? 'checked' : ''} ${csvIsRet ? 'disabled' : ''} onchange="cmState.options[${idx}].is_return = this.checked; renderCmCoupangRows();">
                             <span>🔄 반품${csvIsRet && cGrade ? ` (${escapeHtml(cGrade)})` : ''}</span>
                         </label>
                         <span class="text-[10px] font-mono text-slate-500 shrink-0">${csvInfo}</span>
-                        <button type="button" onclick="removeCmCoupangRow(${idx})" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-bold">삭제</button>
+                        <button type="button" onclick="removeCmCoupangRow(${idx})" class="px-2 py-1 bg-white hover:bg-rose-50 border border-slate-200 text-rose-600 rounded text-[10px] font-semibold">삭제</button>
                     </div>
                 `;
             }).join('');
@@ -8390,7 +8274,7 @@ HTML_TEMPLATE = """
                 const isSelected = cmState.options.some(o => o.id === it.id);
                 let ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px]">미매핑</span>';
                 if (isSelected) {
-                    ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[10px]">연결됨</span>';
+                    ownerBadge = '<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold text-[10px]">연결됨</span>';
                 } else if (it.owners.length > 0) {
                     ownerBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px]">타상품: ${escapeHtml(it.owners.map(o => o.seller_code).join(', '))}</span>`;
                 }
@@ -8398,17 +8282,17 @@ HTML_TEMPLATE = """
                     ? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[10px]">🔄 반품${it.grade ? ` (${escapeHtml(it.grade)})` : ''}</span>`
                     : '';
                 const pidBadge = !isSelected && it.samePid
-                    ? '<span class="px-1 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-[9px]">🔗 동일 등록ID</span>'
+                    ? '<span class="px-1 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold text-[9px]">🔗 동일 등록ID</span>'
                     : '';
                 const btnHtml = isSelected
-                    ? `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[10px]">해제</button>`
-                    : `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded ${it.is_return ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'} text-white font-bold text-[10px]">+ 연결 (${it.guessedBundle}개입)</button>`;
+                    ? `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 font-semibold text-[10px]">해제</button>`
+                    : `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded ${it.is_return ? 'bg-rose-700 hover:bg-rose-800' : 'bg-slate-900 hover:bg-slate-800'} text-white font-semibold text-[10px]">+ 연결 (${it.guessedBundle}개입)</button>`;
                 return `
                     <div class="py-1.5 px-1 flex items-center justify-between gap-2 ${it.is_return ? 'bg-rose-50/35 hover:bg-rose-50/70' : 'hover:bg-slate-50'}">
                         <div class="min-w-0 flex-1">
                             <div class="flex flex-wrap items-center gap-1.5">
                                 <span class="font-mono font-bold text-slate-900">${escapeHtml(it.id)}</span>
-                                <span class="font-bold text-blue-950 bg-blue-100/70 px-1.5 rounded text-[10px]">${escapeHtml(it.option_name || '옵션명 없음')}</span>
+                                <span class="font-semibold text-slate-700 bg-slate-100 px-1.5 rounded text-[10px]">${escapeHtml(it.option_name || '옵션명 없음')}</span>
                                 ${retBadge}
                                 ${pidBadge}
                                 ${ownerBadge}
