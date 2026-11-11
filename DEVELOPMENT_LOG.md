@@ -94,3 +94,23 @@
 5. **남은 문제 및 다음 작업 시 주의사항**:
    - 수정된 `google_apps_script_bridge.gs` 코드는 Google Apps Script 웹앱 편집기에 사용자가 직접 붙여넣어 **새 버전으로 재배포**해야 클라우드 백업 가드·일일 백업이 반영됨.
    - `origin/main` 원격 푸시는 규칙상 미실행 상태이며, 배포 전 관리자 센터 `[JSON 전체 백업 다운로드]` 후 사용자 승인 하에 커밋·푸시해야 함.
+
+---
+
+## [2026-11-11] 상품 행 확장 UI 단순화(쿠팡 번들 재고 전용) · 세부정보 팝업 모달 분리 · 매출 주문일 시리얼 정규화
+1. **작업 날짜와 변경한 기능**: `2026-11-11` / 상품 행 클릭 시 쿠팡 번들 재고만 심플하게 노출하고 전체 상세 내역은 `세부정보보기` 팝업 모달로 분리, `recent_orders` Excel 시리얼 날짜 표시 정규화
+2. **수정한 파일과 핵심 변경 사항**:
+   - `app.py`:
+     - `renderMasterTable()` 내 인라인 확장 행(`#subrow_${m.id}`)에서 입고 배너·4칸 KPI·개미 FIFO·소진 시뮬레이션·B2B·쿠팡외 최근 주문 카드를 제거하고, 상단 요약 Strip(`세부정보보기` / `접기`) + 정상·반품 요약 바 + 번들 그룹별(`N개입 번들`) 카드 UI만 가독성 높게 배치(기존 `.subrow-sticky-shell` 및 반품 전환·등급미확인 마커 유지). 툴바 전체 토글 버튼 텍스트를 `번들 재고 펼치기`/`번들 재고 접기`로 변경.
+     - 신규 팝업 모달 `#productDetailModal` (`z-[95]`) 및 `openProductDetailModal()`, `closeProductDetailModal()`, `renderProductDetailModal()`, `Esc` 키/배경 클릭 닫기, `isAnyModalOpen()`/`updateAdminUI()`/`fetchSummary()` 연동 추가. 팝업 내부에 입고예정·판매정체 알람·4칸 KPI·리드타임/메모·개미창고 소비기한 FIFO·소진 시뮬레이션·쿠팡 번들 요약·B2B/쿠팡외 최근 주문을 배치.
+     - `get_summary()`에서 기존 저장 데이터(`sales_inventory`)를 읽어 `recent_orders`를 생성할 때도 `normalize_gaemi_reg_date()`로 Excel 시리얼 날짜(`46316.69378472222` 등)를 `YYYY-MM-DD HH:MM:SS` 형식으로 정규화하고, B2B(S코드) 합산 시 날짜 내림차순 정렬 및 최근 5건 제한 추가(프론트 `renderProductDetailModal`에서도 `normalizeJsGaemiRegDate()` 이중 적용).
+   - `test_admin_mode.py`: `test_20_compact_bundle_subrow_detail_modal_and_sales_date_norm` 추가(구 Excel 시리얼 매출 주문일 정규화, 인라인 확장행 vs 팝업 모달 구조 분리, PIN/금지 컬럼 미노출 검증)
+3. **변경 이유 및 중요한 설계 결정**: 모바일/좁은 화면에서 행을 클릭했을 때 9개 섹션이 세로로 길게 나열되어 핵심인 쿠팡 번들 재고 파악이 어렵다는 피드백을 반영해, 인라인 확장은 쿠팡 번들별 정상·반품 실물 재고 확인에만 집중하고 전체 운영 지표·FIFO·시뮬레이션·주문 내역은 독립 팝업 모달(`z-[95]`, 수정/매핑 모달 아래 레이어)로 분리함. 또한 화면 하단 최근 주문에 노출되던 구 매출 데이터의 Excel 시리얼 날짜를 재업로드 전에도 즉시 사람이 읽을 수 있도록 조회 시점에 정규화함.
+4. **실행한 테스트와 그 결과**:
+   - `python -W error::SyntaxWarning -m py_compile app.py test_app.py test_business_logic.py test_admin_mode.py` — 통과 (exit code 0)
+   - 정적 HTML/JS 검증(`verify_html_js.py`, 스크래치) — 통과 (`JS delimiter & string/template balance OK`, 158개 정적 `document.getElementById()` 타겟 확인, 143개 인라인 이벤트 핸들러 확인, `GET /` 381,461 chars, `GET /api/summary` 38 masters)
+   - `python -m unittest discover -p "test_*.py" -v` — 35개 테스트 전부 통과 (`Ran 35 tests in 2.082s`, `OK`)
+   - `git diff --stat inventory_master_store.json` — 출력 없음 (운영 원본 데이터 무수정 확인)
+5. **남은 문제 및 다음 작업 시 주의사항**:
+   - 현재 변경사항은 로컬 워킹 트리(`app.py`, `test_admin_mode.py`, `DEVELOPMENT_LOG.md`)에만 반영된 미커밋 상태이며, `origin/main` 푸시 및 Render 배포 전 사용자 확인이 필요함.
+   - `test_13`, `test_16`, `test_17`, `test_20`은 인라인 확장행의 `.subrow-sticky-shell` / `쿠팡 윙 옵션별 번들 · 실물 재고` / `반품` 버튼 마커와 팝업 모달의 `판매 정체(소진무) 알람:` 마커를 검증하므로, 추후 UI 수정 시 해당 마커 유실에 유의할 것.

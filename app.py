@@ -1661,7 +1661,11 @@ def get_summary():
             s30 = int(s_data.get("total_30d", s7) or 0)
             raw_other_sales_7d += s7
             raw_other_sales_30d += s30
-            collected_orders.extend(list(s_data.get("orders", [])[:5]))
+            raw_orders = s_data.get("orders", [])[:5]
+            for ord_item in raw_orders:
+                norm_ord = dict(ord_item)
+                norm_ord["date"] = normalize_gaemi_reg_date(ord_item.get("date", ""))
+                collected_orders.append(norm_ord)
 
         if len(effective_sales_codes) > 1 and len(collected_orders) > 1:
             collected_orders.sort(key=lambda o: str(o.get("date", "")), reverse=True)
@@ -1727,13 +1731,16 @@ def get_summary():
                 target["coupang_sales_7d"] += (s_c_7d * mult)
                 target["coupang_sales_30d"] += (s_c_30d * mult)
 
-                for ord_item in s_orders:
+                for ord_item in s_orders[:5]:
                     target["recent_orders"].append({
-                        "date": ord_item.get("date", ""),
+                        "date": normalize_gaemi_reg_date(ord_item.get("date", "")),
                         "qty": ord_item.get("qty", 0) * mult,
                         "mall": f"{ord_item.get('mall', '타채널')} ({s_code} x{mult})",
                         "name": ord_item.get("name", "")
                     })
+                if len(target["recent_orders"]) > 1:
+                    target["recent_orders"].sort(key=lambda o: str(o.get("date", "")), reverse=True)
+                    target["recent_orders"] = target["recent_orders"][:5]
 
                 target["b2b_shared_sales"].append({
                     "s_code": s_code,
@@ -3534,9 +3541,9 @@ HTML_TEMPLATE = """
                         </select>
 
                         <!-- 전체 펼치기/접기 -->
-                        <button type="button" onclick="toggleAllOptionDetails()" class="text-xs px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium transition flex items-center gap-1">
-                            <i class="fa-solid fa-list-ul text-slate-400"></i>
-                            <span id="expandBtnText">소비기한 세부내역</span>
+                        <button type="button" onclick="toggleAllOptionDetails()" title="전체 상품의 쿠팡 번들 재고 펼치기/접기" class="text-xs px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium transition flex items-center gap-1">
+                            <i class="fa-solid fa-cubes text-slate-400"></i>
+                            <span id="expandBtnText">번들 재고 펼치기</span>
                         </button>
 
                         <!-- 열 너비 조정 패널 토글 -->
@@ -4406,6 +4413,30 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
+    <!-- 5. 상품 전체 세부정보 팝업 모달 (z-[95]: 수정/코드매핑 모달 z-[100]/[110] 아래) -->
+    <div id="productDetailModal" onclick="if(event.target === this) closeProductDetailModal();" class="hidden fixed inset-0 z-[95] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl flex flex-col max-h-[90vh] overflow-hidden">
+            <div class="bg-slate-50/90 border-b border-slate-200 px-4 sm:px-5 py-3.5 flex items-start justify-between gap-3 shrink-0">
+                <div class="min-w-0 flex-1 space-y-1">
+                    <div id="pd_modal_badges" class="flex flex-wrap items-center gap-1.5"></div>
+                    <h3 id="pd_modal_title" class="font-bold text-sm sm:text-base text-slate-900 break-words">상품 세부정보</h3>
+                </div>
+                <button type="button" onclick="closeProductDetailModal()" class="shrink-0 w-8 h-8 rounded-lg hover:bg-slate-200/70 text-slate-500 hover:text-slate-800 flex items-center justify-center transition" title="닫기 (Esc)">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+
+            <div id="pd_modal_body" class="p-4 sm:p-5 overflow-y-auto flex-1 space-y-3.5 text-xs bg-white">
+                <!-- JS 동적 렌더링 -->
+            </div>
+
+            <div class="bg-slate-50 border-t border-slate-200 px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <div id="pd_modal_admin_actions" class="flex flex-wrap items-center gap-2"></div>
+                <button type="button" onclick="closeProductDetailModal()" class="ml-auto px-4 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition">닫기</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 스크립트 로직 -->
     <script>
         // 열 정의 (13개 열): 개미창고와 쿠팡창고 각각의 재고량, 런웨이, 소비기한 미니태그, 추천 조치 버튼 포함
@@ -4582,6 +4613,7 @@ HTML_TEMPLATE = """
         let publicTunnelUrl = null;
         let expandAllOptions = false;
         let expandedRowIds = new Set();
+        let currentDetailProdId = null;
         let activeCategory = 'all';
         let activeStatus = 'all';
         let adminToken = '';
@@ -4601,10 +4633,12 @@ HTML_TEMPLATE = """
             const m2 = document.getElementById('editProductModal');
             const m3 = document.getElementById('adminCenterModal');
             const m4 = document.getElementById('codeMappingModal');
+            const m5 = document.getElementById('productDetailModal');
             return (m1 && !m1.classList.contains('hidden')) ||
                    (m2 && !m2.classList.contains('hidden')) ||
                    (m3 && !m3.classList.contains('hidden')) ||
-                   (m4 && !m4.classList.contains('hidden'));
+                   (m4 && !m4.classList.contains('hidden')) ||
+                   (m5 && !m5.classList.contains('hidden'));
         }
 
         function closeAdminMenu() {
@@ -4638,6 +4672,10 @@ HTML_TEMPLATE = """
                 if (toolbar) toolbar.classList.add('hidden');
             }
             if (allMasterData.length > 0) renderMasterTable();
+            const pdEl = document.getElementById('productDetailModal');
+            if (pdEl && !pdEl.classList.contains('hidden') && currentDetailProdId) {
+                renderProductDetailModal(currentDetailProdId);
+            }
         }
 
         async function checkAdminSession() {
@@ -4902,7 +4940,7 @@ HTML_TEMPLATE = """
         function toggleAllOptionDetails() {
             expandAllOptions = !expandAllOptions;
             if (!expandAllOptions) expandedRowIds.clear();
-            document.getElementById('expandBtnText').innerText = expandAllOptions ? "소비기한 접기" : "소비기한 세부내역";
+            document.getElementById('expandBtnText').innerText = expandAllOptions ? "번들 재고 접기" : "번들 재고 펼치기";
             renderMasterTable();
         }
 
@@ -4924,6 +4962,321 @@ HTML_TEMPLATE = """
                 expandedRowIds.delete(prodId);
             }
         }
+
+        function openProductDetailModal(prodId) {
+            currentDetailProdId = prodId;
+            if (!renderProductDetailModal(prodId)) return;
+            const modal = document.getElementById('productDetailModal');
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function closeProductDetailModal() {
+            currentDetailProdId = null;
+            const modal = document.getElementById('productDetailModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function renderProductDetailModal(prodId) {
+            const m = allMasterData.find(x => x.id === prodId || x.seller_code === prodId);
+            if (!m) {
+                closeProductDetailModal();
+                return false;
+            }
+            const badgesEl = document.getElementById('pd_modal_badges');
+            const titleEl = document.getElementById('pd_modal_title');
+            const bodyEl = document.getElementById('pd_modal_body');
+            const adminActionsEl = document.getElementById('pd_modal_admin_actions');
+            if (!badgesEl || !titleEl || !bodyEl || !adminActionsEl) return false;
+
+            const theme = getStatusTheme(m.status_color);
+            const badgeClass = theme.pill;
+            const ptypeBadge = m.product_type === '수입'
+                ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200/80 text-slate-800 border border-slate-300 whitespace-nowrap">수입</span>'
+                : '<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-50 text-slate-600 border border-slate-200 whitespace-nowrap">사입</span>';
+            const b2bBadge = (m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0)
+                ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">B2B연동</span>`
+                : '';
+
+            badgesEl.innerHTML = `
+                ${ptypeBadge}
+                <span class="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">${escapeHtml(m.seller_code)}</span>
+                ${m.category ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">${escapeHtml(m.category)}</span>` : ''}
+                <span class="px-2 py-0.5 rounded-full text-[10px] border break-keep ${badgeClass}">${escapeHtml(m.status)}</span>
+                ${b2bBadge}
+            `;
+            titleEl.textContent = m.name || m.seller_code || '상품 세부정보';
+
+            const effLt = m.effective_lead_time || 110;
+            const effPrep = m.effective_prepare_limit || 130;
+            const activeGaemiLots = (m.gaemi_lots || []).filter(lot => (lot.stock || 0) > 0);
+            const bundleGroups = Array.isArray(m.coupang_bundle_groups) ? m.coupang_bundle_groups : [];
+            const retPkgTot = m.coupang_return_package_total || 0;
+            const retPhysTot = m.coupang_return_physical_total || 0;
+            const recentOrders = Array.isArray(m.recent_orders) ? m.recent_orders : [];
+
+            const inboundBannerHtml = m.in_transit_qty > 0 ? `
+                <div class="bg-teal-50/75 border border-teal-200 rounded-xl px-3.5 py-2.5 text-[11px] text-teal-950 flex items-start gap-2">
+                    <i class="fa-solid fa-ship text-teal-600 mt-0.5 shrink-0"></i>
+                    <div class="min-w-0 break-words leading-relaxed">
+                        <span class="font-bold">발주 완료 · 입고 예정:</span>
+                        <span>
+                            ${m.expected_arrival_date ? `<strong>${escapeHtml(m.expected_arrival_date)}</strong>에 ` : ''}<strong>+${m.in_transit_qty.toLocaleString()}개</strong> 입고 예정입니다.
+                            ${m.daily_sales > 0
+                                ? `(${m.master_physical_total > 0 ? `현재 실물 <strong>${escapeHtml(m.total_runway_str)}</strong>` : '현재 실물 <strong>0개</strong>'} → 입고 반영 시 총 <strong>${escapeHtml(m.effective_runway_str)}</strong>)`
+                                : `(입고 반영 시 가용재고 <strong>${(m.master_physical_total + m.in_transit_qty).toLocaleString()}개</strong> 확보)`}
+                        </span>
+                    </div>
+                </div>
+            ` : '';
+
+            const noSalesBannerHtml = m.is_no_sales ? `
+                <div class="bg-orange-50/75 border border-orange-200 rounded-xl px-3.5 py-2.5 text-[11px] text-orange-950 flex items-start gap-2">
+                    <i class="fa-solid fa-bell text-orange-600 mt-0.5 shrink-0"></i>
+                    <div class="min-w-0 break-words leading-relaxed">
+                        <span class="font-bold">판매 정체(소진무) 알람:</span>
+                        <span>현재 재고 <strong>${m.master_physical_total.toLocaleString()}개</strong> 보유 중이나 최근 7일·30일 출고량이 <strong>0개</strong>입니다. 상품 노출·프로모션 또는 채널 코드 매핑을 점검하세요.</span>
+                    </div>
+                </div>
+            ` : '';
+
+            const lotSyncBannerHtml = m.lot_sync_note ? `
+                <div class="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-[11px] text-slate-700 font-medium break-words">
+                    🔄 <strong>로트 동기화:</strong> ${escapeHtml(m.lot_sync_note)}
+                </div>
+            ` : '';
+
+            const kpiGridHtml = `
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                    <div class="bg-slate-50/70 border border-slate-200 rounded-xl px-3 py-2">
+                        <div class="text-[10px] font-semibold text-slate-500">총 가용재고</div>
+                        <div class="font-bold font-mono text-sm text-slate-900 mt-0.5">${m.master_physical_total.toLocaleString()}개</div>
+                        ${m.in_transit_qty > 0
+                            ? `<div class="text-[10px] font-semibold text-teal-700 truncate">🚢 예정 +${m.in_transit_qty.toLocaleString()}개</div>`
+                            : `<div class="text-[10px] text-slate-400">전체 창고 합산</div>`}
+                    </div>
+                    <div class="bg-slate-50/70 border border-slate-200 rounded-xl px-3 py-2">
+                        <div class="text-[10px] font-semibold text-slate-500">개미창고(3PL)</div>
+                        <div class="font-bold font-mono text-sm text-slate-900 mt-0.5">${m.gaemi_total.toLocaleString()}개</div>
+                        <div class="text-[10px] text-slate-500 truncate">런웨이 ${escapeHtml(m.gaemi_runway_str)}</div>
+                    </div>
+                    <div class="bg-slate-50/70 border border-slate-200 rounded-xl px-3 py-2">
+                        <div class="text-[10px] font-semibold text-slate-500">쿠팡(실물)</div>
+                        <div class="font-bold font-mono text-sm text-slate-900 mt-0.5">${m.coupang_physical_total.toLocaleString()}개</div>
+                        <div class="text-[10px] text-slate-500 truncate">${m.coupang_package_total.toLocaleString()}세트 · ${escapeHtml(m.coupang_runway_str)}</div>
+                        ${retPhysTot > 0
+                            ? `<div class="text-[10px] font-medium text-slate-500 truncate mt-0.5">🔄 반품 ${retPhysTot.toLocaleString()}개 (${retPkgTot.toLocaleString()}세트)</div>`
+                            : ''}
+                    </div>
+                    <div class="${m.is_no_sales ? 'bg-orange-50/50 border-orange-200' : 'bg-slate-50/70 border-slate-200'} border rounded-xl px-3 py-2">
+                        <div class="text-[10px] font-semibold ${m.is_no_sales ? 'text-orange-800' : 'text-slate-500'}">출고 속도 · 통합</div>
+                        <div class="font-bold font-mono text-sm ${m.is_no_sales ? 'text-orange-950' : 'text-slate-900'} mt-0.5">일 ${m.daily_sales}개</div>
+                        <div class="text-[10px] ${m.is_no_sales ? 'text-orange-700' : 'text-slate-500'} truncate">7일 ${m.total_sales_7d} · 30일 ${m.total_sales_30d || 0}</div>
+                    </div>
+                </div>
+            `;
+
+            const criteriaAndNoteHtml = `
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1.5 text-[11px] text-slate-700">
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium">
+                        <span><i class="fa-solid fa-gear text-slate-400 mr-1"></i>리드타임 <strong>${effLt}일</strong> (안전 +${effPrep - effLt}일)</span>
+                        <span class="text-slate-300">·</span>
+                        <span>기한경고 <strong>${m.effective_expiry_warn || 120}일</strong></span>
+                        ${m.in_transit_qty > 0 ? `<span class="text-slate-300">·</span><span class="text-teal-700 font-semibold">입고예정 +${m.in_transit_qty.toLocaleString()}개 (${escapeHtml(m.expected_arrival_date || '미정')})</span>` : ''}
+                    </div>
+                    ${m.note ? `
+                        <div class="pt-1.5 border-t border-slate-200/80 break-words text-slate-700">
+                            <i class="fa-solid fa-circle-info mr-1 text-slate-500"></i>
+                            <span class="font-bold text-slate-900">참고사항:</span> ${escapeHtml(m.note)}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            const gaemiSectionHtml = `
+                <div class="rounded-xl border border-slate-200 p-3.5 space-y-2.5 bg-white">
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="flex items-center space-x-1.5 text-xs font-bold text-slate-800">
+                            <i class="fa-solid fa-clock-rotate-left text-slate-500"></i>
+                            <span>개미창고 소비기한 · FIFO</span>
+                        </div>
+                        <span class="text-[10px] bg-slate-100 text-slate-700 font-semibold px-2 py-0.5 rounded shrink-0">
+                            ${activeGaemiLots.length}개 로트
+                        </span>
+                    </div>
+                    ${activeGaemiLots.length > 0 ? `
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            ${activeGaemiLots.map((lot) => {
+                                const isNearest = (lot.expiry_date && lot.expiry_date === m.nearest_expiry_date);
+                                let fifoBadge = '<span class="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-medium">출고 대기</span>';
+                                let cardBorder = 'border-slate-200 bg-slate-50/50';
+                                if (lot.source === 'unassigned') {
+                                    fifoBadge = '<span class="text-[9px] bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded-full border border-rose-200">⚠️ 기한 필요</span>';
+                                    cardBorder = 'border-rose-200 bg-rose-50/40';
+                                } else if (isNearest && lot.stock > 0) {
+                                    fifoBadge = '<span class="text-[9px] bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded-full border border-rose-200">🥇 1순위 출고</span>';
+                                    cardBorder = 'border-rose-200 bg-rose-50/40';
+                                }
+                                const expText = lot.expiry_date ? `${lot.expiry_date} (D-${lot.days_left}일)` : '미기재/로트명';
+                                const adminLotBadge = lot.is_admin_expiry ? ' <span class="text-[9px] bg-slate-200/70 text-slate-700 px-1 rounded font-semibold">관리자</span>' : '';
+                                return `
+                                    <div class="p-2.5 rounded-lg border ${cardBorder} flex justify-between items-center gap-2">
+                                        <div class="min-w-0 flex-1">
+                                            <div class="font-bold text-slate-800 truncate">${escapeHtml(lot.option_name)}${adminLotBadge}</div>
+                                            <div class="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center">
+                                                <i class="fa-regular fa-calendar-check mr-1 text-slate-400 shrink-0"></i>
+                                                <span class="truncate">${escapeHtml(expText)}</span>
+                                            </div>
+                                        </div>
+                                        <div class="text-right shrink-0">
+                                            <div class="font-bold font-mono text-slate-800">${lot.stock.toLocaleString()}개</div>
+                                            <div class="mt-0.5">${fifoBadge}</div>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    ` : `
+                        <div class="text-[11px] text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">현재 개미창고 보유 로트 재고가 없습니다.</div>
+                    `}
+                    ${m.nearest_expiry_date ? `
+                        <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[11px] text-slate-700 space-y-1.5">
+                            <div class="flex items-start gap-1.5">
+                                <i class="fa-solid fa-chart-pie text-slate-500 mt-0.5 shrink-0"></i>
+                                <div class="min-w-0 break-words leading-relaxed">
+                                    <span class="font-bold text-slate-800">소진 시뮬레이션:</span>
+                                    <span>일평균 <strong>${m.daily_sales}개</strong> 기준, 최단기한(<strong>${escapeHtml(m.nearest_expiry_date)}</strong>, D-${m.nearest_days_left}일)까지 <strong>${m.projected_sales_to_exp}개</strong> 소진 예상 (로트 ${m.nearest_lot_stock}개)</span>
+                                </div>
+                            </div>
+                            <div>
+                                ${m.expiry_risk_qty > 0 ? `
+                                    <span class="inline-block w-full sm:w-auto text-center bg-rose-50 border border-rose-200 text-rose-800 font-bold px-2.5 py-1 rounded text-[11px]">
+                                        🚨 기한 내 약 ${m.expiry_risk_qty}개 미소진 위험 (특가/번들 할인 필요)
+                                    </span>
+                                ` : `
+                                    <span class="inline-block w-full sm:w-auto text-center bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold px-2.5 py-1 rounded text-[11px]">
+                                        ✅ 기한 내 100% 정상 소진 예상
+                                    </span>
+                                `}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            const coupangSummaryHtml = bundleGroups.length > 0 ? `
+                <div class="rounded-xl border border-slate-200 p-3.5 space-y-2 bg-white">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div class="flex items-center space-x-1.5 text-xs font-bold text-slate-800">
+                            <i class="fa-solid fa-cubes text-slate-500"></i>
+                            <span>쿠팡 번들별 재고 요약</span>
+                        </div>
+                        <span class="text-[10px] font-mono text-slate-600">
+                            정상 ${m.coupang_package_total.toLocaleString()}세트 (${m.coupang_physical_total.toLocaleString()}개)${retPhysTot > 0 ? ` · 🔄 반품 ${retPkgTot.toLocaleString()}세트 (${retPhysTot.toLocaleString()}개)` : ''}
+                        </span>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5">
+                        ${bundleGroups.map(grp => {
+                            const nPkg = grp.normal_package_stock || 0;
+                            const nPhys = grp.normal_physical_stock || 0;
+                            const rPhys = grp.return_physical_stock || 0;
+                            return `
+                                <span class="px-2.5 py-1 rounded-lg border text-[11px] font-mono ${nPhys > 0 ? 'bg-slate-50 border-slate-300 text-slate-800 font-semibold' : 'bg-white border-slate-200 text-slate-400'}">
+                                    ${grp.bundle}개입: ${nPkg.toLocaleString()}세트 (${nPhys.toLocaleString()}개)${rPhys > 0 ? ` · 🔄 반품 ${rPhys.toLocaleString()}개` : ''}
+                                </span>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            ` : '';
+
+            const hasB2B = (m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0);
+            const hasSalesSection = hasB2B || recentOrders.length > 0 || (m.other_sales_7d || 0) > 0 || (m.other_sales_30d || 0) > 0;
+            const b2bAndOrdersHtml = hasSalesSection ? `
+                <div class="rounded-xl border border-slate-200 p-3.5 space-y-2.5 bg-white">
+                    ${hasB2B ? `
+                        <div class="bg-slate-50 rounded-lg border border-slate-200 p-2.5 text-[11px] text-slate-700 space-y-1.5">
+                            <div class="flex items-start gap-1.5 break-words">
+                                <i class="fa-solid fa-boxes-stacked text-slate-500 mt-0.5 shrink-0"></i>
+                                <div>
+                                    <span class="font-bold text-slate-900">B2B/세트 연동:</span>
+                                    <span><strong>${escapeHtml(m.b2b_linked_codes.map(b => `${b.s_code} (${b.desc})`).join(', '))}</strong> 주문 시 실물 재고 차감 및 출고 합산</span>
+                                </div>
+                            </div>
+                            <div>
+                                ${m.b2b_shared_sales && m.b2b_shared_sales.length > 0 ? `
+                                    <span class="inline-block text-[10px] bg-white text-slate-700 font-semibold px-2 py-0.5 rounded border border-slate-200">
+                                        B2B 출고량: 7일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_7d, 0)}개 / 30일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_30d, 0)}개
+                                    </span>
+                                ` : `<span class="text-[10px] text-slate-400">최근 S코드 주문 없음</span>`}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <div class="space-y-1.5">
+                        <div class="text-[11px] font-bold text-slate-800 flex flex-wrap items-center justify-between gap-1">
+                            <span><i class="fa-solid fa-receipt mr-1 text-slate-500"></i>쿠팡외 출고: 7일 <strong>${(m.other_sales_7d || 0).toLocaleString()}개</strong> / 30일 <strong>${(m.other_sales_30d || m.other_sales_7d || 0).toLocaleString()}개</strong></span>
+                            ${recentOrders.length > 0 ? `<span class="text-[10px] text-slate-400 font-normal">최근 주문 ${recentOrders.length}건</span>` : ''}
+                        </div>
+                        ${recentOrders.length > 0 ? `
+                            <div class="rounded-lg border border-slate-200 divide-y divide-slate-100 bg-slate-50/40 overflow-hidden">
+                                ${recentOrders.map(ord => {
+                                    const ordDateFormatted = normalizeJsGaemiRegDate(ord.date || '');
+                                    return `
+                                        <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-white">
+                                            <div class="min-w-0 flex-1">
+                                                <div class="font-semibold text-slate-800 truncate">${escapeHtml(ord.mall || '스마트스토어')}</div>
+                                                ${ord.name ? `<div class="text-[10px] text-slate-400 truncate">${escapeHtml(ord.name)}</div>` : ''}
+                                            </div>
+                                            <div class="text-right shrink-0 font-mono">
+                                                <span class="font-bold text-slate-900">${(ord.qty || 0).toLocaleString()}개</span>
+                                                ${ordDateFormatted ? `<div class="text-[10px] text-slate-400">${escapeHtml(ordDateFormatted)}</div>` : ''}
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        ` : `<div class="text-[11px] text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2">최근 쿠팡외 주문 내역이 없습니다.</div>`}
+                    </div>
+                </div>
+            ` : '';
+
+            bodyEl.innerHTML = [
+                inboundBannerHtml,
+                noSalesBannerHtml,
+                lotSyncBannerHtml,
+                kpiGridHtml,
+                criteriaAndNoteHtml,
+                gaemiSectionHtml,
+                coupangSummaryHtml,
+                b2bAndOrdersHtml
+            ].filter(Boolean).join('');
+
+            const targetIdEsc = escapeHtml(m.id || m.seller_code);
+            adminActionsEl.innerHTML = isAdminMode ? `
+                <button type="button" data-prod-id="${targetIdEsc}" onclick="openCodeMappingModal(this.dataset.prodId)" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-semibold text-xs transition">
+                    🔗 코드 매핑
+                </button>
+                <button type="button" data-prod-id="${targetIdEsc}" onclick="openEditProductModal(this.dataset.prodId)" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-900 rounded-lg font-semibold text-xs transition">
+                    ✏️ 정보 · 소비기한 수정
+                </button>
+            ` : '';
+
+            return true;
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            const cm = document.getElementById('codeMappingModal');
+            if (cm && !cm.classList.contains('hidden')) { closeCodeMappingModal(); return; }
+            const ep = document.getElementById('editProductModal');
+            if (ep && !ep.classList.contains('hidden')) { closeEditProductModal(); return; }
+            const ac = document.getElementById('adminCenterModal');
+            if (ac && !ac.classList.contains('hidden')) { closeAdminCenter(); return; }
+            const pin = document.getElementById('pinModal');
+            if (pin && !pin.classList.contains('hidden')) { closePinModal(); return; }
+            const pd = document.getElementById('productDetailModal');
+            if (pd && !pd.classList.contains('hidden')) { closeProductDetailModal(); }
+        });
 
         async function toggleCoupangOptionReturn(prodId, optId, makeReturn, btnEl) {
             if (!isAdminMode) {
@@ -5382,6 +5735,10 @@ HTML_TEMPLATE = """
                 if (!isAnyModalOpen() && !activeResizeState) {
                     renderMasterTable();
                 }
+                const pdEl = document.getElementById('productDetailModal');
+                if (pdEl && !pdEl.classList.contains('hidden') && currentDetailProdId) {
+                    renderProductDetailModal(currentDetailProdId);
+                }
             } catch (err) {
                 console.error("데이터 로드 실패:", err);
             }
@@ -5549,7 +5906,6 @@ HTML_TEMPLATE = """
                     : '';
 
                 const isSubExpanded = expandAllOptions || expandedRowIds.has(m.id);
-                const activeGaemiLots = (m.gaemi_lots || []).filter(lot => (lot.stock || 0) > 0);
 
                 html += `
                     <tr draggable="true" data-row-idx="${allMasterData.indexOf(m)}" class="hover:bg-slate-50/80 transition cursor-pointer select-none" onclick="toggleSingleOption('${escapeHtml(m.id)}')">
@@ -5660,349 +6016,196 @@ HTML_TEMPLATE = """
 
                 html += `</tr>`;
 
-                // 세부 확장 행 (컴팩트 sticky 폭 · 모바일/PC 한눈 보기 UI)
+                // 세부 확장 행 (쿠팡 번들 재고 전용 · 심플 가독성 UI + 세부정보보기 팝업 버튼)
+                const subrowCoupangBody = (() => {
+                    const opts = m.options || [];
+                    const bundleGroups = Array.isArray(m.coupang_bundle_groups) ? m.coupang_bundle_groups : [];
+                    const retPkgTot = m.coupang_return_package_total || 0;
+                    const retPhysTot = m.coupang_return_physical_total || 0;
+                    const hasAnyReturn = retPhysTot > 0 || m.has_coupang_return || bundleGroups.some(g => (g.return_options || []).length > 0);
+                    const detailIdEsc = escapeHtml(m.id || m.seller_code);
+
+                    const topHeaderHtml = `
+                        <div class="px-3 py-2.5 bg-slate-50/90 border-b border-slate-200 flex items-center justify-between gap-2">
+                            <div class="min-w-0 flex-1">
+                                <div class="flex flex-wrap items-center gap-1.5">
+                                    <i class="fa-solid fa-cubes text-slate-600 text-xs"></i>
+                                    <span class="text-xs font-bold text-slate-900">쿠팡 윙 옵션별 번들 · 실물 재고</span>
+                                    ${opts.length > 0 ? `<span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-white border border-slate-200 text-slate-500">${opts.length}개 옵션</span>` : ''}
+                                </div>
+                                <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                                    <span class="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-600">${escapeHtml(m.seller_code)}</span>
+                                    <span class="font-semibold text-slate-800 truncate max-w-[220px] sm:max-w-[300px]" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-1.5 shrink-0">
+                                <button type="button" data-prod-id="${detailIdEsc}" onclick="event.stopPropagation(); openProductDetailModal(this.dataset.prodId)" class="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-semibold transition flex items-center gap-1 shadow-xs whitespace-nowrap">
+                                    <i class="fa-solid fa-circle-info text-[10px]"></i>
+                                    <span>세부정보보기</span>
+                                </button>
+                                <button type="button" onclick="event.stopPropagation(); toggleSingleOption('${escapeHtml(m.id)}')" class="px-2 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-500 hover:text-slate-800 text-[11px] font-medium transition flex items-center gap-1 whitespace-nowrap" title="접기">
+                                    <i class="fa-solid fa-chevron-up text-[9px]"></i>
+                                    <span class="hidden sm:inline">접기</span>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+
+                    const totalStripHtml = opts.length > 0 ? `
+                        <div class="px-3 py-2 bg-white border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                            <div class="flex flex-wrap items-center gap-1.5 font-mono">
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-800 font-semibold">
+                                    <span>정상</span>
+                                    <strong class="text-slate-900">${m.coupang_package_total.toLocaleString()}세트</strong>
+                                    <span class="text-slate-500">(${m.coupang_physical_total.toLocaleString()}개)</span>
+                                </span>
+                                ${hasAnyReturn ? `
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100/80 border border-slate-200 text-slate-600 font-medium">
+                                        🔄 반품 ${retPkgTot.toLocaleString()}세트 (${retPhysTot.toLocaleString()}개)
+                                    </span>
+                                ` : ''}
+                            </div>
+                            <span class="text-[10px] font-mono text-slate-500">
+                                7일 출고 <strong class="text-slate-700">${(m.coupang_sales_7d || 0).toLocaleString()}개</strong> · 런웨이 <strong class="text-slate-700">${escapeHtml(m.coupang_runway_str)}</strong>
+                            </span>
+                        </div>
+                    ` : '';
+
+                    if (opts.length === 0) {
+                        return `
+                            ${topHeaderHtml}
+                            <div class="p-3 bg-slate-50/40">
+                                <div class="bg-white border border-dashed border-slate-300 rounded-xl px-3.5 py-4 text-center space-y-2">
+                                    <div class="text-xs font-semibold text-slate-700">연결된 쿠팡 윙 번들 옵션이 없습니다.</div>
+                                    <div class="text-[11px] text-slate-500">개미창고(3PL) <strong>${m.gaemi_total.toLocaleString()}개</strong> · 쿠팡외 7일 <strong>${(m.other_sales_7d || 0).toLocaleString()}개</strong> — 전체 세부내역은 상단 <strong>세부정보보기</strong>에서 확인하세요.</div>
+                                    ${isAdminMode ? `
+                                        <div>
+                                            <button type="button" data-prod-id="${detailIdEsc}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-lg text-[11px] font-semibold">
+                                                🔗 쿠팡 옵션 매핑
+                                            </button>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    const groupsHtml = bundleGroups.map(grp => {
+                        const nOpts = grp.normal_options || [];
+                        const rOpts = grp.return_options || [];
+                        const nPkg = grp.normal_package_stock || 0;
+                        const nPhys = grp.normal_physical_stock || 0;
+                        const rPkg = grp.return_package_stock || 0;
+                        const rPhys = grp.return_physical_stock || 0;
+
+                        const groupHeaderHtml = `
+                            <div class="px-3 py-1.5 bg-slate-50/90 border-b border-slate-100 flex flex-wrap items-center justify-between gap-1.5">
+                                <span class="inline-flex items-center gap-1.5">
+                                    <span class="px-1.5 py-0.5 rounded bg-slate-800 text-white font-mono font-bold text-[10px]">${grp.bundle}개입</span>
+                                    <span class="text-[11px] font-bold text-slate-800">번들</span>
+                                </span>
+                                <div class="flex flex-wrap items-center gap-1.5 font-mono text-[10px]">
+                                    <span class="px-2 py-0.5 rounded-md border ${nPhys > 0 ? 'bg-white border-slate-300 text-slate-800 font-bold' : 'bg-slate-50 border-slate-200 text-slate-400 font-medium'}">
+                                        정상 ${nPkg.toLocaleString()}세트 (${nPhys.toLocaleString()}개)
+                                    </span>
+                                    ${(rOpts.length > 0 || rPhys > 0) ? `
+                                        <span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200 font-medium">
+                                            🔄 반품 ${rPkg.toLocaleString()}세트 (${rPhys.toLocaleString()}개)
+                                        </span>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+
+                        const normalRowsHtml = nOpts.map(opt => {
+                            const hasStock = (opt.physical_stock || 0) > 0;
+                            const missBadge = opt.grade_missing
+                                ? `<span class="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[9px] shrink-0" title="기존 업로드 데이터에 상품등급(G열) 정보가 없어 정상으로 표시될 수 있습니다. 쿠팡 파일 재업로드 또는 관리자 반품 지정을 이용하세요.">등급미확인</span>`
+                                : '';
+                            const toggleBtnHtml = isAdminMode
+                                ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, true, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 hover:border-slate-300 text-[9px] font-semibold transition shrink-0" title="이 옵션 ID를 정상 재고에서 제외하고 반품 재고로 지정합니다">🔄 반품 지정</button>`
+                                : '';
+                            return `
+                                <div class="px-3 py-2 flex items-center justify-between gap-3 bg-white">
+                                    <div class="min-w-0 flex-1">
+                                        <div class="flex flex-wrap items-center gap-1.5">
+                                            <span class="text-xs font-semibold ${hasStock ? 'text-slate-900' : 'text-slate-500'} truncate">${escapeHtml(opt.name)}</span>
+                                            ${missBadge}
+                                        </div>
+                                        <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                            <span class="text-[10px] text-slate-400 font-mono truncate">${escapeHtml(opt.id)}</span>
+                                            ${toggleBtnHtml}
+                                        </div>
+                                    </div>
+                                    <div class="text-right shrink-0 font-mono">
+                                        <div class="text-xs ${hasStock ? 'font-bold text-slate-900' : 'font-medium text-slate-400'}">${opt.coupang_stock.toLocaleString()}세트 <span class="${hasStock ? 'font-semibold text-slate-600' : 'font-normal text-slate-400'}">(실물 ${opt.physical_stock.toLocaleString()}개)</span></div>
+                                        <div class="text-[10px] text-slate-500 mt-0.5">7일 출고 <span class="${(opt.sales_7d_physical || 0) > 0 ? 'font-bold text-slate-700' : 'text-slate-400'}">${opt.sales_7d_physical.toLocaleString()}개</span>${(opt.doc > 0 && hasStock) ? ` · ${opt.doc}일분` : ''}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+
+                        const returnRowsHtml = rOpts.map(opt => {
+                            let retActionHtml = '';
+                            if (!opt.csv_is_return && isAdminMode && opt.option_is_return_flag) {
+                                retActionHtml = `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, false, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 text-[9px] font-semibold transition shrink-0" title="수동 반품 지정을 해제하고 정상 재고로 복귀합니다">↩️ 정상 복귀</button>`;
+                            }
+                            return `
+                                <div class="px-3 py-2 flex items-center justify-between gap-3 bg-slate-50/75">
+                                    <div class="min-w-0 flex-1">
+                                        <div class="flex flex-wrap items-center gap-1">
+                                            <span class="px-1.5 py-0.2 rounded bg-slate-200/70 text-slate-700 border border-slate-300 font-semibold text-[9px] shrink-0">🔄 반품</span>
+                                            ${opt.grade ? `<span class="px-1.5 py-0.2 rounded bg-white text-slate-500 border border-slate-200 font-mono font-medium text-[9px] shrink-0">${escapeHtml(opt.grade)}</span>` : ''}
+                                            <span class="text-xs font-semibold text-slate-600 truncate">${escapeHtml(opt.name)}</span>
+                                        </div>
+                                        ${(opt.id || retActionHtml) ? `
+                                        <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                            <span class="text-[10px] text-slate-400 font-mono truncate">${escapeHtml(opt.id)}</span>
+                                            ${retActionHtml}
+                                        </div>` : ''}
+                                    </div>
+                                    <div class="text-right shrink-0 font-mono">
+                                        <div class="text-xs font-semibold text-slate-600">${opt.coupang_stock.toLocaleString()}세트 <span class="text-slate-500 font-normal">(반품 실물 ${opt.physical_stock.toLocaleString()}개)</span></div>
+                                        <div class="text-[10px] text-slate-400 mt-0.5">7일 출고 <strong class="text-slate-600">${opt.sales_7d_physical.toLocaleString()}개</strong></div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+
+                        return `
+                            <div class="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                                ${groupHeaderHtml}
+                                <div class="divide-y divide-slate-100">
+                                    ${normalRowsHtml}
+                                    ${returnRowsHtml}
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+
+                    const hasGradeMissingNormal = opts.some(o => o.grade_missing && !o.is_return);
+                    const gradeMissingHintHtml = hasGradeMissingNormal ? `
+                        <div class="px-3 py-2 bg-amber-50/75 border border-amber-200 rounded-xl text-[10px] text-amber-900 font-medium break-words">
+                            ⚠️ 기존 쿠팡 업로드 데이터에 G열(상품등급) 정보가 누락되어 반품이 정상으로 합산될 수 있습니다. <strong>쿠팡 재고건전성 파일 재업로드</strong> 시 자동 분리되며${isAdminMode ? ', 위 <strong>[🔄 반품 지정]</strong> 버튼으로 즉시 변경 가능합니다.' : ', 관리자 모드에서도 수동 지정 가능합니다.'}
+                        </div>
+                    ` : '';
+
+                    return `
+                        ${topHeaderHtml}
+                        ${totalStripHtml}
+                        <div class="p-2.5 sm:p-3 bg-slate-50/40 space-y-2">
+                            ${groupsHtml}
+                            ${gradeMissingHintHtml}
+                        </div>
+                    `;
+                })();
+
                 html += `
                     <tr id="subrow_${escapeHtml(m.id)}" class="subrow-tr ${isSubExpanded ? '' : 'hidden'} bg-slate-50/90 border-b border-slate-200">
                         <td colspan="${currentColumnOrder.length}" class="subrow-cell p-0 align-top">
                             <div class="subrow-sticky-shell px-2 sm:px-3.5 py-2.5" style="width: min(var(--subrow-view-w, 100%), 680px); max-width: 100%;">
-                                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden divide-y divide-slate-100">
-
-                                    <!-- 0. 한눈에 보는 상단 품목/수량 요약 Strip -->
-                                    <div class="p-2.5 sm:p-3 bg-slate-50/80 space-y-2">
-                                        <div class="flex items-start justify-between gap-2">
-                                            <div class="min-w-0 flex-1">
-                                                <div class="flex flex-wrap items-center gap-1.5">
-                                                    ${ptypeBadge}
-                                                    <span class="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">${escapeHtml(m.seller_code)}</span>
-                                                    <span class="px-2 py-0.5 rounded-full text-[10px] border break-keep ${badgeClass}">${escapeHtml(m.status)}</span>
-                                                </div>
-                                                <div class="font-bold text-slate-900 text-xs sm:text-sm mt-1 break-words">${escapeHtml(m.name)}</div>
-                                            </div>
-                                            <button type="button" onclick="event.stopPropagation(); toggleSingleOption('${escapeHtml(m.id)}')" class="shrink-0 px-2 py-1 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 text-[10px] font-semibold flex items-center gap-1">
-                                                <i class="fa-solid fa-xmark"></i>
-                                                <span>접기</span>
-                                            </button>
-                                        </div>
-
-                                        ${m.in_transit_qty > 0 ? `
-                                            <div class="bg-teal-50/70 border border-teal-200 rounded-lg px-2.5 py-2 text-[11px] text-teal-950 flex items-start gap-2">
-                                                <i class="fa-solid fa-ship text-teal-600 mt-0.5 shrink-0"></i>
-                                                <div class="min-w-0 break-words">
-                                                    <span class="font-bold">발주 완료 · 입고 예정:</span>
-                                                    <span>
-                                                        ${m.expected_arrival_date ? `<strong>${escapeHtml(m.expected_arrival_date)}</strong>에 ` : ''}<strong>+${m.in_transit_qty.toLocaleString()}개</strong> 입고 예정입니다.
-                                                        ${m.daily_sales > 0
-                                                            ? `(${m.master_physical_total > 0 ? `현재 실물 <strong>${escapeHtml(m.total_runway_str)}</strong>` : '현재 실물 <strong>0개</strong>'} → 입고 반영 시 총 <strong>${escapeHtml(m.effective_runway_str)}</strong>)`
-                                                            : `(입고 반영 시 가용재고 <strong>${(m.master_physical_total + m.in_transit_qty).toLocaleString()}개</strong> 확보)`}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        ` : ''}
-
-                                        ${m.is_no_sales ? `
-                                            <div class="bg-orange-50/70 border border-orange-200 rounded-lg px-2.5 py-2 text-[11px] text-orange-950 flex items-start gap-2">
-                                                <i class="fa-solid fa-bell text-orange-600 mt-0.5 shrink-0"></i>
-                                                <div class="min-w-0 break-words">
-                                                    <span class="font-bold">판매 정체(소진무) 알람:</span>
-                                                    <span>현재 재고 <strong>${m.master_physical_total.toLocaleString()}개</strong> 보유 중이나 최근 7일·30일 출고량이 <strong>0개</strong>입니다. 상품 노출·프로모션 또는 채널 코드 매핑을 점검하세요.</span>
-                                                </div>
-                                            </div>
-                                        ` : ''}
-
-                                        <!-- 핵심 수량 4칸 그리드 -->
-                                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[11px]">
-                                            <div class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
-                                                <div class="text-[10px] font-semibold text-slate-500">총 가용재고</div>
-                                                <div class="font-bold font-mono text-sm text-slate-900">${m.master_physical_total.toLocaleString()}개</div>
-                                                ${m.in_transit_qty > 0
-                                                    ? `<div class="text-[9px] font-semibold text-teal-700 truncate">🚢 예정 +${m.in_transit_qty.toLocaleString()}개</div>`
-                                                    : `<div class="text-[9px] text-slate-400">전체 창고 합산</div>`}
-                                            </div>
-                                            <div class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
-                                                <div class="text-[10px] font-semibold text-slate-500">개미창고(3PL)</div>
-                                                <div class="font-bold font-mono text-sm text-slate-900">${m.gaemi_total.toLocaleString()}개</div>
-                                                <div class="text-[9px] text-slate-500 truncate">런웨이 ${escapeHtml(m.gaemi_runway_str)}</div>
-                                            </div>
-                                            <div class="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
-                                                <div class="text-[10px] font-semibold text-slate-500">쿠팡(실물)</div>
-                                                <div class="font-bold font-mono text-sm text-slate-900">${m.coupang_physical_total.toLocaleString()}개</div>
-                                                <div class="text-[9px] text-slate-500 truncate">${m.coupang_package_total}세트 · ${escapeHtml(m.coupang_runway_str)}</div>
-                                                ${(m.coupang_return_physical_total || 0) > 0
-                                                    ? `<div class="text-[9px] font-medium text-slate-500 truncate mt-0.5">🔄 반품 ${m.coupang_return_physical_total.toLocaleString()}개 (${m.coupang_return_package_total || 0}세트)</div>`
-                                                    : ''}
-                                            </div>
-                                            <div class="${m.is_no_sales ? 'bg-orange-50/50 border-orange-200' : 'bg-white border-slate-200'} border rounded-lg px-2.5 py-1.5">
-                                                <div class="text-[10px] font-semibold ${m.is_no_sales ? 'text-orange-800' : 'text-slate-500'}">출고 속도 · 통합</div>
-                                                <div class="font-bold font-mono text-sm ${m.is_no_sales ? 'text-orange-950' : 'text-slate-900'}">일 ${m.daily_sales}개</div>
-                                                <div class="text-[9px] ${m.is_no_sales ? 'text-orange-700' : 'text-slate-500'} truncate">7일 ${m.total_sales_7d} · 30일 ${m.total_sales_30d || 0}</div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    ${(isAdminMode || m.in_transit_qty > 0 || m.lot_sync_note) ? `
-                                        <div class="p-2.5 sm:p-3 space-y-1.5 text-[11px]">
-                                            ${isAdminMode ? `
-                                                <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2">
-                                                    <span class="font-medium text-slate-700 break-words">⚙️ 리드타임 ${effLt}일 (안전 +${effPrep - effLt}일) · 기한경고 ${m.effective_expiry_warn || 120}일${m.in_transit_qty > 0 ? ` · 입고예정 +${m.in_transit_qty}개 (${escapeHtml(m.expected_arrival_date || '미정')})` : ''}</span>
-                                                    <div class="flex flex-wrap items-center gap-1.5">
-                                                        <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-md font-semibold">
-                                                            🔗 코드 매핑
-                                                        </button>
-                                                        <button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-md font-semibold">
-                                                            ✏️ 정보 · 소비기한 수정
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ` : (m.in_transit_qty > 0 ? `
-                                                <div class="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium break-words">
-                                                    🚢 입고 예정: <strong>+${m.in_transit_qty.toLocaleString()}개</strong>${m.expected_arrival_date ? ` (예상일: <strong>${escapeHtml(m.expected_arrival_date)}</strong>)` : ''}
-                                                </div>
-                                            ` : '')}
-                                            ${m.lot_sync_note ? `
-                                                <div class="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium break-words">
-                                                    🔄 <strong>로트 동기화:</strong> ${escapeHtml(m.lot_sync_note)}
-                                                </div>
-                                            ` : ''}
-                                        </div>
-                                    ` : ''}
-
-                                    <!-- 1. 개미창고 소비기한 & 선입선출(FIFO) 현황판 -->
-                                    ${activeGaemiLots.length > 0 ? `
-                                        <div class="p-2.5 sm:p-3 space-y-2">
-                                            <div class="flex items-center justify-between gap-2">
-                                                <div class="flex items-center space-x-1.5 text-xs font-bold text-slate-800">
-                                                    <i class="fa-solid fa-clock-rotate-left text-slate-500"></i>
-                                                    <span>개미창고 소비기한 · FIFO</span>
-                                                </div>
-                                                <span class="text-[10px] bg-slate-100 text-slate-700 font-semibold px-2 py-0.5 rounded shrink-0">
-                                                    ${activeGaemiLots.length}개 로트
-                                                </span>
-                                            </div>
-
-                                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
-                                                ${activeGaemiLots.map((lot) => {
-                                                    const isNearest = (lot.expiry_date && lot.expiry_date === m.nearest_expiry_date);
-                                                    let fifoBadge = '<span class="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.2 rounded font-medium">출고 대기</span>';
-                                                    let cardBorder = 'border-slate-200 bg-slate-50/50';
-
-                                                    if (lot.source === 'unassigned') {
-                                                        fifoBadge = '<span class="text-[9px] bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded-full border border-rose-200">⚠️ 기한 필요</span>';
-                                                        cardBorder = 'border-rose-200 bg-rose-50/40';
-                                                    } else if (isNearest && lot.stock > 0) {
-                                                        fifoBadge = '<span class="text-[9px] bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded-full border border-rose-200">🥇 1순위 출고</span>';
-                                                        cardBorder = 'border-rose-200 bg-rose-50/40';
-                                                    }
-
-                                                    const expText = lot.expiry_date ? `${lot.expiry_date} (D-${lot.days_left}일)` : '미기재/로트명';
-                                                    const adminLotBadge = lot.is_admin_expiry ? ' <span class="text-[9px] bg-slate-200/70 text-slate-700 px-1 rounded font-semibold">관리자</span>' : '';
-
-                                                    return `
-                                                        <div class="p-2 rounded-lg border ${cardBorder} flex justify-between items-center gap-2">
-                                                            <div class="min-w-0 flex-1">
-                                                                <div class="font-bold text-slate-800 truncate">${escapeHtml(lot.option_name)}${adminLotBadge}</div>
-                                                                <div class="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center">
-                                                                    <i class="fa-regular fa-calendar-check mr-1 text-slate-400 shrink-0"></i>
-                                                                    <span class="truncate">${escapeHtml(expText)}</span>
-                                                                </div>
-                                                            </div>
-                                                            <div class="text-right shrink-0">
-                                                                <div class="font-bold font-mono text-slate-800">${lot.stock.toLocaleString()}개</div>
-                                                                <div class="mt-0.5">${fifoBadge}</div>
-                                                            </div>
-                                                        </div>
-                                                    `;
-                                                }).join('')}
-                                            </div>
-
-                                            <!-- 소비기한 vs 판매속도 소진 시뮬레이션 카드 -->
-                                            ${m.nearest_expiry_date ? `
-                                                <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[11px] text-slate-700 space-y-1.5">
-                                                    <div class="flex items-start gap-1.5">
-                                                        <i class="fa-solid fa-chart-pie text-slate-500 mt-0.5 shrink-0"></i>
-                                                        <div class="min-w-0 break-words leading-relaxed">
-                                                            <span class="font-bold text-slate-800">소진 시뮬레이션:</span>
-                                                            <span>일평균 <strong>${m.daily_sales}개</strong> 기준, 최단기한(<strong>${escapeHtml(m.nearest_expiry_date)}</strong>, D-${m.nearest_days_left}일)까지 <strong>${m.projected_sales_to_exp}개</strong> 소진 예상 (로트 ${m.nearest_lot_stock}개)</span>
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        ${m.expiry_risk_qty > 0 ? `
-                                                            <span class="inline-block w-full sm:w-auto text-center bg-rose-50 border border-rose-200 text-rose-800 font-bold px-2.5 py-1 rounded text-[11px]">
-                                                                🚨 기한 내 약 ${m.expiry_risk_qty}개 미소진 위험 (특가/번들 할인 필요)
-                                                            </span>
-                                                        ` : `
-                                                            <span class="inline-block w-full sm:w-auto text-center bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold px-2.5 py-1 rounded text-[11px]">
-                                                                ✅ 기한 내 100% 정상 소진 예상
-                                                            </span>
-                                                        `}
-                                                    </div>
-                                                </div>
-                                            ` : ''}
-                                        </div>
-                                    ` : ''}
-
-                                    <!-- 2. 쿠팡 옵션 번들 내역 (번들별 정상/반품 분리 표시) -->
-                                    ${(() => {
-                                        const opts = m.options || [];
-                                        if (opts.length === 0) return '';
-                                        const bundleGroups = Array.isArray(m.coupang_bundle_groups) ? m.coupang_bundle_groups : [];
-                                        const retPkgTot = m.coupang_return_package_total || 0;
-                                        const retPhysTot = m.coupang_return_physical_total || 0;
-                                        const hasAnyReturn = retPhysTot > 0 || m.has_coupang_return || bundleGroups.some(g => (g.return_options || []).length > 0);
-                                        const headerSummary = hasAnyReturn
-                                            ? `<span class="text-[10px] font-mono text-slate-600">정상 ${m.coupang_physical_total.toLocaleString()}개 · <span class="text-slate-500 font-medium">🔄 반품 ${retPhysTot.toLocaleString()}개 (${retPkgTot.toLocaleString()}세트)</span></span>`
-                                            : `<span class="text-[10px] font-mono text-slate-500">총 ${opts.length}개 옵션</span>`;
-
-                                        const groupsHtml = bundleGroups.map(grp => {
-                                            const nOpts = grp.normal_options || [];
-                                            const rOpts = grp.return_options || [];
-                                            const nPkg = grp.normal_package_stock || 0;
-                                            const nPhys = grp.normal_physical_stock || 0;
-                                            const rPkg = grp.return_package_stock || 0;
-                                            const rPhys = grp.return_physical_stock || 0;
-                                            const showGroupHeader = hasAnyReturn || nOpts.length > 1 || rOpts.length > 0;
-
-                                            const groupHeaderHtml = showGroupHeader ? `
-                                                <div class="px-2.5 py-1 bg-slate-50 flex flex-wrap items-center justify-between gap-1.5 text-[10px]">
-                                                    <span class="font-bold font-mono text-slate-800">${grp.bundle}개입 번들</span>
-                                                    <div class="flex flex-wrap items-center gap-1 font-mono">
-                                                        <span class="px-1.5 py-0.2 rounded bg-white border border-slate-200 text-slate-700 font-semibold">정상 ${nPkg.toLocaleString()}세트 (${nPhys.toLocaleString()}개)</span>
-                                                        ${(rOpts.length > 0 || rPhys > 0)
-                                                            ? `<span class="px-1.5 py-0.2 rounded bg-slate-100/80 text-slate-600 border border-slate-200 font-medium">🔄 반품 ${rPkg.toLocaleString()}세트 (${rPhys.toLocaleString()}개)</span>`
-                                                            : `<span class="px-1.5 py-0.2 rounded bg-white text-slate-400 border border-slate-200">반품 0개</span>`}
-                                                    </div>
-                                                </div>
-                                            ` : '';
-
-                                            const normalRowsHtml = nOpts.map(opt => {
-                                                const missBadge = opt.grade_missing
-                                                    ? `<span class="px-1 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[9px] shrink-0" title="기존 업로드 데이터에 상품등급(G열) 정보가 없어 정상으로 표시될 수 있습니다. 쿠팡 파일 재업로드 또는 관리자 반품 지정을 이용하세요.">등급미확인</span>`
-                                                    : '';
-                                                const toggleBtnHtml = isAdminMode
-                                                    ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, true, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 hover:border-slate-300 text-[9px] font-semibold transition shrink-0" title="이 옵션 ID를 정상 재고에서 제외하고 반품 재고로 지정합니다">🔄 반품 지정</button>`
-                                                    : '';
-                                                return `
-                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-white">
-                                                        <div class="min-w-0 flex-1">
-                                                            <div class="flex flex-wrap items-center gap-1">
-                                                                <span class="font-bold text-slate-800 truncate">${escapeHtml(opt.name)}</span>
-                                                                ${missBadge}
-                                                            </div>
-                                                            <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
-                                                                <span class="text-[10px] text-slate-500 font-mono truncate">${escapeHtml(opt.id)} · ${opt.bundle}개입</span>
-                                                                ${toggleBtnHtml}
-                                                            </div>
-                                                        </div>
-                                                        <div class="text-right shrink-0 font-mono">
-                                                            <div class="font-bold text-slate-900">${opt.coupang_stock}세트 <span class="text-slate-500 font-normal">(실물 ${opt.physical_stock}개)</span></div>
-                                                            <div class="text-[10px] text-slate-500">7일 출고: <strong class="text-slate-700">${opt.sales_7d_physical}개</strong></div>
-                                                        </div>
-                                                    </div>
-                                                `;
-                                            }).join('');
-
-                                            const returnRowsHtml = rOpts.map(opt => {
-                                                let retActionHtml = '';
-                                                if (!opt.csv_is_return && isAdminMode && opt.option_is_return_flag) {
-                                                    retActionHtml = `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, false, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 text-[9px] font-semibold transition shrink-0" title="수동 반품 지정을 해제하고 정상 재고로 복귀합니다">↩️ 정상 복귀</button>`;
-                                                }
-                                                return `
-                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-slate-50/70">
-                                                        <div class="min-w-0 flex-1">
-                                                            <div class="flex flex-wrap items-center gap-1">
-                                                                <span class="px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 font-semibold text-[9px] shrink-0">🔄 반품</span>
-                                                                ${opt.grade ? `<span class="px-1.5 py-0.2 rounded bg-white text-slate-500 border border-slate-200 font-mono font-medium text-[9px] shrink-0">${escapeHtml(opt.grade)}</span>` : ''}
-                                                                <span class="font-semibold text-slate-600 truncate">${escapeHtml(opt.name)}</span>
-                                                            </div>
-                                                            ${(opt.id || opt.bundle || retActionHtml) ? `
-                                                            <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
-                                                                <span class="text-[10px] text-slate-400 font-mono truncate">${escapeHtml(opt.id)} · ${opt.bundle}개입</span>
-                                                                ${retActionHtml}
-                                                            </div>` : ''}
-                                                        </div>
-                                                        <div class="text-right shrink-0 font-mono">
-                                                            <div class="font-semibold text-slate-600">${opt.coupang_stock}세트 <span class="text-slate-500 font-normal">(반품 실물 ${opt.physical_stock}개)</span></div>
-                                                            <div class="text-[10px] text-slate-400">7일 출고: <strong class="text-slate-600">${opt.sales_7d_physical}개</strong></div>
-                                                        </div>
-                                                    </div>
-                                                `;
-                                            }).join('');
-
-                                            return `<div class="divide-y divide-slate-100">${groupHeaderHtml}${normalRowsHtml}${returnRowsHtml}</div>`;
-                                        }).join('');
-
-                                        const hasGradeMissingNormal = opts.some(o => o.grade_missing && !o.is_return);
-                                        const gradeMissingHintHtml = hasGradeMissingNormal ? `
-                                            <div class="px-2.5 py-1.5 bg-amber-50/70 border border-amber-200 rounded-lg text-[10px] text-amber-900 font-medium break-words">
-                                                ⚠️ 기존 쿠팡 업로드 데이터에 G열(상품등급) 정보가 누락되어 반품이 정상으로 합산될 수 있습니다. <strong>쿠팡 재고건전성 파일 재업로드</strong> 시 자동 분리되며${isAdminMode ? ', 위 <strong>[🔄 반품 지정]</strong> 버튼으로 즉시 변경 가능합니다.' : ', 관리자 모드에서도 수동 지정 가능합니다.'}
-                                            </div>
-                                        ` : '';
-
-                                        return `
-                                            <div class="p-2.5 sm:p-3 space-y-1.5">
-                                                <div class="flex flex-wrap items-center justify-between gap-1 text-[11px] font-bold text-slate-800">
-                                                    <div class="flex items-center space-x-1">
-                                                        <i class="fa-solid fa-cubes text-slate-500"></i>
-                                                        <span>쿠팡 윙 옵션별 번들 · 실물 재고</span>
-                                                    </div>
-                                                    ${headerSummary}
-                                                </div>
-                                                <div class="rounded-lg border border-slate-200 divide-y divide-slate-200 bg-white overflow-hidden">
-                                                    ${groupsHtml}
-                                                </div>
-                                                ${gradeMissingHintHtml}
-                                            </div>
-                                        `;
-                                    })()}
-
-                                    <!-- 3. B2B/세트(S코드) 연동, 제품 참고사항, 타채널 최근 주문 -->
-                                    ${((m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0) || m.note || (m.recent_orders && m.recent_orders.length > 0)) ? `
-                                        <div class="p-2.5 sm:p-3 space-y-2">
-                                            ${m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0 ? `
-                                                <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 text-[11px] text-slate-700 space-y-1">
-                                                    <div class="flex items-start gap-1.5 break-words">
-                                                        <i class="fa-solid fa-boxes-stacked text-slate-500 mt-0.5 shrink-0"></i>
-                                                        <div>
-                                                            <span class="font-bold text-slate-900">B2B/세트 연동:</span>
-                                                            <span><strong>${escapeHtml(m.b2b_linked_codes.map(b => `${b.s_code} (${b.desc})`).join(', '))}</strong> 주문 시 실물 재고 차감 및 출고 합산</span>
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        ${m.b2b_shared_sales && m.b2b_shared_sales.length > 0 ? `
-                                                            <span class="inline-block text-[10px] bg-white text-slate-700 font-semibold px-2 py-0.5 rounded border border-slate-200">
-                                                                B2B 출고량: 7일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_7d, 0)}개 / 30일 ${m.b2b_shared_sales.reduce((acc, cur) => acc + cur.sales_30d, 0)}개
-                                                            </span>
-                                                        ` : `
-                                                            <span class="text-[10px] text-slate-400">최근 S코드 주문 없음</span>
-                                                        `}
-                                                    </div>
-                                                </div>
-                                            ` : ''}
-
-                                            ${m.note ? `
-                                                <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 text-[11px] text-slate-700 break-words">
-                                                    <i class="fa-solid fa-circle-info mr-1 text-slate-500"></i>
-                                                    <span class="font-bold text-slate-900">참고사항:</span> ${escapeHtml(m.note)}
-                                                </div>
-                                            ` : ''}
-
-                                            ${m.recent_orders && m.recent_orders.length > 0 ? `
-                                                <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 space-y-1">
-                                                    <div class="text-[11px] font-bold text-slate-800 flex flex-wrap items-center justify-between gap-1">
-                                                        <span><i class="fa-solid fa-receipt mr-1 text-slate-500"></i>쿠팡외 출고: 7일 <strong>${m.other_sales_7d}개</strong> / 30일 <strong>${m.other_sales_30d || m.other_sales_7d}개</strong></span>
-                                                        <span class="text-[10px] text-slate-400 font-normal">최근 주문 5건</span>
-                                                    </div>
-                                                    <div class="flex flex-wrap gap-1 text-[10px]">
-                                                        ${m.recent_orders.map(ord => `
-                                                            <span class="bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-700">
-                                                                <span class="font-semibold text-slate-900">${escapeHtml(ord.mall || '스마트스토어')}</span>: ${ord.qty}개 (${escapeHtml(ord.date)})
-                                                            </span>
-                                                        `).join('')}
-                                                    </div>
-                                                </div>
-                                            ` : ''}
-                                        </div>
-                                    ` : ''}
-
+                                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                                    ${subrowCoupangBody}
                                 </div>
                             </div>
                         </td>

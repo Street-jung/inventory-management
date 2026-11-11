@@ -1822,6 +1822,89 @@ class TestIljeomodoAdminMode(unittest.TestCase):
 
         print("OK: [Admin Test 19] Excel 시리얼/CSV 양방향 로트키 정규화·NFC/대소문자 매칭·오버라이드 정리 검증 완료")
 
+    def test_20_compact_bundle_subrow_detail_modal_and_sales_date_norm(self):
+        """인라인 행 확장은 쿠팡 번들 재고+세부정보보기만 표시하고, 전체 내역은 팝업 모달로 분리되며, 기존 매출 Excel 시리얼 날짜도 정규화되는지 검증"""
+        # 1. 기존 저장 데이터(구 Excel 시리얼 날짜 포함)가 /api/summary 에서 사람이 읽을 수 있는 일시로 정규화되는지 확인
+        with app_module.data_lock:
+            app_module.app_state["sales_inventory"] = {
+                "10GL04": {
+                    "total_7d": 6,
+                    "total_30d": 6,
+                    "orders": [
+                        {"date": "46316.69378472222", "qty": 6, "mall": "스마트스토어", "name": "구온 초코칩"}
+                    ]
+                },
+                "S100009": {
+                    "total_7d": 6,
+                    "total_30d": 6,
+                    "orders": [
+                        {"date": "46307.60758101852", "qty": 3, "mall": "카페24(신)", "name": "B2B 박스"},
+                        {"date": "46318.446921296294", "qty": 3, "mall": "카페24(신)", "name": "B2B 박스"},
+                    ]
+                }
+            }
+
+        summary = json.loads(self.client.get("/api/summary").data)
+        gl04 = next(m for m in summary["masters"] if m["seller_code"] == "10GL04")
+        self.assertGreaterEqual(len(gl04["recent_orders"]), 3)
+        dates = [o["date"] for o in gl04["recent_orders"]]
+        # raw float serial이 남아있지 않아야 하며 최신순 정렬(2026-10-23 -> 2026-10-21 -> 2026-10-12)이어야 함
+        for d in dates:
+            self.assertNotIn("463", d)
+            self.assertRegex(d, r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+        self.assertEqual(dates, sorted(dates, reverse=True))
+
+        # 2. HTML/JS 마커 및 UI 구조 분리(인라인=쿠팡 번들 전용 + 세부정보보기 / 팝업=전체 세부정보) 검증
+        html = self.client.get("/").data.decode("utf-8")
+        self.assertNotIn("1500", html)
+        self.assertNotIn("비고", html)
+        self.assertNotIn("'biko'", html)
+
+        for marker in (
+            'id="productDetailModal"',
+            'id="pd_modal_badges"',
+            'id="pd_modal_title"',
+            'id="pd_modal_body"',
+            'id="pd_modal_admin_actions"',
+            "openProductDetailModal",
+            "closeProductDetailModal",
+            "renderProductDetailModal",
+            "세부정보보기",
+            "번들 재고 펼치기",
+            "번들 재고 접기",
+            "쿠팡 윙 옵션별 번들 · 실물 재고",
+            "subrow-sticky-shell",
+        ):
+            self.assertIn(marker, html, f"Missing UI/JS marker: {marker}")
+
+        # 인라인 subrow 렌더 블록에는 소비기한 FIFO/소진 시뮬레이션/쿠팡외 출고가 없어야 하고,
+        # 팝업 모달 렌더 함수(renderProductDetailModal)에는 모두 포함되어야 함
+        subrow_start = html.find('<tr id="subrow_${escapeHtml(m.id)}"')
+        tfoot_start = html.find("// 5. 하단 합계란(tfoot) 렌더링")
+        self.assertGreater(subrow_start, 0)
+        self.assertGreater(tfoot_start, subrow_start)
+        subrow_section = html[subrow_start:tfoot_start]
+        self.assertNotIn("개미창고 소비기한 · FIFO", subrow_section)
+        self.assertNotIn("소진 시뮬레이션:", subrow_section)
+        self.assertNotIn("B2B/세트 연동:", subrow_section)
+
+        modal_fn_start = html.find("function renderProductDetailModal(prodId)")
+        modal_fn_end = html.find("async function toggleCoupangOptionReturn(")
+        self.assertGreater(modal_fn_start, 0)
+        self.assertGreater(modal_fn_end, modal_fn_start)
+        modal_fn_section = html[modal_fn_start:modal_fn_end]
+        for detail_marker in (
+            "개미창고 소비기한 · FIFO",
+            "소진 시뮬레이션:",
+            "B2B/세트 연동:",
+            "쿠팡외 출고:",
+            "normalizeJsGaemiRegDate",
+            "판매 정체(소진무) 알람:",
+        ):
+            self.assertIn(detail_marker, modal_fn_section, f"Missing detail modal marker: {detail_marker}")
+
+        print("OK: [Admin Test 20] 쿠팡 번들 전용 인라인 확장 + 세부정보보기 팝업 모달 분리 + 매출 주문일 정규화 검증 완료")
+
 
 if __name__ == '__main__':
     unittest.main()
