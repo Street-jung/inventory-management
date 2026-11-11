@@ -1115,6 +1115,7 @@ def get_summary():
     order_prepare_count = 0      # 🟡 발주 준비 (안전재고 버퍼 구간)
     coupang_transfer_count = 0   # 🔵 쿠팡 채우기 필요 (창고 간 불균형)
     expiry_warning_count = 0     # ⏳ 소비기한 주의
+    in_transit_wait_count = 0    # 🚢 발주완료 · 입고 예정/대기
     no_sales_count = 0           # 🟠 판매 정체 (소진무: 재고 보유 · 최근 7/30일 판매 0)
     safe_count = 0               # 🟢 정상 안전
 
@@ -1243,28 +1244,82 @@ def get_summary():
                     expiry_risk_qty = nearest_lot_stock
                     expiry_note = f"잔여 {nearest_days_left}일 (판매 정체)"
 
-        # 6. 결품 방지 및 발주 의사결정 액션(Action) 판정 트리 (품목별/관리자 설정 리드타임 반영)
+        # 6. 결품 방지 및 발주 의사결정 액션(Action) 판정 트리 (품목별/관리자 설정 리드타임 + 입고예정 반영)
+        has_in_transit = in_transit_qty > 0
+        norm_arrival_date = normalize_date_str(expected_arrival_date)
+        arr_short = norm_arrival_date[5:] if len(norm_arrival_date) >= 10 else norm_arrival_date
+        days_to_arrival = None
+        if norm_arrival_date and len(norm_arrival_date) >= 10:
+            try:
+                arr_dt = datetime.strptime(norm_arrival_date[:10], "%Y-%m-%d")
+                today_dt = now_kst().replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+                days_to_arrival = (arr_dt - today_dt).days
+            except Exception:
+                days_to_arrival = None
+
+        effective_total_stock = master_physical_total + in_transit_qty
+        if daily_sales > 0:
+            effective_runway = round(effective_total_stock / daily_sales, 1)
+            effective_runway_str = f"{effective_runway}일"
+        else:
+            effective_runway = 999
+            effective_runway_str = "소진무" if effective_total_stock > 0 else "재고없음"
+
+        pre_arrival_gap = (
+            has_in_transit
+            and daily_sales > 0
+            and days_to_arrival is not None
+            and days_to_arrival > 0
+            and total_runway < days_to_arrival
+        )
+
         is_urgent = False
         is_order_prepare = False
         is_coupang_transfer = False
         is_exp_warn = False
+        is_in_transit_wait = False
         is_no_sales = False
         is_safe = False
 
         if master_physical_total == 0:
-            status = "🔴 결품 (0개)"
-            status_color = "red"
-            action_cta = "🚨 결품 즉시 발주"
-            action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
-            risk_score = 1000
-            is_urgent = True
-        elif daily_sales > 0 and total_runway < eff_lead_time:
-            status = f"🔴 긴급 발주 (D-{int(total_runway)}일)"
-            status_color = "red"
-            action_cta = "🚨 수입 발주 기안" if product_type == "수입" else "🚨 사입 긴급 발주"
-            action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
-            risk_score = (900 if product_type == "수입" else 850) - total_runway
-            is_urgent = True
+            if has_in_transit:
+                if daily_sales > 0 and effective_runway < eff_lead_time:
+                    status = f"🔴 추가 발주 검토 (입고포함 D-{int(effective_runway)}일)"
+                    status_color = "red"
+                    action_cta = "📋 추가 발주 검토"
+                    action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
+                    risk_score = 920 - effective_runway
+                    is_urgent = True
+                else:
+                    arr_tag = arr_short if arr_short else f"+{in_transit_qty:,}개"
+                    status = f"🚢 입고 대기 (품절 · {arr_tag})"
+                    status_color = "teal"
+                    action_cta = f"🚚 {arr_short} 입고 확인" if arr_short else "🚚 입고 일정 확인"
+                    action_cta_class = "bg-teal-600 hover:bg-teal-700 text-white"
+                    risk_score = 330
+                    is_in_transit_wait = True
+            else:
+                status = "🔴 결품 (0개)"
+                status_color = "red"
+                action_cta = "🚨 결품 즉시 발주"
+                action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
+                risk_score = 1000
+                is_urgent = True
+        elif daily_sales > 0 and total_runway < eff_lead_time and (not has_in_transit or effective_runway < eff_lead_time):
+            if has_in_transit:
+                status = f"🔴 추가 발주 검토 (입고포함 D-{int(effective_runway)}일)"
+                status_color = "red"
+                action_cta = "📋 추가 발주 검토"
+                action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
+                risk_score = (880 if product_type == "수입" else 830) - effective_runway
+                is_urgent = True
+            else:
+                status = f"🔴 긴급 발주 (D-{int(total_runway)}일)"
+                status_color = "red"
+                action_cta = "🚨 수입 발주 기안" if product_type == "수입" else "🚨 사입 긴급 발주"
+                action_cta_class = "bg-rose-600 hover:bg-rose-700 text-white"
+                risk_score = (900 if product_type == "수입" else 850) - total_runway
+                is_urgent = True
         elif g_total >= 10 and (coupang_runway <= 14 or (c_physical_total == 0 and c_sales_7d > 0)):
             status = f"🔵 쿠팡 채우기 (쿠팡 D-{int(coupang_runway)}일)"
             status_color = "blue"
@@ -1272,7 +1327,7 @@ def get_summary():
             action_cta_class = "bg-blue-600 hover:bg-blue-700 text-white"
             risk_score = 700 - coupang_runway
             is_coupang_transfer = True
-        elif daily_sales > 0 and total_runway <= eff_prepare_limit:
+        elif daily_sales > 0 and total_runway <= eff_prepare_limit and not has_in_transit:
             status = f"🟡 발주 준비 (D-{int(total_runway)}일)" if product_type == "수입" else f"🟡 사입 주의 (D-{int(total_runway)}일)"
             status_color = "amber"
             action_cta = "📝 발주서 작성" if product_type == "수입" else "📝 사입 발주 검토"
@@ -1286,6 +1341,27 @@ def get_summary():
             action_cta_class = "bg-purple-600 hover:bg-purple-700 text-white"
             risk_score = 350
             is_exp_warn = True
+        elif has_in_transit and daily_sales > 0 and total_runway <= eff_prepare_limit:
+            arr_tag = arr_short if arr_short else f"+{in_transit_qty:,}개"
+            if effective_runway <= eff_prepare_limit:
+                status = f"🚢 입고 예정 · 추가준비 ({arr_tag})"
+                status_color = "teal"
+                action_cta = "📋 추가 발주 확인"
+                action_cta_class = "bg-teal-600 hover:bg-teal-700 text-white"
+                risk_score = 310 - min(total_runway, 150)
+            elif pre_arrival_gap:
+                status = f"🚚 입고 전 소진주의 ({arr_tag})"
+                status_color = "teal"
+                action_cta = f"🚚 {arr_short} 입고 점검" if arr_short else "🚚 입고 일정 점검"
+                action_cta_class = "bg-teal-600 hover:bg-teal-700 text-white"
+                risk_score = 320 - min(total_runway, 120)
+            else:
+                status = f"🚢 입고 예정 ({arr_tag})"
+                status_color = "teal"
+                action_cta = f"📦 {arr_short} 입고 대기" if arr_short else "📦 입고 일정 확인"
+                action_cta_class = "bg-teal-600 hover:bg-teal-700 text-white"
+                risk_score = 220 - min(total_runway, 150)
+            is_in_transit_wait = True
         elif master_physical_total > 0 and daily_sales <= 0:
             status = "🟠 판매 정체 (소진무)"
             status_color = "orange"
@@ -1310,6 +1386,8 @@ def get_summary():
             order_prepare_count += 1
         elif is_exp_warn:
             expiry_warning_count += 1
+        elif is_in_transit_wait:
+            in_transit_wait_count += 1
         elif is_no_sales:
             no_sales_count += 1
         elif is_safe:
@@ -1330,6 +1408,12 @@ def get_summary():
             "effective_expiry_warn": eff_exp_warn,
             "in_transit_qty": in_transit_qty,
             "expected_arrival_date": expected_arrival_date,
+            "days_to_arrival": days_to_arrival,
+            "effective_total_with_transit": effective_total_stock,
+            "effective_runway": effective_runway,
+            "effective_runway_str": effective_runway_str,
+            "is_in_transit_covered": bool(is_in_transit_wait),
+            "pre_arrival_gap": bool(pre_arrival_gap),
             "lot_sync_note": lot_sync_note,
             "is_shared": False,
             "has_b2b_set": (norm_code in base_to_shared_map),
@@ -1414,6 +1498,7 @@ def get_summary():
             "order_prepare_count": order_prepare_count,
             "coupang_transfer_count": coupang_transfer_count,
             "expiry_warning_count": expiry_warning_count,
+            "in_transit_count": in_transit_wait_count,
             "no_sales_count": no_sales_count,
             "safe_count": safe_count,
             "leadtime_count": legacy_leadtime_count,
@@ -2709,7 +2794,10 @@ HTML_TEMPLATE = """
                     <span id="statSalesSubtext" class="text-slate-400 text-[11px]">(쿠팡 0 + 외 0)</span>
                 </div>
             </div>
-            <div class="text-[11px] text-slate-500 flex items-center space-x-2">
+            <div class="text-[11px] text-slate-500 flex flex-wrap items-center gap-2">
+                <button type="button" onclick="setStatusFilter('inbound')" class="inline-flex items-center text-teal-900 bg-teal-50 hover:bg-teal-100 border border-teal-300 px-2 py-0.5 rounded font-bold text-[10px] transition cursor-pointer" title="입고 예정일·수량이 등록되어 발주 완료(입고 대기) 상태인 품목만 필터링합니다">
+                    <i class="fa-solid fa-ship mr-1 text-teal-600"></i>발주완료 · 입고대기 <span id="statInboundWait" class="ml-1 font-mono font-black">0</span>개
+                </button>
                 <span class="inline-flex items-center text-indigo-800 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-mono text-[10px]">
                     <i class="fa-solid fa-scale-balanced mr-1 text-indigo-600"></i>7일(60%)+30일(40%) 가중 일평균 런웨이
                 </span>
@@ -2796,6 +2884,7 @@ HTML_TEMPLATE = """
                         <button onclick="setStatusFilter('all')" class="status-pill active px-2 py-0.5 rounded text-[11px] font-bold bg-slate-800 text-white">전체보기</button>
                         <button onclick="setStatusFilter('urgent')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200">🔴 긴급 발주</button>
                         <button onclick="setStatusFilter('prepare')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200">🟡 발주 준비</button>
+                        <button onclick="setStatusFilter('inbound')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-teal-100 text-teal-900 border border-teal-300 hover:bg-teal-200">🚢 입고 예정 (<span id="pillInboundCount">0</span>)</button>
                         <button onclick="setStatusFilter('transfer')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-300 hover:bg-blue-200">🔵 쿠팡 이동</button>
                         <button onclick="setStatusFilter('expiry')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-purple-100 text-purple-900 border border-purple-300 hover:bg-purple-200">⏳ 소비기한 주의</button>
                         <button onclick="setStatusFilter('no_sales')" class="status-pill px-2 py-0.5 rounded text-[11px] font-bold bg-orange-100 text-orange-900 border border-orange-300 hover:bg-orange-200">🟠 판매 정체</button>
@@ -4331,6 +4420,11 @@ HTML_TEMPLATE = """
                 const elNoSales = document.getElementById('statNoSales');
                 if (elNoSales) elNoSales.innerText = (data.stats.no_sales_count || 0);
                 document.getElementById('statSafeStock').innerText = (data.stats.safe_count || 0);
+                const inboundCnt = data.stats.in_transit_count || 0;
+                const elInboundWait = document.getElementById('statInboundWait');
+                if (elInboundWait) elInboundWait.innerText = inboundCnt;
+                const elInboundPill = document.getElementById('pillInboundCount');
+                if (elInboundPill) elInboundPill.innerText = inboundCnt;
 
                 // 3. 재고 요약 바 및 카테고리별 단품 수 갱신
                 const totalMasters = data.stats.total_masters || allMasterData.length;
@@ -4419,6 +4513,8 @@ HTML_TEMPLATE = """
                     if (m.status_color !== 'red') return false;
                 } else if (activeStatus === 'prepare') {
                     if (m.status_color !== 'amber') return false;
+                } else if (activeStatus === 'inbound') {
+                    if (m.status_color !== 'teal') return false;
                 } else if (activeStatus === 'transfer') {
                     if (m.status_color !== 'blue') return false;
                 } else if (activeStatus === 'expiry') {
@@ -4467,6 +4563,7 @@ HTML_TEMPLATE = """
                 let badgeClass = "bg-slate-100 text-slate-700";
                 if (m.status_color === 'red') badgeClass = "bg-rose-100 text-rose-800 font-bold border border-rose-300 animate-pulse";
                 else if (m.status_color === 'blue') badgeClass = "bg-blue-100 text-blue-900 font-bold border border-blue-300";
+                else if (m.status_color === 'teal') badgeClass = "bg-teal-100 text-teal-900 font-bold border border-teal-300";
                 else if (m.status_color === 'amber') badgeClass = "bg-amber-100 text-amber-900 font-bold border border-amber-300";
                 else if (m.status_color === 'purple') badgeClass = "bg-purple-100 text-purple-900 font-bold border border-purple-300";
                 else if (m.status_color === 'orange') badgeClass = "bg-orange-100 text-orange-950 font-bold border border-orange-300";
@@ -4520,17 +4617,20 @@ HTML_TEMPLATE = """
                     coupangRunwayHtml = `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-100 text-orange-900 border border-orange-300 font-bold text-[10px] whitespace-nowrap" title="쿠팡 창고 실물이 있으나 최근 7/30일 쿠팡 판매가 0건입니다">🔕 소진무</span>`;
                 }
 
-                // 통합 런웨이 프로그레스 바 시각화 (품목별/전역 기준 반영)
+                // 통합 런웨이 프로그레스 바 시각화 (품목별/전역 기준 + 입고 예정 반영)
                 const effLt = m.effective_lead_time || 110;
                 const effPrep = m.effective_prepare_limit || 130;
                 const isStagnantTotal = (m.total_runway_str === '소진무');
                 const isOutOfStockTotal = (m.total_runway_str === '재고없음');
+                const hasInboundCover = (m.status_color === 'teal' && m.in_transit_qty > 0);
                 let runwayBarColor = "bg-emerald-500";
-                if (isOutOfStockTotal || (!isStagnantTotal && m.total_runway < effLt)) runwayBarColor = "bg-rose-500";
+                if (hasInboundCover) runwayBarColor = "bg-teal-500";
+                else if (isOutOfStockTotal || (!isStagnantTotal && m.total_runway < effLt)) runwayBarColor = "bg-rose-500";
                 else if (isStagnantTotal) runwayBarColor = "bg-orange-500";
                 else if (m.total_runway <= effPrep) runwayBarColor = "bg-amber-500";
                 const barBase = Math.max(180, effPrep + 30);
-                const barPercent = isOutOfStockTotal ? 8 : (isStagnantTotal ? 100 : Math.min(100, Math.max(8, (m.total_runway / barBase) * 100)));
+                const barMetric = (hasInboundCover && m.daily_sales > 0 && m.effective_runway) ? m.effective_runway : m.total_runway;
+                const barPercent = (isOutOfStockTotal && !hasInboundCover) ? 8 : ((isStagnantTotal || (hasInboundCover && m.daily_sales <= 0)) ? 100 : Math.min(100, Math.max(8, (barMetric / barBase) * 100)));
 
                 const inTransitHtml = (m.in_transit_qty && m.in_transit_qty > 0)
                     ? `<div class="text-[9px] font-bold text-blue-700 mt-0.5 whitespace-nowrap" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 +${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
@@ -4606,13 +4706,17 @@ HTML_TEMPLATE = """
                     } else if (colId === 'total_runway') {
                         const totalRunwayBadge = isStagnantTotal
                             ? `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-100 text-orange-950 border border-orange-300 font-bold font-mono text-[10px] whitespace-nowrap" title="재고 보유 중 최근 7/30일 출고량 0">🔕 소진무</span>`
-                            : `<div class="font-bold font-mono text-[11px] ${isOutOfStockTotal ? 'text-rose-700' : 'text-slate-800'} truncate">${escapeHtml(m.total_runway_str)}</div>`;
+                            : `<div class="font-bold font-mono text-[11px] ${isOutOfStockTotal && !hasInboundCover ? 'text-rose-700' : 'text-slate-800'} truncate">${escapeHtml(m.total_runway_str)}</div>`;
+                        const inboundRunwaySub = (m.in_transit_qty > 0 && m.daily_sales > 0 && m.effective_runway)
+                            ? `<div class="text-[9px] text-teal-700 font-bold mt-0.5 truncate" title="입고 예정(+${m.in_transit_qty.toLocaleString()}개) 합산 기준 런웨이">입고포함 ${Math.floor(m.effective_runway)}일</div>`
+                            : '';
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
                                 ${totalRunwayBadge}
                                 <div class="w-full max-w-[68px] h-1.5 bg-slate-200 rounded-full mx-auto mt-1 overflow-hidden">
                                     <div class="${runwayBarColor} h-full rounded-full" style="width: ${barPercent}%"></div>
                                 </div>
+                                ${inboundRunwaySub}
                             </td>
                         `;
                     } else if (colId === 'action_cta') {
@@ -4661,6 +4765,21 @@ HTML_TEMPLATE = """
                                                 <span>접기</span>
                                             </button>
                                         </div>
+
+                                        ${m.in_transit_qty > 0 ? `
+                                            <div class="bg-teal-50 border border-teal-300 rounded-lg px-2.5 py-2 text-[11px] text-teal-950 flex items-start gap-2">
+                                                <i class="fa-solid fa-ship text-teal-600 mt-0.5 shrink-0"></i>
+                                                <div class="min-w-0 break-words">
+                                                    <span class="font-extrabold">발주 완료 · 입고 예정:</span>
+                                                    <span>
+                                                        ${m.expected_arrival_date ? `<strong>${escapeHtml(m.expected_arrival_date)}</strong>에 ` : ''}<strong>+${m.in_transit_qty.toLocaleString()}개</strong> 입고 예정입니다.
+                                                        ${m.daily_sales > 0
+                                                            ? `(${m.master_physical_total > 0 ? `현재 실물 <strong>${escapeHtml(m.total_runway_str)}</strong>` : '현재 실물 <strong>0개</strong>'} → 입고 반영 시 총 <strong>${escapeHtml(m.effective_runway_str)}</strong>)`
+                                                            : `(입고 반영 시 가용재고 <strong>${(m.master_physical_total + m.in_transit_qty).toLocaleString()}개</strong> 확보)`}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ` : ''}
 
                                         ${m.is_no_sales ? `
                                             <div class="bg-orange-50 border border-orange-300 rounded-lg px-2.5 py-2 text-[11px] text-orange-950 flex items-start gap-2">

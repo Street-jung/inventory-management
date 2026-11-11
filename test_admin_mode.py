@@ -997,12 +997,13 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         self.assertGreater(ek02["risk_score"], eo02["risk_score"])
         self.assertGreater(eo02["risk_score"], dc02["risk_score"])
 
-        # 6대 KPI 상호배타 합계 == total_masters 확인
+        # 7대 상태 상호배타 합계 == total_masters 확인
         kpi_sum = (
             stats["urgent_order_count"]
             + stats["order_prepare_count"]
             + stats["coupang_transfer_count"]
             + stats["expiry_warning_count"]
+            + stats["in_transit_count"]
             + stats["no_sales_count"]
             + stats["safe_count"]
         )
@@ -1040,6 +1041,135 @@ class TestIljeomodoAdminMode(unittest.TestCase):
             self.assertIn(marker, html, f"Missing UI/JS marker: {marker}")
 
         print("OK: [Admin Test 13] 소진무 알람 판정/우선순위/CSV, 열 너비 조정, 컴팩트 sticky 세부행 UI 검증 완료")
+
+    def test_14_in_transit_arrival_replaces_urgent_order_prompts(self):
+        """입고 예정일/수량 등록 품목이 '긴급 발주/즉시 발주' 대신 '입고 예정/입고 대기/추가 검토' 표현으로 전환되는지 검증"""
+        headers = self._login("1500")
+        fixed_today = datetime(2026, 11, 11, 11, 30, 0, tzinfo=timezone(timedelta(hours=9)))
+        far_exp = "2028-12-31"
+
+        with app_module.data_lock:
+            app_module.app_state["gaemi_inventory"] = {
+                # 10GL02: 현재 40개 (일판매 10 -> D-4일) + 11-18(+4320) -> 입고전 소진주의
+                "PJ_GL02_T": [{"lot_id": "GL02::1", "gaemi_code": "PJ_GL02_T", "option_name": "기본", "stock": 40, "expiry_date": far_exp, "reg_date": "2026-10-01"}],
+                # 10GL04: 현재 250개 (일판매 10 -> D-25일) + 11-18(+2880) -> 입고 예정 (합산 313일)
+                "PJ_GL04_T": [{"lot_id": "GL04::1", "gaemi_code": "PJ_GL04_T", "option_name": "기본", "stock": 250, "expiry_date": far_exp, "reg_date": "2026-10-01"}],
+                # 10GL05: 현재 100개 (일판매 10 -> D-10일) + 11-18(+500) -> 입고포함 D-60일 (< 110) -> 추가 발주 검토
+                "PJ_GL05_T": [{"lot_id": "GL05::1", "gaemi_code": "PJ_GL05_T", "option_name": "기본", "stock": 100, "expiry_date": far_exp, "reg_date": "2026-10-01"}],
+                # 20TZ01: 현재 200개 (일판매 10 -> D-20일) + 11-18(+1000) -> 입고포함 D-120일 (110~130) -> 입고 예정 · 추가준비
+                "PJ_TZ01_T": [{"lot_id": "TZ01::1", "gaemi_code": "PJ_TZ01_T", "option_name": "기본", "stock": 200, "expiry_date": far_exp, "reg_date": "2026-10-01"}],
+                # 20TZ03: 현재 250개 (일판매 10 -> D-25일), 입고예정 0 -> 기존 긴급 발주 유지 비교군
+                "PJ_TZ03_T": [{"lot_id": "TZ03::1", "gaemi_code": "PJ_TZ03_T", "option_name": "기본", "stock": 250, "expiry_date": far_exp, "reg_date": "2026-10-01"}],
+                # 20EO02: 현재 200개 (일판매 10 -> D-20일) + 날짜미정(+2000) -> 날짜 없음 graceful fallback
+                "PJ_EO02_T": [{"lot_id": "EO02::1", "gaemi_code": "PJ_EO02_T", "option_name": "기본", "stock": 200, "expiry_date": far_exp, "reg_date": "2026-10-01"}],
+            }
+            app_module.app_state["coupang_inventory"] = {}
+            app_module.app_state["sales_inventory"] = {
+                code: {"total_7d": 70, "total_30d": 300, "orders": [{"date": "2026-11-10 10:00:00", "qty": 10, "mall": "스마트스토어", "name": code}]}
+                for code in ("10GL02", "10GL04", "10GL05", "20TZ01", "20TZ03", "20EO02")
+            }
+            app_module.app_state["lot_expiry_overrides"] = {}
+
+        # 매핑 & 입고 예정 등록
+        test_configs = [
+            ("10GL06", [], 2880, "2026-11-18", "수입"),  # 현재 0개(품절) + 11-18(+2880)
+            ("10GL02", [{"gaemi_code": "PJ_GL02_T", "option_name": "기본"}], 4320, "2026-11-18", "수입"),
+            ("10GL04", [{"gaemi_code": "PJ_GL04_T", "option_name": "기본"}], 2880, "2026-11-18", "수입"),
+            ("10GL05", [{"gaemi_code": "PJ_GL05_T", "option_name": "기본"}], 500, "2026-11-18", "수입"),
+            ("20TZ01", [{"gaemi_code": "PJ_TZ01_T", "option_name": "기본"}], 1000, "2026-11-18", "수입"),
+            ("20TZ03", [{"gaemi_code": "PJ_TZ03_T", "option_name": "기본"}], 0, "", "수입"),
+            ("20EO02", [{"gaemi_code": "PJ_EO02_T", "option_name": "기본"}], 2000, "", "수입"),
+        ]
+        bulk_products = []
+        for code, gmaps, transit, arr_date, ptype in test_configs:
+            self.assertEqual(self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+                "seller_code": code,
+                "gaemi_mappings": gmaps,
+                "sales_codes": [code],
+                "options": [],
+            }).status_code, 200)
+            bulk_products.append({
+                "seller_code": code,
+                "product_type": ptype,
+                "in_transit_qty": transit,
+                "expected_arrival_date": arr_date,
+                "lead_time_days": None,
+                "safety_buffer_days": None,
+            })
+        self.assertEqual(self.client.post("/api/admin/products/bulk-save", headers=headers, json={
+            "products": bulk_products
+        }).status_code, 200)
+
+        with patch.object(app_module, "now_kst", return_value=fixed_today):
+            res = self.client.get("/api/summary")
+        self.assertEqual(res.status_code, 200)
+        summary = json.loads(res.data)
+        by_code = {m["seller_code"]: m for m in summary["masters"]}
+        stats = summary["stats"]
+
+        # 1. 10GL06 (품절 + 11-18 입고예정): 결품 즉시 발주 대신 입고 대기
+        gl06 = by_code["10GL06"]
+        self.assertEqual(gl06["status"], "🚢 입고 대기 (품절 · 11-18)")
+        self.assertEqual(gl06["status_color"], "teal")
+        self.assertEqual(gl06["action_cta"], "🚚 11-18 입고 확인")
+        self.assertTrue(gl06["is_in_transit_covered"])
+        self.assertNotIn("결품 즉시 발주", gl06["action_cta"])
+
+        # 2. 10GL02 (D-4일 < 7일 후 입고): 입고 전 소진주의 + 점검
+        gl02 = by_code["10GL02"]
+        self.assertEqual(gl02["status"], "🚚 입고 전 소진주의 (11-18)")
+        self.assertEqual(gl02["status_color"], "teal")
+        self.assertEqual(gl02["action_cta"], "🚚 11-18 입고 점검")
+        self.assertTrue(gl02["pre_arrival_gap"])
+        self.assertGreater(gl02["effective_runway"], 130)
+
+        # 3. 10GL04 (D-25일 + 11-18(+2880)): 긴급 발주 대신 입고 예정/입고 대기
+        gl04 = by_code["10GL04"]
+        self.assertEqual(gl04["status"], "🚢 입고 예정 (11-18)")
+        self.assertEqual(gl04["status_color"], "teal")
+        self.assertEqual(gl04["action_cta"], "📦 11-18 입고 대기")
+        self.assertFalse(gl04["pre_arrival_gap"])
+        self.assertEqual(gl04["effective_total_with_transit"], 3130)
+
+        # 4. 10GL05 (입고 포함해도 D-60일 < 110일): 기존 '긴급 발주'가 아니라 '추가 발주 검토'
+        gl05 = by_code["10GL05"]
+        self.assertIn("추가 발주 검토", gl05["status"])
+        self.assertIn("입고포함 D-60일", gl05["status"])
+        self.assertEqual(gl05["status_color"], "red")
+        self.assertEqual(gl05["action_cta"], "📋 추가 발주 검토")
+
+        # 5. 20TZ01 (입고 포함 D-120일, 110~130 버퍼 구간): 입고 예정 · 추가준비
+        tz01 = by_code["20TZ01"]
+        self.assertEqual(tz01["status"], "🚢 입고 예정 · 추가준비 (11-18)")
+        self.assertEqual(tz01["status_color"], "teal")
+        self.assertEqual(tz01["action_cta"], "📋 추가 발주 확인")
+
+        # 6. 20EO02 (입고예정일 없이 수량만 입력): '+2,000개' fallback
+        eo02 = by_code["20EO02"]
+        self.assertEqual(eo02["status"], "🚢 입고 예정 (+2,000개)")
+        self.assertEqual(eo02["status_color"], "teal")
+        self.assertEqual(eo02["action_cta"], "📦 입고 일정 확인")
+
+        # 7. 20TZ03 (입고예정 미등록 대조군): 기존 긴급 발주 유지
+        tz03 = by_code["20TZ03"]
+        self.assertIn("긴급 발주", tz03["status"])
+        self.assertEqual(tz03["status_color"], "red")
+        self.assertEqual(tz03["action_cta"], "🚨 수입 발주 기안")
+
+        # 8. 카운터 & 우선순위(미발주 긴급발주 > 입고대기) & CSV & HTML UI 확인
+        self.assertEqual(stats["in_transit_count"], 5)
+        self.assertGreater(tz03["risk_score"], gl04["risk_score"])
+        self.assertGreater(gl02["risk_score"], gl04["risk_score"])
+
+        csv_text = self.client.get("/api/export-master-csv").data.decode("utf-8-sig")
+        self.assertIn("🚢 입고 예정 (11-18)", csv_text)
+        self.assertIn("📦 11-18 입고 대기", csv_text)
+
+        html = self.client.get("/").data.decode("utf-8")
+        self.assertNotIn("1500", html)
+        for marker in ('id="statInboundWait"', 'id="pillInboundCount"', "setStatusFilter('inbound')", "발주 완료 · 입고 예정:", "입고포함"):
+            self.assertIn(marker, html)
+        print("OK: [Admin Test 14] 입고 예정일·수량 등록 시 입고 대기/예정/소진주의/추가검토 전환 검증 완료")
 
 
 if __name__ == '__main__':
