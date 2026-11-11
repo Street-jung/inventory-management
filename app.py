@@ -126,6 +126,7 @@ app_state = {
     "master_products": get_initial_master_products(),
     "b2b_mappings": copy.deepcopy(DEFAULT_SHARED_STOCK_MAP),
     "lot_expiry_overrides": {},  # { "gaemi_code||option_name[||reg_date]": "YYYY-MM-DD" | "__CLEAR__" }
+    "hidden_unmapped_codes": [], # [ "sales::20DC06", "gaemi::PJ1489503||500ml", "coupang::95844803290" ]
     "settings": copy.deepcopy(DEFAULT_SETTINGS),
     "gaemi_inventory": {},     # { code: [ { option_name, stock, reg_date, status, expiry_date, days_left }, ... ] }
     "coupang_inventory": {},   # { option_id: { stock, inbound, sales_7d, sales_30d, doc, name, opt_name } }
@@ -337,6 +338,95 @@ def _call_gas_bridge(action, payload=None, timeout=15):
         raw = resp.read().decode("utf-8", errors="replace")
         return json.loads(raw)
 
+def normalize_hidden_unmapped_key(raw_key):
+    s = str(raw_key or "").strip()
+    if "::" not in s:
+        return ""
+    ch, rest = s.split("::", 1)
+    ch = ch.strip().lower()
+    rest = rest.strip()
+    if ch == "sales":
+        code = rest.upper()
+        return f"sales::{code}" if code else ""
+    elif ch == "gaemi":
+        if "||" in rest:
+            g_code, opt_name = rest.split("||", 1)
+            g_code = g_code.strip().upper()
+            opt_name = opt_name.strip()
+        else:
+            g_code = rest.strip().upper()
+            opt_name = ""
+        return f"gaemi::{g_code}||{opt_name}" if g_code else ""
+    elif ch == "coupang":
+        oid = rest.strip()
+        return f"coupang::{oid}" if oid else ""
+    return ""
+
+def sanitize_hidden_unmapped_list(raw_list):
+    if not isinstance(raw_list, list):
+        return []
+    seen = set()
+    out = []
+    for item in raw_list:
+        nk = normalize_hidden_unmapped_key(item)
+        if nk and nk not in seen:
+            seen.add(nk)
+            out.append(nk)
+    return out
+
+def _unhide_mapped_keys_locked(record):
+    """방금 마스터 상품에 매핑된 코드는 미매핑 숨김 목록에서 자동 해제(data_lock 보유 상태에서 호출)"""
+    hidden_list = app_state.get("hidden_unmapped_codes")
+    if not isinstance(hidden_list, list) or not hidden_list or not isinstance(record, dict):
+        return
+    if record.get("is_active") is False or is_s_product_code(record.get("seller_code")):
+        return
+    to_remove = set()
+    seller_up = str(record.get("seller_code", "")).strip().upper()
+    if isinstance(record.get("sales_codes"), list):
+        sc_list = record.get("sales_codes")
+    else:
+        sc_list = [seller_up] if seller_up else []
+    for sc in sc_list:
+        sc_up = str(sc or "").strip().upper()
+        if sc_up:
+            to_remove.add(f"sales::{sc_up}")
+
+    wildcard_gaemi_codes = set()
+    for rule in (record.get("gaemi_mappings") or []):
+        if not isinstance(rule, dict):
+            continue
+        gc = str(rule.get("gaemi_code") or rule.get("code") or "").strip().upper()
+        opt = str(rule.get("option_name", "")).strip()
+        if not gc:
+            continue
+        if opt in ("", "*"):
+            wildcard_gaemi_codes.add(gc)
+        else:
+            to_remove.add(f"gaemi::{gc}||{opt}")
+
+    for o in (record.get("options") or []):
+        if not isinstance(o, dict):
+            continue
+        oid = str(o.get("id", "")).strip()
+        if oid:
+            to_remove.add(f"coupang::{oid}")
+
+    if not to_remove and not wildcard_gaemi_codes:
+        return
+
+    cleaned = []
+    for hk in hidden_list:
+        if hk in to_remove:
+            continue
+        if hk.startswith("gaemi::") and wildcard_gaemi_codes:
+            body = hk[7:]
+            gc_part = body.split("||", 1)[0].strip().upper()
+            if gc_part in wildcard_gaemi_codes:
+                continue
+        cleaned.append(hk)
+    app_state["hidden_unmapped_codes"] = cleaned
+
 def build_state_snapshot():
     with data_lock:
         return {
@@ -345,6 +435,7 @@ def build_state_snapshot():
             "master_products": copy.deepcopy(app_state["master_products"]),
             "b2b_mappings": copy.deepcopy(app_state["b2b_mappings"]),
             "lot_expiry_overrides": copy.deepcopy(app_state["lot_expiry_overrides"]),
+            "hidden_unmapped_codes": sanitize_hidden_unmapped_list(app_state.get("hidden_unmapped_codes", [])),
             "settings": copy.deepcopy(app_state["settings"]),
             "gaemi_inventory": copy.deepcopy(app_state["gaemi_inventory"]),
             "coupang_inventory": copy.deepcopy(app_state["coupang_inventory"]),
@@ -371,6 +462,10 @@ def _apply_loaded_state(saved):
             app_state["b2b_mappings"] = saved["b2b_mappings"]
         if "lot_expiry_overrides" in saved and isinstance(saved["lot_expiry_overrides"], dict):
             app_state["lot_expiry_overrides"] = saved["lot_expiry_overrides"]
+        if isinstance(saved.get("hidden_unmapped_codes"), list):
+            app_state["hidden_unmapped_codes"] = sanitize_hidden_unmapped_list(saved.get("hidden_unmapped_codes"))
+        else:
+            app_state["hidden_unmapped_codes"] = []
         if "settings" in saved and isinstance(saved["settings"], dict):
             merged_settings = copy.deepcopy(DEFAULT_SETTINGS)
             merged_settings.update(saved["settings"])
@@ -609,7 +704,7 @@ def parse_gaemi_rows(rows):
 # -------------------------------------------------------------
 def parse_coupang_rows(rows):
     """
-    쿠팡 파일: 옵션 ID, 등록상품명, 옵션명, 판매가능재고 (실시간 기준), 입고예정재고, 최근 판매수량(지난 7일, 지난 30일), 예상 소진일(DOC)
+    쿠팡 파일: 등록상품 ID, 옵션 ID, 등록상품명, 옵션명, 상품등급(G열: NEW / 반품...), 판매가능재고 (실시간 기준), 입고예정재고, 최근 판매수량(지난 7일, 지난 30일), 예상 소진일(DOC)
     """
     if not rows or len(rows) < 2:
         return {}
@@ -643,6 +738,17 @@ def parse_coupang_rows(rows):
         elif "DOC" in h or "소진일" in h:
             col_doc = i
 
+    used_cols = {col_oid, col_pname, col_oname, col_stock, col_inbound, col_sales7, col_sales30, col_doc}
+    col_pid = next((i for i, h in enumerate(headers) if "등록상품 ID" in h or "등록상품ID" in h), -1)
+    if col_pid == -1 and len(headers) > 1 and 1 not in used_cols:
+        col_pid = 1
+    if col_pid >= 0:
+        used_cols.add(col_pid)
+
+    col_grade = next((i for i, h in enumerate(headers) if "상품등급" in h or h == "등급" or "등급" in h), -1)
+    if col_grade == -1 and len(headers) > 6 and 6 not in used_cols:
+        col_grade = 6
+
     coupang_dict = {}
     for r in rows[header_idx + 1:]:
         if len(r) <= col_oid:
@@ -651,8 +757,11 @@ def parse_coupang_rows(rows):
         if not oid or not oid.isdigit():
             continue
             
+        pid = str(r[col_pid]).strip() if (col_pid >= 0 and len(r) > col_pid) else ""
         pname = str(r[col_pname]).strip() if len(r) > col_pname else ""
         oname = str(r[col_oname]).strip() if len(r) > col_oname else ""
+        grade = str(r[col_grade]).strip() if (col_grade >= 0 and len(r) > col_grade) else ""
+        is_return = ("반품" in grade)
         stock_s = str(r[col_stock]).replace(",", "").strip() if len(r) > col_stock else "0"
         inbound_s = str(r[col_inbound]).replace(",", "").strip() if len(r) > col_inbound else "0"
         sales7_s = str(r[col_sales7]).replace(",", "").strip() if len(r) > col_sales7 else "0"
@@ -666,8 +775,11 @@ def parse_coupang_rows(rows):
         doc = int(doc_s) if doc_s.isdigit() else 0
 
         coupang_dict[oid] = {
+            "product_id": pid,
             "product_name": pname,
             "option_name": oname,
+            "grade": grade,
+            "is_return": is_return,
             "stock": stock,
             "inbound": inbound,
             "sales_7d": sales7,
@@ -951,40 +1063,94 @@ def get_summary():
             nearest_days_left = None
             nearest_lot_stock = 0
 
-        # 쿠팡 옵션 재고 및 출고량 계산
+        # 쿠팡 옵션 재고 및 출고량 계산 (정상 재고 vs 반품 재고 분리 집계 + 번들별 그룹화)
         c_package_total = 0
         c_physical_total = 0
         c_sales_7d_total = 0
         c_sales_30d_total = 0
+        c_return_package_total = 0
+        c_return_physical_total = 0
+        c_return_sales_7d_total = 0
+        c_return_sales_30d_total = 0
         option_details = []
+        bundle_group_map = {}
 
         for opt in m.get("options", []):
             oid = str(opt.get("id", "")).strip()
-            bundle = int(opt.get("bundle", 1) or 1)
+            bundle = max(1, int(opt.get("bundle", 1) or 1))
             c_data = coupang.get(oid, {})
             c_stock = int(c_data.get("stock", 0) or 0)
             c_inbound = int(c_data.get("inbound", 0) or 0)
             c_sales7 = int(c_data.get("sales_7d", 0) or 0)
             c_sales30 = int(c_data.get("sales_30d", 0) or 0)
             doc = int(c_data.get("doc", 0) or 0)
+            c_grade = str(c_data.get("grade", "") or "").strip()
+            c_pid = str(c_data.get("product_id", "") or "").strip()
+            eff_is_return = bool(opt.get("is_return") or c_data.get("is_return") or ("반품" in c_grade))
 
-            c_package_total += c_stock
-            c_physical_total += (c_stock * bundle)
-            c_sales_7d_total += (c_sales7 * bundle)
-            c_sales_30d_total += (c_sales30 * bundle)
+            phys_stock = c_stock * bundle
+            phys_sales7 = c_sales7 * bundle
+            phys_sales30 = c_sales30 * bundle
 
-            option_details.append({
+            if eff_is_return:
+                c_return_package_total += c_stock
+                c_return_physical_total += phys_stock
+                c_return_sales_7d_total += phys_sales7
+                c_return_sales_30d_total += phys_sales30
+            else:
+                c_package_total += c_stock
+                c_physical_total += phys_stock
+                c_sales_7d_total += phys_sales7
+                c_sales_30d_total += phys_sales30
+
+            opt_detail = {
                 "id": oid,
                 "bundle": bundle,
                 "name": opt.get("name", f"{bundle}개입"),
+                "is_return": eff_is_return,
+                "option_is_return_flag": bool(opt.get("is_return")),
+                "grade": c_grade or ("반품" if eff_is_return else ""),
+                "product_id": c_pid,
                 "coupang_stock": c_stock,
-                "physical_stock": c_stock * bundle,
+                "physical_stock": phys_stock,
                 "inbound": c_inbound,
                 "sales_7d": c_sales7,
-                "sales_7d_physical": c_sales7 * bundle,
+                "sales_7d_physical": phys_sales7,
                 "sales_30d": c_sales30,
                 "doc": doc
-            })
+            }
+            option_details.append(opt_detail)
+
+            grp = bundle_group_map.get(bundle)
+            if grp is None:
+                grp = {
+                    "bundle": bundle,
+                    "label": f"{bundle}개입",
+                    "normal_options": [],
+                    "return_options": [],
+                    "normal_package_stock": 0,
+                    "normal_physical_stock": 0,
+                    "normal_sales_7d_physical": 0,
+                    "normal_inbound": 0,
+                    "return_package_stock": 0,
+                    "return_physical_stock": 0,
+                    "return_sales_7d_physical": 0,
+                }
+                bundle_group_map[bundle] = grp
+
+            if eff_is_return:
+                grp["return_options"].append(opt_detail)
+                grp["return_package_stock"] += c_stock
+                grp["return_physical_stock"] += phys_stock
+                grp["return_sales_7d_physical"] += phys_sales7
+            else:
+                grp["normal_options"].append(opt_detail)
+                grp["normal_package_stock"] += c_stock
+                grp["normal_physical_stock"] += phys_stock
+                grp["normal_sales_7d_physical"] += phys_sales7
+                grp["normal_inbound"] += c_inbound
+
+        coupang_bundle_groups = [bundle_group_map[b] for b in sorted(bundle_group_map.keys())]
 
         # 쿠팡외 매출정보 상품관리코드 매핑 집계 (explicit sales_codes 또는 기본 [seller_code])
         has_explicit_sales = ("sales_codes" in m and isinstance(m["sales_codes"], list))
@@ -1031,6 +1197,11 @@ def get_summary():
             "lot_count": lot_count,
             "coupang_package_total": c_package_total,
             "coupang_physical_total": c_physical_total,
+            "coupang_return_package_total": c_return_package_total,
+            "coupang_return_physical_total": c_return_physical_total,
+            "coupang_return_sales_7d": c_return_sales_7d_total,
+            "coupang_return_sales_30d": c_return_sales_30d_total,
+            "coupang_bundle_groups": coupang_bundle_groups,
             "master_physical_total": g_total + c_physical_total,
             "coupang_sales_7d": c_sales_7d_total,
             "coupang_sales_30d": c_sales_30d_total,
@@ -1103,6 +1274,7 @@ def get_summary():
     master_summaries = []
     total_gaemi_stock = 0
     total_coupang_stock = 0
+    total_coupang_return_stock = 0
     total_physical_stock = 0
     total_coupang_7d = 0
     total_coupang_30d = 0
@@ -1156,6 +1328,11 @@ def get_summary():
 
         c_package_total = calc.get("coupang_package_total", 0)
         c_physical_total = calc.get("coupang_physical_total", 0)
+        c_return_package_total = calc.get("coupang_return_package_total", 0)
+        c_return_physical_total = calc.get("coupang_return_physical_total", 0)
+        c_return_sales_7d = calc.get("coupang_return_sales_7d", 0)
+        c_return_sales_30d = calc.get("coupang_return_sales_30d", 0)
+        coupang_bundle_groups = calc.get("coupang_bundle_groups", [])
         master_physical_total = calc.get("master_physical_total", 0)
         option_details = calc.get("options", [])
         c_sales_7d = calc.get("coupang_sales_7d", 0)
@@ -1195,6 +1372,7 @@ def get_summary():
 
         total_gaemi_stock += g_total
         total_coupang_stock += c_physical_total
+        total_coupang_return_stock += c_return_physical_total
         total_physical_stock += master_physical_total
 
         total_coupang_7d += c_sales_7d
@@ -1445,6 +1623,12 @@ def get_summary():
             "projected_sales_to_exp": projected_sales_to_exp,
             "coupang_package_total": c_package_total,
             "coupang_physical_total": c_physical_total,
+            "coupang_return_package_total": c_return_package_total,
+            "coupang_return_physical_total": c_return_physical_total,
+            "coupang_return_sales_7d": c_return_sales_7d,
+            "coupang_return_sales_30d": c_return_sales_30d,
+            "coupang_bundle_groups": coupang_bundle_groups,
+            "has_coupang_return": bool(c_return_physical_total > 0 or any(o.get("is_return") for o in option_details)),
             "master_physical_total": master_physical_total,
             "coupang_sales_7d": c_sales_7d,
             "coupang_sales_30d": c_sales_30d,
@@ -1487,6 +1671,7 @@ def get_summary():
             "inactive_count": inactive_count,
             "total_gaemi_stock": total_gaemi_stock,
             "total_coupang_stock": total_coupang_stock,
+            "total_coupang_return_stock": total_coupang_return_stock,
             "total_physical_stock": total_physical_stock,
             "total_coupang_7d": total_coupang_7d,
             "total_coupang_30d": total_coupang_30d,
@@ -1610,17 +1795,20 @@ def upload_file_data():
         if not parsed:
             return jsonify({"success": False, "message": "쿠팡 윙 파일 형식(헤더: 옵션 ID, 판매가능재고 등)을 인식하지 못했습니다."}), 400
         uploaded_at = now_kst().strftime("%Y-%m-%d %H:%M")
+        ret_cnt = sum(1 for v in parsed.values() if v.get("is_return"))
+        ret_note = f" (반품 옵션 {ret_cnt}건 포함)" if ret_cnt else ""
         with data_lock:
             app_state["coupang_inventory"].update(parsed)
             app_state["data_uploaded_at"] = uploaded_at
             app_state["last_updated"] = uploaded_at
             app_state.setdefault("upload_timestamps", {})["coupang"] = uploaded_at
         sync_res = save_state(sync_drive=True, wait_drive=False)
-        add_log(f"🚀 [쿠팡 윙] {len(parsed)}개 옵션 ID의 실시간 재고 및 판매량 데이터가 업데이트되었습니다!")
+        add_log(f"🚀 [쿠팡 윙] {len(parsed)}개 옵션 ID{ret_note}의 실시간 재고 및 판매량 데이터가 업데이트되었습니다!")
         return jsonify({
             "success": True,
-            "message": f"쿠팡 윙 {len(parsed)}개 옵션 데이터가 반영되었습니다.",
+            "message": f"쿠팡 윙 {len(parsed)}개 옵션 데이터{ret_note}가 반영되었습니다.",
             "uploaded_at": uploaded_at,
+            "return_count": ret_cnt,
             "drive_sync": sync_res
         })
 
@@ -1727,7 +1915,7 @@ def export_master_csv():
     cw.writerow([
         "판매자관리코드", "구분", "마스터 상품명", "총 가용재고", "통합 런웨이(일)",
         "개미(3PL) 재고", "개미 런웨이(일)", "최단 소비기한",
-        "쿠팡(실물) 재고", "쿠팡 런웨이(일)", 
+        "쿠팡(실물) 재고", "쿠팡 반품(실물) 재고", "쿠팡 런웨이(일)", 
         "7일 출고량", "30일 출고량", "일평균 출고량", 
         "발주 권고 상태", "추천 조치"
     ])
@@ -1737,7 +1925,7 @@ def export_master_csv():
             m["seller_code"], m.get("product_type", "사입"), m["name"],
             m["master_physical_total"], m["total_runway_str"],
             m["gaemi_total"], m["gaemi_runway_str"], m.get("nearest_expiry_date") or "-",
-            m["coupang_physical_total"], m["coupang_runway_str"],
+            m["coupang_physical_total"], m.get("coupang_return_physical_total", 0), m["coupang_runway_str"],
             m["total_sales_7d"], m.get("total_sales_30d", 0), m["daily_sales"],
             m["status"], m["action_cta"]
         ])
@@ -1805,6 +1993,7 @@ def admin_get_config():
         masters = copy.deepcopy(app_state["master_products"])
         b2b = copy.deepcopy(get_active_b2b_mappings())
         lot_overrides = copy.deepcopy(app_state.get("lot_expiry_overrides", {}))
+        hidden_unmapped = sanitize_hidden_unmapped_list(app_state.get("hidden_unmapped_codes", []))
         settings = copy.deepcopy(app_state.get("settings", DEFAULT_SETTINGS))
         settings_public = {
             "default_import_lead_time": settings.get("default_import_lead_time", 110),
@@ -1843,6 +2032,7 @@ def admin_get_config():
         "master_products": masters,
         "b2b_mappings": b2b,
         "lot_expiry_overrides": lot_overrides,
+        "hidden_unmapped_codes": hidden_unmapped,
         "settings": settings_public,
         "gaemi_inventory": gaemi,
         "coupang_inventory": coupang,
@@ -1911,7 +2101,10 @@ def _parse_coupang_options_input(raw_val):
         seen.add(oid)
         bundle = max(1, _parse_optional_positive_int(opt.get("bundle")) or 1)
         oname = str(opt.get("name", f"{bundle}개")).strip() or f"{bundle}개"
-        clean_options.append({"id": oid, "bundle": bundle, "name": oname})
+        entry = {"id": oid, "bundle": bundle, "name": oname}
+        if bool(opt.get("is_return")):
+            entry["is_return"] = True
+        clean_options.append(entry)
     return clean_options
 
 @app.route("/api/admin/product/save", methods=["POST"])
@@ -2131,9 +2324,13 @@ def admin_save_product():
                     coupang_inv[oid_s]["stock"] = max(0, int(st_val))
                     coupang_inv[oid_s]["updated_at"] = now_kst().strftime("%m-%d %H:%M")
                 else:
+                    is_ret_opt = any(o.get("id") == oid_s and o.get("is_return") for o in (record.get("options") or []))
                     coupang_inv[oid_s] = {
+                        "product_id": "",
                         "product_name": name,
                         "option_name": "수동 등록",
+                        "grade": "반품" if is_ret_opt else "",
+                        "is_return": is_ret_opt,
                         "stock": max(0, int(st_val)),
                         "inbound": 0,
                         "sales_7d": 0,
@@ -2142,6 +2339,7 @@ def admin_save_product():
                         "updated_at": now_kst().strftime("%m-%d %H:%M")
                     }
 
+        _unhide_mapped_keys_locked(record)
         saved_copy = copy.deepcopy(record)
 
     sync_res = save_state(sync_drive=True, wait_drive=True)
@@ -2202,6 +2400,7 @@ def admin_save_product_mappings():
         if "options" in body:
             target["options"] = _parse_coupang_options_input(body.get("options") or [])
 
+        _unhide_mapped_keys_locked(target)
         saved_copy = copy.deepcopy(target)
         t_code = target.get("seller_code", "")
         t_name = target.get("name", "")
@@ -2212,6 +2411,73 @@ def admin_save_product_mappings():
         "success": True,
         "message": f"[{t_code}] {t_name} 코드 매핑 저장 완료!",
         "product": saved_copy,
+        "drive_sync": sync_res
+    })
+
+@app.route("/api/admin/unmapped-explorer/hidden", methods=["POST"])
+@require_admin
+def admin_toggle_unmapped_explorer_hidden():
+    """CSV 미매핑 코드 탐색기 항목별 숨기기/복원(해제)/전체복원 영구 저장"""
+    body = request.get_json() or {}
+    action = str(body.get("action", "")).strip().lower()
+    raw_keys = body.get("keys")
+    single_key = body.get("key")
+    label = str(body.get("label", "")).strip()
+
+    if action not in ("hide", "unhide", "clear"):
+        if "hidden" in body:
+            action = "hide" if bool(body.get("hidden")) else "unhide"
+        elif raw_keys is not None or single_key is not None:
+            action = "hide"
+
+    if action not in ("hide", "unhide", "clear"):
+        return jsonify({"success": False, "message": "유효하지 않은 요청입니다. (action: hide|unhide|clear)"}), 400
+
+    target_keys = []
+    if isinstance(raw_keys, list):
+        for k in raw_keys:
+            nk = normalize_hidden_unmapped_key(k)
+            if nk and nk not in target_keys:
+                target_keys.append(nk)
+    elif single_key is not None:
+        nk = normalize_hidden_unmapped_key(single_key)
+        if nk:
+            target_keys.append(nk)
+
+    if action in ("hide", "unhide") and not target_keys:
+        return jsonify({"success": False, "message": "숨기거나 복원할 유효한 코드 키가 없습니다."}), 400
+
+    with data_lock:
+        cur_list = sanitize_hidden_unmapped_list(app_state.get("hidden_unmapped_codes", []))
+        if action == "clear":
+            cleared_cnt = len(cur_list)
+            app_state["hidden_unmapped_codes"] = []
+            msg = f"숨긴 미매핑 항목 {cleared_cnt}건을 모두 복원했습니다."
+        elif action == "hide":
+            cur_set = set(cur_list)
+            added = 0
+            for nk in target_keys:
+                if nk not in cur_set:
+                    cur_list.append(nk)
+                    cur_set.add(nk)
+                    added += 1
+            app_state["hidden_unmapped_codes"] = cur_list
+            target_desc = label or (", ".join(target_keys[:2]) + (f" 외 {len(target_keys)-2}건" if len(target_keys) > 2 else ""))
+            msg = f"[{target_desc}] 미매핑 목록에서 숨김 처리했습니다." if added else f"[{target_desc}] 이미 숨김 처리된 항목입니다."
+        else:
+            rm_set = set(target_keys)
+            app_state["hidden_unmapped_codes"] = [k for k in cur_list if k not in rm_set]
+            target_desc = label or (", ".join(target_keys[:2]) + (f" 외 {len(target_keys)-2}건" if len(target_keys) > 2 else ""))
+            msg = f"[{target_desc}] 숨김 해제(미매핑 목록 복원)했습니다."
+
+        result_list = list(app_state["hidden_unmapped_codes"])
+
+    sync_res = save_state(sync_drive=True, wait_drive=True)
+    add_log(f"👁️ [관리자 미매핑 탐색기] {msg}")
+    return jsonify({
+        "success": True,
+        "message": msg,
+        "hidden_unmapped_codes": result_list,
         "drive_sync": sync_res
     })
 
@@ -2784,7 +3050,7 @@ HTML_TEMPLATE = """
                 <div class="flex items-center space-x-1.5">
                     <span class="font-bold text-slate-900">총 가용재고:</span>
                     <span id="statTotalStock" class="font-bold text-emerald-700 text-sm">0개</span>
-                    <span class="text-slate-400 text-[11px]">(개미 <span id="statGaemiStock" class="font-semibold text-amber-700">0</span> + 쿠팡실물 <span id="statCoupangStock" class="font-semibold text-blue-700">0</span>)</span>
+                    <span class="text-slate-400 text-[11px]">(개미 <span id="statGaemiStock" class="font-semibold text-amber-700">0</span> + 쿠팡실물 <span id="statCoupangStock" class="font-semibold text-blue-700">0</span><span id="statCoupangReturnWrap" class="hidden text-rose-600 font-semibold"> · 🔄반품 <span id="statCoupangReturnStock">0개</span></span>)</span>
                 </div>
                 <span class="text-slate-300">|</span>
                 <div class="flex items-center space-x-1.5">
@@ -3341,16 +3607,26 @@ HTML_TEMPLATE = """
                                         <option value="sales">① 쿠팡외 매출정보 (상품관리코드)</option>
                                         <option value="gaemi">② 개미창고 (상품코드 + 옵션명)</option>
                                         <option value="coupang">③ 쿠팡 재고건전성 (쿠팡 옵션 ID)</option>
+                                        <option value="coupang_return">③-1 쿠팡 반품 재고만 (G열 '반품')</option>
                                     </select>
                                     <label class="inline-flex items-center space-x-1.5 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-sky-200 text-[11px]">
                                         <input type="checkbox" id="acMapCsvOnlyUnmapped" onchange="renderAdminMappingExplorer()" checked>
                                         <span class="font-bold text-slate-700">미매핑 코드만 보기</span>
                                     </label>
-                                    <input type="text" id="acMapCsvSearch" oninput="renderAdminMappingExplorer()" placeholder="CSV 코드, 옵션명, 상품명 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white w-56 text-[11px]">
+                                    <select id="acMapCsvHiddenMode" onchange="renderAdminMappingExplorer()" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-slate-700 text-[11px]" title="숨김 처리된 미매핑 상품 표시 방식">
+                                        <option value="exclude">숨김 제외 (필요한 항목만)</option>
+                                        <option value="only_hidden">숨김 항목만 보기</option>
+                                        <option value="include">숨김 항목 포함 전체</option>
+                                    </select>
+                                    <span id="acMapCsvHiddenSummary" class="hidden inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-700">
+                                        <button type="button" onclick="toggleAcMapOnlyHiddenQuick()" class="hover:underline text-slate-700" title="클릭하여 숨김 항목만 보기/제외 전환">숨김 <span id="acMapCsvHiddenCountBadge" class="font-mono text-slate-950">0</span>건</button>
+                                        <button type="button" onclick="clearAllHiddenUnmappedCsvRows()" class="px-1.5 py-0.5 rounded bg-white hover:bg-indigo-50 border border-slate-300 text-indigo-700 font-bold text-[10px]" title="숨김 처리된 모든 미매핑 항목을 다시 표시합니다">전체복원</button>
+                                    </span>
+                                    <input type="text" id="acMapCsvSearch" oninput="renderAdminMappingExplorer()" placeholder="CSV 코드, 옵션명, 상품명 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white w-52 text-[11px]">
                                 </div>
                                 <span class="text-[10px] text-slate-500">* B2B S코드는 'B2B/세트' 탭 규칙으로 별도 판정됩니다.</span>
                             </div>
-                            <div class="max-h-60 overflow-y-auto bg-white border border-sky-200 rounded-lg">
+                            <div class="max-h-60 overflow-x-auto overflow-y-auto bg-white border border-sky-200 rounded-lg">
                                 <table class="w-full text-left border-collapse text-[11px]">
                                     <thead class="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
                                         <tr>
@@ -3358,7 +3634,7 @@ HTML_TEMPLATE = """
                                             <th class="p-2 min-w-[190px]">CSV 코드 / 옵션명</th>
                                             <th class="p-2">CSV 품목 정보 · 수량/매출</th>
                                             <th class="p-2 w-28">연결 상태</th>
-                                            <th class="p-2 min-w-[260px]">빠른 마스터 연결 / 신규등록</th>
+                                            <th class="p-2 min-w-[305px]">빠른 마스터 연결 / 신규등록 / 숨김</th>
                                         </tr>
                                     </thead>
                                     <tbody id="acMapCsvTbody" class="divide-y divide-slate-100"></tbody>
@@ -3674,12 +3950,16 @@ HTML_TEMPLATE = """
                     <div id="cm_coupang_rows" class="space-y-1.5"></div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-                        <input type="text" id="cm_coupang_id_input" placeholder="쿠팡 옵션 ID (예: 95844803290)" class="sm:col-span-4 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <input type="text" id="cm_coupang_id_input" placeholder="쿠팡 옵션 ID (예: 95844803290)" class="sm:col-span-3 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
                         <div class="sm:col-span-2 flex items-center space-x-1">
-                            <input type="number" min="1" id="cm_coupang_bundle_input" value="1" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-right focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <input type="number" min="1" id="cm_coupang_bundle_input" value="1" class="w-full px-2 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-right focus:outline-none focus:ring-2 focus:ring-blue-500">
                             <span class="text-[11px] text-slate-600 shrink-0">개입</span>
                         </div>
-                        <input type="text" id="cm_coupang_name_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmCoupangManual();}" placeholder="옵션명 (예: 2개 500ml)" class="sm:col-span-4 px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <input type="text" id="cm_coupang_name_input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCmCoupangManual();}" placeholder="옵션명 (예: 2개 500ml)" class="sm:col-span-3 px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <label class="sm:col-span-2 inline-flex items-center justify-center space-x-1 px-2 py-1.5 rounded-lg border border-rose-200 bg-rose-50/70 cursor-pointer text-[11px] font-bold text-rose-800" title="체크 시 정상 가용재고에서 제외되고 번들별 반품 재고로 관리됩니다">
+                            <input type="checkbox" id="cm_coupang_return_input">
+                            <span>🔄 반품</span>
+                        </label>
                         <button type="button" onclick="addCmCoupangManual()" class="sm:col-span-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold">+ 직접 추가</button>
                     </div>
 
@@ -4442,6 +4722,17 @@ HTML_TEMPLATE = """
 
                 document.getElementById('statGaemiStock').innerText = data.stats.total_gaemi_stock.toLocaleString() + '개';
                 document.getElementById('statCoupangStock').innerText = data.stats.total_coupang_stock.toLocaleString() + '개';
+                const totalRetStock = data.stats.total_coupang_return_stock || 0;
+                const elRetWrap = document.getElementById('statCoupangReturnWrap');
+                const elRetStock = document.getElementById('statCoupangReturnStock');
+                if (elRetWrap && elRetStock) {
+                    if (totalRetStock > 0) {
+                        elRetStock.innerText = totalRetStock.toLocaleString() + '개';
+                        elRetWrap.classList.remove('hidden');
+                    } else {
+                        elRetWrap.classList.add('hidden');
+                    }
+                }
                 document.getElementById('statTotalStock').innerText = data.stats.total_physical_stock.toLocaleString() + '개';
                 document.getElementById('statTotalSales7d').innerText = `7일 ${data.stats.total_sales_7d.toLocaleString()}개`;
                 if (document.getElementById('statTotalSales30d')) {
@@ -4498,7 +4789,8 @@ HTML_TEMPLATE = """
                     const matchName = (m.name || '').toLowerCase().includes(query);
                     const matchCode = (m.seller_code || '').toLowerCase().includes(query);
                     const matchNote = (m.note || '').toLowerCase().includes(query);
-                    if (!matchName && !matchCode && !matchNote) return false;
+                    const matchReturn = query.includes('반품') && ((m.coupang_return_physical_total || 0) > 0 || m.has_coupang_return);
+                    if (!matchName && !matchCode && !matchNote && !matchReturn) return false;
                 }
                 if (activeCategory !== 'all') {
                     if (activeCategory === '수입') {
@@ -4539,6 +4831,7 @@ HTML_TEMPLATE = """
             let sumTotalStock = 0;
             let sumGaemiStock = 0;
             let sumCoupangStock = 0;
+            let sumCoupangReturnStock = 0;
             let sumCoupangSales = 0;
             let sumCoupangSales30d = 0;
             let sumOtherSales = 0;
@@ -4552,6 +4845,7 @@ HTML_TEMPLATE = """
                 sumTotalStock += m.master_physical_total;
                 sumGaemiStock += m.gaemi_total;
                 sumCoupangStock += m.coupang_physical_total;
+                sumCoupangReturnStock += (m.coupang_return_physical_total || 0);
                 sumCoupangSales += m.coupang_sales_7d;
                 sumCoupangSales30d += (m.coupang_sales_30d || 0);
                 sumOtherSales += m.other_sales_7d;
@@ -4686,10 +4980,16 @@ HTML_TEMPLATE = """
                     } else if (colId === 'gaemi_runway') {
                         html += `<td class="${col.tdClass} overflow-hidden">${gaemiRunwayHtml}</td>`;
                     } else if (colId === 'coupang_stock') {
+                        const retPhys = m.coupang_return_physical_total || 0;
+                        const retPkg = m.coupang_return_package_total || 0;
+                        const retBadgeHtml = retPhys > 0
+                            ? `<div class="mt-0.5"><span class="inline-block text-[9px] px-1 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold whitespace-nowrap" title="쿠팡 반품 재고 (정상 가용재고 합산 제외 · ${retPkg}세트)">🔄 반품 ${retPhys.toLocaleString()}</span></div>`
+                            : '';
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
                                 <div class="font-bold font-mono">${m.coupang_physical_total.toLocaleString()}</div>
                                 ${m.coupang_package_total > 0 ? `<div class="text-[9px] text-slate-400 font-normal">(${m.coupang_package_total}세트)</div>` : ''}
+                                ${retBadgeHtml}
                             </td>
                         `;
                     } else if (colId === 'coupang_runway') {
@@ -4809,6 +5109,9 @@ HTML_TEMPLATE = """
                                                 <div class="text-[10px] font-bold text-blue-800">쿠팡(실물)</div>
                                                 <div class="font-black font-mono text-sm text-blue-950">${m.coupang_physical_total.toLocaleString()}개</div>
                                                 <div class="text-[9px] font-semibold text-blue-800 truncate">${m.coupang_package_total}세트 · ${escapeHtml(m.coupang_runway_str)}</div>
+                                                ${(m.coupang_return_physical_total || 0) > 0
+                                                    ? `<div class="text-[9px] font-bold text-rose-700 truncate mt-0.5">🔄 반품 ${m.coupang_return_physical_total.toLocaleString()}개 (${m.coupang_return_package_total || 0}세트)</div>`
+                                                    : ''}
                                             </div>
                                             <div class="${m.is_no_sales ? 'bg-orange-50/80 border-orange-300' : 'bg-indigo-50/70 border-indigo-200'} border rounded-lg px-2.5 py-1.5">
                                                 <div class="text-[10px] font-bold ${m.is_no_sales ? 'text-orange-900' : 'text-indigo-800'}">출고 속도 · 통합</div>
@@ -4919,32 +5222,118 @@ HTML_TEMPLATE = """
                                         </div>
                                     ` : ''}
 
-                                    <!-- 2. 쿠팡 옵션 번들 내역 (한눈에 비교 가능한 컴팩트 리스트) -->
-                                    ${m.options && m.options.length > 0 ? `
-                                        <div class="p-2.5 sm:p-3 space-y-1.5">
-                                            <div class="flex items-center justify-between text-[11px] font-bold text-blue-800">
-                                                <div class="flex items-center space-x-1">
-                                                    <i class="fa-solid fa-cubes"></i>
-                                                    <span>쿠팡 윙 옵션별 번들 · 실물 재고</span>
-                                                </div>
-                                                <span class="text-[10px] font-mono text-blue-600">총 ${m.options.length}개 옵션</span>
-                                            </div>
-                                            <div class="rounded-lg border border-blue-200 divide-y divide-blue-100 bg-blue-50/25 overflow-hidden">
-                                                ${m.options.map(opt => `
-                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px]">
-                                                        <div class="min-w-0 flex-1">
-                                                            <div class="font-bold text-slate-800 truncate">${escapeHtml(opt.name)}</div>
-                                                            <div class="text-[10px] text-slate-500 font-mono truncate">${escapeHtml(opt.id)} · ${opt.bundle}개입</div>
-                                                        </div>
-                                                        <div class="text-right shrink-0 font-mono">
-                                                            <div class="font-extrabold text-blue-700">${opt.coupang_stock}세트 <span class="text-slate-600 font-semibold">(실물 ${opt.physical_stock}개)</span></div>
-                                                            <div class="text-[10px] text-slate-500">7일 출고: <strong class="text-slate-700">${opt.sales_7d_physical}개</strong></div>
-                                                        </div>
+                                    <!-- 2. 쿠팡 옵션 번들 내역 (한눈에 비교 가능한 컴팩트 리스트 · 번들별 정상/반품 분리 표시) -->
+                                    ${(() => {
+                                        const opts = m.options || [];
+                                        if (opts.length === 0) return '';
+                                        let bundleGroups = Array.isArray(m.coupang_bundle_groups) && m.coupang_bundle_groups.length > 0
+                                            ? m.coupang_bundle_groups
+                                            : null;
+                                        if (!bundleGroups) {
+                                            const gMap = new Map();
+                                            opts.forEach(opt => {
+                                                const b = Math.max(1, parseInt(opt.bundle || 1, 10) || 1);
+                                                if (!gMap.has(b)) {
+                                                    gMap.set(b, {
+                                                        bundle: b,
+                                                        label: `${b}개입`,
+                                                        normal_options: [],
+                                                        return_options: [],
+                                                        normal_package_stock: 0,
+                                                        normal_physical_stock: 0,
+                                                        return_package_stock: 0,
+                                                        return_physical_stock: 0
+                                                    });
+                                                }
+                                                const g = gMap.get(b);
+                                                if (opt.is_return) {
+                                                    g.return_options.push(opt);
+                                                    g.return_package_stock += (opt.coupang_stock || 0);
+                                                    g.return_physical_stock += (opt.physical_stock || 0);
+                                                } else {
+                                                    g.normal_options.push(opt);
+                                                    g.normal_package_stock += (opt.coupang_stock || 0);
+                                                    g.normal_physical_stock += (opt.physical_stock || 0);
+                                                }
+                                            });
+                                            bundleGroups = Array.from(gMap.values()).sort((a, b) => a.bundle - b.bundle);
+                                        }
+                                        const retPkgTot = m.coupang_return_package_total || 0;
+                                        const retPhysTot = m.coupang_return_physical_total || 0;
+                                        const hasAnyReturn = retPhysTot > 0 || m.has_coupang_return || bundleGroups.some(g => (g.return_options || []).length > 0);
+                                        const headerSummary = hasAnyReturn
+                                            ? `<span class="text-[10px] font-mono text-blue-700">정상 ${m.coupang_physical_total.toLocaleString()}개 · <span class="text-rose-700 font-extrabold">🔄 반품 ${retPhysTot.toLocaleString()}개 (${retPkgTot.toLocaleString()}세트)</span></span>`
+                                            : `<span class="text-[10px] font-mono text-blue-600">총 ${opts.length}개 옵션</span>`;
+
+                                        const groupsHtml = bundleGroups.map(grp => {
+                                            const nOpts = grp.normal_options || [];
+                                            const rOpts = grp.return_options || [];
+                                            const nPkg = grp.normal_package_stock || 0;
+                                            const nPhys = grp.normal_physical_stock || 0;
+                                            const rPkg = grp.return_package_stock || 0;
+                                            const rPhys = grp.return_physical_stock || 0;
+                                            const showGroupHeader = hasAnyReturn || nOpts.length > 1 || rOpts.length > 0;
+
+                                            const groupHeaderHtml = showGroupHeader ? `
+                                                <div class="px-2.5 py-1 bg-slate-100/80 flex flex-wrap items-center justify-between gap-1.5 text-[10px]">
+                                                    <span class="font-extrabold font-mono text-slate-800">${grp.bundle}개입 번들</span>
+                                                    <div class="flex flex-wrap items-center gap-1 font-mono">
+                                                        <span class="px-1.5 py-0.2 rounded bg-blue-100/80 text-blue-900 font-bold">정상 ${nPkg.toLocaleString()}세트 (${nPhys.toLocaleString()}개)</span>
+                                                        ${(rOpts.length > 0 || rPhys > 0)
+                                                            ? `<span class="px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-200 font-extrabold">🔄 반품 ${rPkg.toLocaleString()}세트 (${rPhys.toLocaleString()}개)</span>`
+                                                            : `<span class="px-1.5 py-0.2 rounded bg-white text-slate-400 border border-slate-200">반품 0개</span>`}
                                                     </div>
-                                                `).join('')}
+                                                </div>
+                                            ` : '';
+
+                                            const normalRowsHtml = nOpts.map(opt => `
+                                                <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-blue-50/20">
+                                                    <div class="min-w-0 flex-1">
+                                                        <div class="font-bold text-slate-800 truncate">${escapeHtml(opt.name)}</div>
+                                                        <div class="text-[10px] text-slate-500 font-mono truncate">${escapeHtml(opt.id)} · ${opt.bundle}개입</div>
+                                                    </div>
+                                                    <div class="text-right shrink-0 font-mono">
+                                                        <div class="font-extrabold text-blue-700">${opt.coupang_stock}세트 <span class="text-slate-600 font-semibold">(실물 ${opt.physical_stock}개)</span></div>
+                                                        <div class="text-[10px] text-slate-500">7일 출고: <strong class="text-slate-700">${opt.sales_7d_physical}개</strong></div>
+                                                    </div>
+                                                </div>
+                                            `).join('');
+
+                                            const returnRowsHtml = rOpts.map(opt => `
+                                                <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-rose-50/60">
+                                                    <div class="min-w-0 flex-1">
+                                                        <div class="flex flex-wrap items-center gap-1">
+                                                            <span class="px-1.5 py-0.2 rounded bg-rose-600 text-white font-bold text-[9px] shrink-0">🔄 반품</span>
+                                                            ${opt.grade ? `<span class="px-1.5 py-0.2 rounded bg-rose-100 text-rose-900 border border-rose-200 font-mono font-bold text-[9px] shrink-0">${escapeHtml(opt.grade)}</span>` : ''}
+                                                            <span class="font-bold text-rose-950 truncate">${escapeHtml(opt.name)}</span>
+                                                        </div>
+                                                        <div class="text-[10px] text-rose-700/80 font-mono truncate mt-0.5">${escapeHtml(opt.id)} · ${opt.bundle}개입</div>
+                                                    </div>
+                                                    <div class="text-right shrink-0 font-mono">
+                                                        <div class="font-extrabold text-rose-700">${opt.coupang_stock}세트 <span class="text-rose-950 font-semibold">(반품 실물 ${opt.physical_stock}개)</span></div>
+                                                        <div class="text-[10px] text-rose-700/80">7일 출고: <strong class="text-rose-900">${opt.sales_7d_physical}개</strong></div>
+                                                    </div>
+                                                </div>
+                                            `).join('');
+
+                                            return `<div class="divide-y divide-blue-100/70">${groupHeaderHtml}${normalRowsHtml}${returnRowsHtml}</div>`;
+                                        }).join('');
+
+                                        return `
+                                            <div class="p-2.5 sm:p-3 space-y-1.5">
+                                                <div class="flex flex-wrap items-center justify-between gap-1 text-[11px] font-bold text-blue-800">
+                                                    <div class="flex items-center space-x-1">
+                                                        <i class="fa-solid fa-cubes"></i>
+                                                        <span>쿠팡 윙 옵션별 번들 · 실물 재고</span>
+                                                    </div>
+                                                    ${headerSummary}
+                                                </div>
+                                                <div class="rounded-lg border border-blue-200 divide-y divide-blue-200 bg-white overflow-hidden">
+                                                    ${groupsHtml}
+                                                </div>
                                             </div>
-                                        </div>
-                                    ` : ''}
+                                        `;
+                                    })()}
 
                                     <!-- 3. B2B/세트(S코드) 연동, 제품 참고사항, 타채널 최근 주문 -->
                                     ${((m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0) || m.note || (m.recent_orders && m.recent_orders.length > 0)) ? `
@@ -5023,7 +5412,7 @@ HTML_TEMPLATE = """
                     const avgGRunway = sumDailySales > 0 ? (sumGaemiStock / sumDailySales).toFixed(1) + '일' : (sumGaemiStock > 0 ? '소진무' : '-');
                     footHtml += `<td class="py-2.5 px-1.5 text-center font-bold text-amber-900 text-[11px] overflow-hidden">${avgGRunway}</td>`;
                 } else if (colId === 'coupang_stock') {
-                    footHtml += `<td class="py-2.5 px-2 text-right font-black text-blue-800 text-xs bg-blue-100/60 overflow-hidden">${sumCoupangStock.toLocaleString()}</td>`;
+                    footHtml += `<td class="py-2.5 px-2 text-right font-black text-blue-800 text-xs bg-blue-100/60 overflow-hidden"><div>${sumCoupangStock.toLocaleString()}</div>${sumCoupangReturnStock > 0 ? `<div class="text-[9px] font-bold text-rose-700">🔄 반품 ${sumCoupangReturnStock.toLocaleString()}</div>` : ''}</td>`;
                 } else if (colId === 'coupang_runway') {
                     const avgCRunway = sumCoupangSales > 0 ? (sumCoupangStock / (sumCoupangSales / 7.0)).toFixed(1) + '일' : (sumCoupangStock > 0 ? '소진무' : '-');
                     footHtml += `<td class="py-2.5 px-1.5 text-center font-bold text-blue-900 text-[11px] overflow-hidden">${avgCRunway}</td>`;
@@ -5302,7 +5691,7 @@ HTML_TEMPLATE = """
                     csv_gaemi_lots: csvLots,
                     gaemi_total: gTotal,
                     options: (rawCfgItem.options || []).map(o => ({
-                        id: o.id, bundle: o.bundle, name: o.name,
+                        id: o.id, bundle: o.bundle, name: o.name, is_return: Boolean(o.is_return),
                         coupang_stock: ((adminConfigCache.coupang_inventory || {})[o.id] || {}).stock || 0
                     }))
                 });
@@ -5557,7 +5946,11 @@ HTML_TEMPLATE = """
         function addCoupangOptionRow(opt = {}) {
             const container = document.getElementById('ep_options_container');
             const row = document.createElement('div');
-            row.className = 'ep-opt-row flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg p-2';
+            const cd = (adminConfigCache && adminConfigCache.coupang_inventory && opt.id) ? adminConfigCache.coupang_inventory[opt.id] : null;
+            const cGrade = cd ? String(cd.grade || '').trim() : '';
+            const csvIsRet = Boolean(cd && (cd.is_return || cGrade.includes('반품')));
+            const isRet = Boolean(opt.is_return || csvIsRet);
+            row.className = `ep-opt-row flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-rose-300 bg-rose-50/40' : 'border-slate-200'} rounded-lg p-2`;
             row.innerHTML = `
                 <input type="text" class="ep-opt-id w-36 px-2.5 py-1 border border-slate-300 rounded font-mono text-[11px]" placeholder="쿠팡 옵션 ID" value="${escapeHtml(opt.id || '')}">
                 <div class="flex items-center space-x-1">
@@ -5565,6 +5958,10 @@ HTML_TEMPLATE = """
                     <span class="text-[11px] text-slate-500">개입</span>
                 </div>
                 <input type="text" class="ep-opt-name flex-1 min-w-[100px] px-2.5 py-1 border border-slate-300 rounded text-[11px]" placeholder="옵션명 (예: 2개)" value="${escapeHtml(opt.name || '')}">
+                <label class="inline-flex items-center space-x-1 px-1.5 py-1 rounded border ${isRet ? 'bg-rose-100 border-rose-300 text-rose-900' : 'bg-slate-50 border-slate-200 text-slate-600'} text-[10px] font-bold cursor-pointer shrink-0" title="체크 시 반품 재고로 분리 관리됩니다">
+                    <input type="checkbox" class="ep-opt-return" ${isRet ? 'checked' : ''}>
+                    <span>🔄 반품${csvIsRet && cGrade ? ` (${escapeHtml(cGrade)})` : ''}</span>
+                </label>
                 <button type="button" onclick="this.closest('.ep-opt-row').remove()" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-bold">삭제</button>
             `;
             container.appendChild(row);
@@ -5586,7 +5983,7 @@ HTML_TEMPLATE = """
                 html += `<div class="text-[11px] font-bold text-blue-900 mt-2">쿠팡 창고(세트 기준) 임시 재고 보정</div>`;
                 html += options.map(o => `
                     <div class="flex items-center justify-between gap-2 bg-white border border-rose-200 rounded px-2.5 py-1.5">
-                        <span class="text-[11px] text-slate-700 truncate">${escapeHtml(o.name)} [${escapeHtml(o.id)}] (현재 ${o.coupang_stock || 0}세트)</span>
+                        <span class="text-[11px] text-slate-700 truncate">${o.is_return ? '<span class="text-rose-700 font-bold mr-1">[반품]</span>' : ''}${escapeHtml(o.name)} [${escapeHtml(o.id)}] (현재 ${o.coupang_stock || 0}세트)</span>
                         <input type="number" min="0" class="ep-temp-coupang w-24 px-2 py-1 border border-slate-300 rounded font-mono text-[11px] text-right" data-opt-id="${escapeHtml(o.id)}" placeholder="${o.coupang_stock || 0}">
                     </div>
                 `).join('');
@@ -5610,7 +6007,13 @@ HTML_TEMPLATE = """
                 const id = r.querySelector('.ep-opt-id').value.trim();
                 const bundle = parseInt(r.querySelector('.ep-opt-bundle').value || '1', 10) || 1;
                 const oname = r.querySelector('.ep-opt-name').value.trim() || `${bundle}개`;
-                if (id) options.push({ id, bundle, name: oname });
+                const isRetEl = r.querySelector('.ep-opt-return');
+                const isRet = Boolean(isRetEl && isRetEl.checked);
+                if (id) {
+                    const optObj = { id, bundle, name: oname };
+                    if (isRet) optObj.is_return = true;
+                    options.push(optObj);
+                }
             });
 
             const manualLots = [];
@@ -6377,12 +6780,16 @@ HTML_TEMPLATE = """
         function buildMappingOwnershipIndex(cfg) {
             const masters = (cfg && cfg.master_products) || [];
             const b2bMap = (cfg && cfg.b2b_mappings) || {};
+            const coupangInv = (cfg && cfg.coupang_inventory) || {};
             const groupedGaemi = getGroupedGaemiEntries(cfg);
 
             const salesOwners = {};
             const gaemiOwners = {};
             const coupangOwners = {};
             const b2bSalesOwners = {};
+            const productIdOwners = {};
+            const productNameOwners = {};
+            const masterMetaMap = {};
 
             Object.entries(b2bMap).forEach(([sCode, info]) => {
                 const sc = String(sCode || '').trim().toUpperCase();
@@ -6398,6 +6805,7 @@ HTML_TEMPLATE = """
                     name: String(m.name || '').trim()
                 };
                 const normCode = ownerInfo.seller_code.toUpperCase();
+                const optNameHints = [];
 
                 const scList = Array.isArray(m.sales_codes)
                     ? m.sales_codes
@@ -6422,14 +6830,91 @@ HTML_TEMPLATE = """
                 (m.options || []).forEach(opt => {
                     const oid = String(opt.id || '').trim();
                     if (!oid) return;
+                    if (opt.name) optNameHints.push(String(opt.name).trim());
                     if (!coupangOwners[oid]) coupangOwners[oid] = [];
                     if (!coupangOwners[oid].some(o => o.seller_code === ownerInfo.seller_code)) {
                         coupangOwners[oid].push(ownerInfo);
                     }
+                    const cd = coupangInv[oid];
+                    if (cd) {
+                        if (cd.option_name) optNameHints.push(String(cd.option_name).trim());
+                        if (cd.product_name) optNameHints.push(String(cd.product_name).trim());
+                        const pid = String(cd.product_id || '').trim();
+                        if (pid) {
+                            if (!productIdOwners[pid]) productIdOwners[pid] = [];
+                            if (!productIdOwners[pid].some(o => o.seller_code === ownerInfo.seller_code)) {
+                                productIdOwners[pid].push(ownerInfo);
+                            }
+                        }
+                        const pNameKey = String(cd.product_name || '').trim().toLowerCase();
+                        if (pNameKey) {
+                            if (!productNameOwners[pNameKey]) productNameOwners[pNameKey] = [];
+                            if (!productNameOwners[pNameKey].some(o => o.seller_code === ownerInfo.seller_code)) {
+                                productNameOwners[pNameKey].push(ownerInfo);
+                            }
+                        }
+                    }
                 });
+
+                masterMetaMap[ownerInfo.seller_code] = {
+                    optNames: optNameHints.join(' ')
+                };
             });
 
-            return { groupedGaemi, salesOwners, b2bSalesOwners, gaemiOwners, coupangOwners };
+            return { groupedGaemi, salesOwners, b2bSalesOwners, gaemiOwners, coupangOwners, productIdOwners, productNameOwners, masterMetaMap };
+        }
+
+        function extractUnitTokens(text) {
+            const s = String(text || '').toLowerCase();
+            const m = s.match(/(\\d+(?:\\.\\d+)?)\\s*(?:ml|l|g|kg)/g);
+            return m ? Array.from(new Set(m.map(t => t.replace(/\\s+/g, '')))) : [];
+        }
+
+        function suggestMasterForCoupangCsvRow(row, cfg, idxData) {
+            if (!row || row.channel !== 'coupang' || row.isMapped) return null;
+            const pid = String(row.product_id || '').trim();
+            const pidOwners = (pid && idxData.productIdOwners && idxData.productIdOwners[pid]) || [];
+            const rowText = `${row.option_name || ''} ${row.product_name || ''}`.toLowerCase();
+            const rowUnits = extractUnitTokens(rowText);
+
+            if (pidOwners.length === 1) {
+                return { master: pidOwners[0], reason: '동일 등록상품 ID' };
+            }
+            if (pidOwners.length > 1) {
+                let best = null;
+                let bestScore = -1;
+                let secondScore = -1;
+                pidOwners.forEach(owner => {
+                    const meta = (idxData.masterMetaMap && idxData.masterMetaMap[owner.seller_code]) || {};
+                    const hay = `${owner.name} ${meta.optNames || ''}`.toLowerCase();
+                    const hayUnits = extractUnitTokens(hay);
+                    let score = 0;
+                    rowUnits.forEach(u => {
+                        if (hayUnits.includes(u)) score += 10;
+                    });
+                    const words = String(owner.name || '').toLowerCase().split(/\\s+/).filter(w => w.length >= 2);
+                    words.forEach(w => {
+                        if (rowText.includes(w)) score += 2;
+                    });
+                    if (score > bestScore) {
+                        secondScore = bestScore;
+                        bestScore = score;
+                        best = owner;
+                    } else if (score > secondScore) {
+                        secondScore = score;
+                    }
+                });
+                if (best && bestScore > secondScore && bestScore > 0) {
+                    return { master: best, reason: '동일 등록상품 ID · 규격 일치' };
+                }
+            }
+
+            const pNameKey = String(row.product_name || '').trim().toLowerCase();
+            const pNameOwners = (pNameKey && idxData.productNameOwners && idxData.productNameOwners[pNameKey]) || [];
+            if (pNameOwners.length === 1) {
+                return { master: pNameOwners[0], reason: '동일 쿠팡 상품명' };
+            }
+            return null;
         }
 
         function showAcMapToast(msg, isError = false) {
@@ -6458,9 +6943,16 @@ HTML_TEMPLATE = """
             const idxData = buildMappingOwnershipIndex(cfg);
             const salesInv = cfg.sales_inventory || {};
             const coupangInv = cfg.coupang_inventory || {};
+            const hiddenList = Array.isArray(cfg.hidden_unmapped_codes) ? cfg.hidden_unmapped_codes : [];
+            const hiddenSet = new Set(hiddenList.map(k => String(k || '').trim()).filter(Boolean));
 
             const allCsvItems = [];
-            let salesTotal = 0, salesUnmapped = 0;
+            let salesTotal = 0, salesVisibleUnmapped = 0;
+            let gaemiTotal = 0, gaemiVisibleUnmapped = 0;
+            let coupangTotal = 0, coupangVisibleUnmapped = 0;
+            let coupangReturnTotal = 0, coupangReturnVisibleUnmapped = 0;
+            let hiddenInCsvCount = 0;
+
             Object.entries(salesInv).sort((a, b) => a[0].localeCompare(b[0])).forEach(([code, sdata]) => {
                 const upCode = String(code || '').trim().toUpperCase();
                 if (!upCode) return;
@@ -6468,9 +6960,16 @@ HTML_TEMPLATE = """
                 const owners = idxData.salesOwners[upCode] || [];
                 const b2bBase = idxData.b2bSalesOwners[upCode] || '';
                 const isMapped = owners.length > 0 || Boolean(b2bBase) || upCode.startsWith('S');
-                if (!isMapped) salesUnmapped += 1;
+                const expKey = `sales::${upCode}`;
+                const isHidden = !isMapped && hiddenSet.has(expKey);
+                if (!isMapped) {
+                    if (isHidden) hiddenInCsvCount += 1;
+                    else salesVisibleUnmapped += 1;
+                }
                 allCsvItems.push({
                     channel: 'sales',
+                    expKey,
+                    displayLabel: upCode,
                     code: upCode,
                     sampleName: (sdata.sample_names || [])[0] || '',
                     malls: (sdata.malls || []).join(', '),
@@ -6479,18 +6978,25 @@ HTML_TEMPLATE = """
                     owners,
                     b2bBase,
                     isMapped,
+                    isHidden,
                     searchBlob: `${upCode} ${(sdata.sample_names || []).join(' ')} ${(sdata.malls || []).join(' ')}`.toLowerCase()
                 });
             });
 
-            let gaemiTotal = 0, gaemiUnmapped = 0;
             idxData.groupedGaemi.forEach(entry => {
                 gaemiTotal += 1;
                 const owners = idxData.gaemiOwners[entry.key] || [];
                 const isMapped = owners.length > 0;
-                if (!isMapped) gaemiUnmapped += 1;
+                const expKey = `gaemi::${entry.key}`;
+                const isHidden = !isMapped && hiddenSet.has(expKey);
+                if (!isMapped) {
+                    if (isHidden) hiddenInCsvCount += 1;
+                    else gaemiVisibleUnmapped += 1;
+                }
                 allCsvItems.push({
                     channel: 'gaemi',
+                    expKey,
+                    displayLabel: `${entry.gaemi_code} (${entry.option_name || '단일'})`,
                     gaemi_code: entry.gaemi_code,
                     option_name: entry.option_name,
                     product_name: entry.product_name,
@@ -6498,46 +7004,91 @@ HTML_TEMPLATE = """
                     lot_count: entry.lot_count,
                     owners,
                     isMapped,
+                    isHidden,
                     searchBlob: `${entry.gaemi_code} ${entry.option_name} ${entry.product_name}`.toLowerCase()
                 });
             });
 
-            let coupangTotal = 0, coupangUnmapped = 0;
             Object.entries(coupangInv).sort((a, b) => a[0].localeCompare(b[0])).forEach(([oid, cdata]) => {
                 const oidStr = String(oid || '').trim();
                 if (!oidStr) return;
                 coupangTotal += 1;
+                const cGrade = String(cdata.grade || '').trim();
+                const isReturn = Boolean(cdata.is_return) || cGrade.includes('반품');
+                if (isReturn) coupangReturnTotal += 1;
                 const owners = idxData.coupangOwners[oidStr] || [];
                 const isMapped = owners.length > 0;
-                if (!isMapped) coupangUnmapped += 1;
+                const expKey = `coupang::${oidStr}`;
+                const isHidden = !isMapped && hiddenSet.has(expKey);
+                if (!isMapped) {
+                    if (isHidden) hiddenInCsvCount += 1;
+                    else {
+                        coupangVisibleUnmapped += 1;
+                        if (isReturn) coupangReturnVisibleUnmapped += 1;
+                    }
+                }
                 const optLabel = String(cdata.option_name || '').trim();
                 const prodName = String(cdata.product_name || '').trim();
-                allCsvItems.push({
+                const cProductId = String(cdata.product_id || '').trim();
+                const cRow = {
                     channel: 'coupang',
+                    expKey,
+                    displayLabel: optLabel ? `${oidStr} · ${optLabel}` : oidStr,
                     option_id: oidStr,
+                    product_id: cProductId,
                     option_name: optLabel,
                     product_name: prodName,
+                    grade: cGrade,
+                    isReturn,
                     stock: parseInt(cdata.stock || 0, 10) || 0,
                     sales_7d: parseInt(cdata.sales_7d || 0, 10) || 0,
                     guessedBundle: guessCoupangBundle(optLabel || prodName),
                     owners,
                     isMapped,
-                    searchBlob: `${oidStr} ${optLabel} ${prodName}`.toLowerCase()
-                });
+                    isHidden,
+                    searchBlob: `${oidStr} ${cProductId} ${optLabel} ${prodName} ${cGrade} ${isReturn ? '반품' : ''}`.toLowerCase()
+                };
+                cRow.suggested = suggestMasterForCoupangCsvRow(cRow, cfg, idxData);
+                allCsvItems.push(cRow);
             });
 
             const countsEl = document.getElementById('acMapCsvCounts');
             if (countsEl) {
-                countsEl.innerText = `매출코드 ${salesTotal}건 (미매핑 ${salesUnmapped}) · 개미 ${gaemiTotal}건 (미매핑 ${gaemiUnmapped}) · 쿠팡 ${coupangTotal}건 (미매핑 ${coupangUnmapped})`;
+                const retSummary = coupangReturnTotal > 0
+                    ? ` (반품 ${coupangReturnTotal} / 미매핑 ${coupangReturnVisibleUnmapped})`
+                    : '';
+                countsEl.innerText = hiddenInCsvCount > 0
+                    ? `매출코드 ${salesTotal}건 (미매핑 ${salesVisibleUnmapped}) · 개미 ${gaemiTotal}건 (미매핑 ${gaemiVisibleUnmapped}) · 쿠팡 ${coupangTotal}건 (미매핑 ${coupangVisibleUnmapped})${retSummary} · 숨김 ${hiddenInCsvCount}건`
+                    : `매출코드 ${salesTotal}건 (미매핑 ${salesVisibleUnmapped}) · 개미 ${gaemiTotal}건 (미매핑 ${gaemiVisibleUnmapped}) · 쿠팡 ${coupangTotal}건 (미매핑 ${coupangVisibleUnmapped})${retSummary}`;
+            }
+
+            const hiddenSummaryEl = document.getElementById('acMapCsvHiddenSummary');
+            const hiddenBadgeEl = document.getElementById('acMapCsvHiddenCountBadge');
+            const totalHiddenBadgeCount = hiddenInCsvCount > 0 ? hiddenInCsvCount : hiddenList.length;
+            if (hiddenSummaryEl && hiddenBadgeEl) {
+                if (totalHiddenBadgeCount > 0) {
+                    hiddenBadgeEl.innerText = String(totalHiddenBadgeCount);
+                    hiddenSummaryEl.classList.remove('hidden');
+                } else {
+                    hiddenBadgeEl.innerText = '0';
+                    hiddenSummaryEl.classList.add('hidden');
+                }
             }
 
             const chFilter = (document.getElementById('acMapCsvChannel') || {}).value || 'all';
             const onlyUnmapped = Boolean((document.getElementById('acMapCsvOnlyUnmapped') || {}).checked);
+            const hiddenMode = (document.getElementById('acMapCsvHiddenMode') || {}).value || 'exclude';
             const q = String((document.getElementById('acMapCsvSearch') || {}).value || '').toLowerCase().trim();
 
             acMapExplorerRows = allCsvItems.filter(row => {
-                if (chFilter !== 'all' && row.channel !== chFilter) return false;
+                if (chFilter === 'coupang_return') {
+                    if (row.channel !== 'coupang' || !row.isReturn) return false;
+                } else if (chFilter !== 'all' && row.channel !== chFilter) {
+                    return false;
+                }
                 if (onlyUnmapped && row.isMapped) return false;
+                if (hiddenMode === 'exclude' && row.isHidden) return false;
+                if (hiddenMode === 'only_hidden' && !row.isHidden) return false;
                 if (q && !row.searchBlob.includes(q)) return false;
                 return true;
             });
@@ -6545,7 +7096,13 @@ HTML_TEMPLATE = """
             const tbody = document.getElementById('acMapCsvTbody');
             if (!tbody) return;
             if (acMapExplorerRows.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-400">표시할 CSV 코드가 없습니다. (모든 코드가 매핑되었거나 CSV가 아직 업로드되지 않았습니다)</td></tr>';
+                let emptyMsg = '표시할 CSV 코드가 없습니다. (모든 코드가 매핑되었거나 CSV가 아직 업로드되지 않았습니다)';
+                if (hiddenMode === 'only_hidden') {
+                    emptyMsg = '숨김 처리된 미매핑 코드가 없습니다.';
+                } else if (hiddenMode === 'exclude' && hiddenInCsvCount > 0 && onlyUnmapped && !q) {
+                    emptyMsg = `필요한 미매핑 코드가 모두 처리되었습니다. (숨김 처리된 ${hiddenInCsvCount}건 제외 — 상단 '숨김 항목만 보기'로 언제든 복원 가능)`;
+                }
+                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">${escapeHtml(emptyMsg)}</td></tr>`;
                 return;
             }
 
@@ -6572,9 +7129,16 @@ HTML_TEMPLATE = """
                     codeCell = `<div class="font-mono font-bold text-amber-950">${escapeHtml(row.gaemi_code)}</div><div class="text-[11px] font-semibold text-slate-800">${escapeHtml(row.option_name || '(옵션명 없음)')}</div>`;
                     infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock.toLocaleString()}개${row.lot_count > 1 ? ` (${row.lot_count}개 로트 합계)` : ''}</div>`;
                 } else {
-                    chBadge = '<span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px]">쿠팡옵션</span>';
-                    codeCell = `<div class="font-mono font-bold text-blue-950">${escapeHtml(row.option_id)}</div><div class="text-[10px] text-slate-600">${escapeHtml(row.option_name || '')}</div>`;
-                    infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock}세트 · 7일출고 ${row.sales_7d}세트 (추천 ${row.guessedBundle}개입)</div>`;
+                    const retBadge = row.isReturn
+                        ? `<div class="mt-0.5"><span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[9px]">🔄 반품</span></div>`
+                        : '';
+                    chBadge = `<span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px]">쿠팡옵션</span>${retBadge}`;
+                    const gradeChip = row.grade && (row.isReturn || row.grade.toUpperCase() !== 'NEW')
+                        ? `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-rose-50 text-rose-800 border border-rose-200 font-mono font-bold text-[9px]">${escapeHtml(row.grade)}</span></div>`
+                        : '';
+                    codeCell = `<div class="font-mono font-bold text-blue-950">${escapeHtml(row.option_id)}</div><div class="text-[10px] text-slate-600">${escapeHtml(row.option_name || '')}</div>${gradeChip}`;
+                    const pidTxt = row.product_id ? ` · 등록ID ${escapeHtml(row.product_id)}` : '';
+                    infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock}세트 · 7일출고 ${row.sales_7d}세트 (추천 ${row.guessedBundle}개입${pidTxt})</div>`;
                 }
 
                 let statusBadge = '';
@@ -6587,23 +7151,45 @@ HTML_TEMPLATE = """
                 } else {
                     statusBadge = '<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[10px]">미매핑</span>';
                 }
+                if (row.isHidden) {
+                    statusBadge += ' <span class="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 border border-slate-300 font-bold text-[10px]">숨김됨</span>';
+                }
 
                 const bundleInputHtml = row.channel === 'coupang'
                     ? `<input type="number" min="1" value="${row.guessedBundle}" class="ac-map-exp-bundle w-12 px-1 py-1 border border-slate-300 rounded font-mono text-[10px] text-right" title="개입(배수)">`
                     : '';
 
+                let hideBtnHtml = '';
+                if (row.isHidden) {
+                    hideBtnHtml = `<button type="button" onclick="toggleHideUnmappedCsvRow(${idx}, false, this)" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded font-bold text-[10px] shrink-0" title="숨김 해제하고 미매핑 목록에 다시 표시">복원</button>`;
+                } else if (!row.isMapped) {
+                    hideBtnHtml = `<button type="button" onclick="toggleHideUnmappedCsvRow(${idx}, true, this)" class="px-2 py-1 bg-white hover:bg-rose-50 border border-slate-300 hover:border-rose-300 text-slate-600 hover:text-rose-700 rounded font-bold text-[10px] shrink-0" title="매핑이 불필요한 상품이면 미매핑 목록에서 숨깁니다">숨기기</button>`;
+                }
+
+                const suggestedId = (row.suggested && row.suggested.master)
+                    ? (row.suggested.master.id || row.suggested.master.seller_code)
+                    : '';
+                const suggestedBadge = (row.suggested && row.suggested.master)
+                    ? `<span class="text-[9px] text-emerald-700 font-bold whitespace-nowrap" title="${escapeHtml(row.suggested.reason || '추천 매핑')}">✨ 추천 ${escapeHtml(row.suggested.master.seller_code)}</span>`
+                    : '';
+                const rowBgClass = row.isHidden
+                    ? 'bg-slate-50/90 opacity-85 hover:bg-slate-100/80'
+                    : (row.isReturn ? 'bg-rose-50/35 hover:bg-rose-50/70' : 'hover:bg-slate-50');
+
                 return `
-                    <tr class="hover:bg-slate-50" data-exp-idx="${idx}">
+                    <tr class="${rowBgClass}" data-exp-idx="${idx}">
                         <td class="p-2 align-top">${chBadge}</td>
                         <td class="p-2 align-top">${codeCell}</td>
                         <td class="p-2 align-top">${infoCell}</td>
                         <td class="p-2 align-top">${statusBadge}</td>
                         <td class="p-2 align-top">
                             <div class="flex flex-wrap items-center gap-1">
-                                <select class="ac-map-exp-target flex-1 min-w-[140px] max-w-[200px] px-1.5 py-1 border border-slate-300 rounded bg-white text-[10px]">${masterOptsHtml}</select>
+                                <select class="ac-map-exp-target flex-1 min-w-[130px] max-w-[185px] px-1.5 py-1 border ${suggestedId ? 'border-emerald-400 bg-emerald-50/40' : 'border-slate-300 bg-white'} rounded text-[10px]" data-suggested="${escapeHtml(suggestedId)}">${masterOptsHtml}</select>
+                                ${suggestedBadge}
                                 ${bundleInputHtml}
                                 <button type="button" onclick="quickLinkCsvRow(${idx}, this)" class="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded font-bold text-[10px] shrink-0">연결</button>
                                 <button type="button" onclick="quickCreateFromCsvRow(${idx})" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded font-bold text-[10px] shrink-0" title="이 코드로 신규 단품 마스터 생성">+ 신규</button>
+                                ${hideBtnHtml}
                             </div>
                         </td>
                     </tr>
@@ -6614,6 +7200,84 @@ HTML_TEMPLATE = """
                 html += `<tr><td colspan="5" class="p-2 text-center text-[10px] text-slate-500 bg-slate-50">상위 ${MAX_ROWS}건만 표시 중입니다 (전체 ${acMapExplorerRows.length}건 — 검색어로 좁혀보세요).</td></tr>`;
             }
             tbody.innerHTML = html;
+            tbody.querySelectorAll('select.ac-map-exp-target[data-suggested]').forEach(sel => {
+                const sug = sel.dataset.suggested;
+                if (sug) sel.value = sug;
+            });
+        }
+
+        function toggleAcMapOnlyHiddenQuick() {
+            const modeEl = document.getElementById('acMapCsvHiddenMode');
+            if (!modeEl) return;
+            modeEl.value = (modeEl.value === 'only_hidden') ? 'exclude' : 'only_hidden';
+            renderAdminMappingExplorer();
+        }
+
+        async function toggleHideUnmappedCsvRow(idx, shouldHide, btnEl) {
+            const row = acMapExplorerRows[idx];
+            if (!row || !row.expKey) return;
+            if (btnEl) btnEl.disabled = true;
+            try {
+                const res = await adminFetch('/api/admin/unmapped-explorer/hidden', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        key: row.expKey,
+                        hidden: Boolean(shouldHide),
+                        label: row.displayLabel || ''
+                    })
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    if (btnEl) btnEl.disabled = false;
+                    alert(json.message || '숨김 처리 저장 실패');
+                    return;
+                }
+                if (adminConfigCache) {
+                    adminConfigCache.hidden_unmapped_codes = Array.isArray(json.hidden_unmapped_codes)
+                        ? json.hidden_unmapped_codes
+                        : [];
+                }
+                renderAdminMappingExplorer();
+                const actionDesc = shouldHide
+                    ? `🙈 [${row.displayLabel}] 미매핑 목록에서 숨겼습니다. ('숨김 항목만 보기'로 언제든 복원 가능)`
+                    : `👁️ [${row.displayLabel}] 숨김이 해제되어 미매핑 목록에 다시 표시됩니다.`;
+                showAcMapToast(actionDesc);
+            } catch (err) {
+                if (btnEl) btnEl.disabled = false;
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('숨김 처리 오류: ' + err.message);
+            }
+        }
+
+        async function clearAllHiddenUnmappedCsvRows() {
+            const hiddenCount = (adminConfigCache && Array.isArray(adminConfigCache.hidden_unmapped_codes))
+                ? adminConfigCache.hidden_unmapped_codes.length
+                : 0;
+            if (hiddenCount === 0) return;
+            if (!confirm(`숨김 처리된 미매핑 항목 ${hiddenCount}건을 모두 다시 표시(복원)하시겠습니까?`)) return;
+            try {
+                const res = await adminFetch('/api/admin/unmapped-explorer/hidden', {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'clear' })
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    alert(json.message || '전체 복원 실패');
+                    return;
+                }
+                if (adminConfigCache) {
+                    adminConfigCache.hidden_unmapped_codes = Array.isArray(json.hidden_unmapped_codes)
+                        ? json.hidden_unmapped_codes
+                        : [];
+                }
+                const modeEl = document.getElementById('acMapCsvHiddenMode');
+                if (modeEl && modeEl.value === 'only_hidden') {
+                    modeEl.value = 'exclude';
+                }
+                renderAdminMappingExplorer();
+                showAcMapToast(`👁️ 숨김 처리되었던 ${hiddenCount}건이 모두 복원되었습니다.`);
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('전체 복원 오류: ' + err.message);
+            }
         }
 
         async function quickLinkCsvRow(idx, btnEl) {
@@ -6657,9 +7321,15 @@ HTML_TEMPLATE = """
             } else if (row.channel === 'coupang') {
                 const bundleEl = tr ? tr.querySelector('.ac-map-exp-bundle') : null;
                 const bundleVal = Math.max(1, parseInt((bundleEl && bundleEl.value) || row.guessedBundle || '1', 10) || 1);
-                const curOpts = (target.options || []).map(o => ({ id: String(o.id || '').trim(), bundle: o.bundle || 1, name: o.name || '' })).filter(o => o.id);
+                const curOpts = (target.options || []).map(o => {
+                    const entry = { id: String(o.id || '').trim(), bundle: o.bundle || 1, name: o.name || '' };
+                    if (o.is_return) entry.is_return = true;
+                    return entry;
+                }).filter(o => o.id);
                 if (!curOpts.some(o => o.id === row.option_id)) {
-                    curOpts.push({ id: row.option_id, bundle: bundleVal, name: row.option_name || `${bundleVal}개` });
+                    const newOpt = { id: row.option_id, bundle: bundleVal, name: row.option_name || `${bundleVal}개` };
+                    if (row.isReturn) newOpt.is_return = true;
+                    curOpts.push(newOpt);
                 }
                 payload.options = curOpts;
             }
@@ -6697,7 +7367,9 @@ HTML_TEMPLATE = """
                 prefill.gaemi_codes = row.gaemi_code;
             } else if (row.channel === 'coupang') {
                 prefill.name = row.product_name || '';
-                prefill.options = [{ id: row.option_id, bundle: row.guessedBundle || 1, name: row.option_name || `${row.guessedBundle || 1}개` }];
+                const newOpt = { id: row.option_id, bundle: row.guessedBundle || 1, name: row.option_name || `${row.guessedBundle || 1}개` };
+                if (row.isReturn) newOpt.is_return = true;
+                prefill.options = [newOpt];
             }
             openCreateProductModal(prefill);
         }
@@ -6795,9 +7467,17 @@ HTML_TEMPLATE = """
                     coupangHtml = '<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">미지정</span>';
                 } else {
                     coupangHtml = opts.map(o => {
-                        const cd = coupangInv[String(o.id || '').trim()];
+                        const oidStr = String(o.id || '').trim();
+                        const cd = coupangInv[oidStr];
+                        const cGrade = cd ? String(cd.grade || '').trim() : '';
+                        const isRet = Boolean(o.is_return) || Boolean(cd && cd.is_return) || cGrade.includes('반품');
                         const stTxt = cd ? ` · ${cd.stock}세트` : '';
-                        return `<span class="inline-block px-1.5 py-0.5 rounded bg-blue-50 text-blue-900 border border-blue-200 font-mono text-[10px] mr-1 mb-1">${escapeHtml(o.id)} <span class="text-blue-700">(${o.bundle || 1}개입${stTxt})</span></span>`;
+                        const retTag = isRet ? '<span class="px-1 rounded bg-rose-200 text-rose-900 font-bold mr-1">반품</span>' : '';
+                        const cls = isRet
+                            ? 'bg-rose-50 text-rose-900 border-rose-200'
+                            : 'bg-blue-50 text-blue-900 border-blue-200';
+                        const subCls = isRet ? 'text-rose-700' : 'text-blue-700';
+                        return `<span class="inline-block px-1.5 py-0.5 rounded border font-mono text-[10px] mr-1 mb-1 ${cls}">${retTag}${escapeHtml(o.id)} <span class="${subCls}">(${o.bundle || 1}개입${stTxt})</span></span>`;
                     }).join('');
                 }
 
@@ -6855,11 +7535,15 @@ HTML_TEMPLATE = """
                 legacy_gaemi_codes: Array.isArray(target.gaemi_codes) ? target.gaemi_codes.slice() : [],
                 legacy_gaemi_filter: String(target.gaemi_filter || '').trim(),
                 options: Array.isArray(target.options)
-                    ? target.options.map(o => ({
-                        id: String(o.id || '').trim(),
-                        bundle: Math.max(1, parseInt(o.bundle || 1, 10) || 1),
-                        name: String(o.name || '').trim()
-                    })).filter(o => o.id)
+                    ? target.options.map(o => {
+                        const entry = {
+                            id: String(o.id || '').trim(),
+                            bundle: Math.max(1, parseInt(o.bundle || 1, 10) || 1),
+                            name: String(o.name || '').trim()
+                        };
+                        if (o.is_return) entry.is_return = true;
+                        return entry;
+                    }).filter(o => o.id)
                     : []
             };
 
@@ -6873,6 +7557,8 @@ HTML_TEMPLATE = """
             document.getElementById('cm_coupang_id_input').value = '';
             document.getElementById('cm_coupang_bundle_input').value = '1';
             document.getElementById('cm_coupang_name_input').value = '';
+            const cmRetChk = document.getElementById('cm_coupang_return_input');
+            if (cmRetChk) cmRetChk.checked = false;
             document.getElementById('cm_coupang_csv_search').value = '';
 
             renderCodeMappingModalBody();
@@ -7277,17 +7963,24 @@ HTML_TEMPLATE = """
             }
             box.innerHTML = cmState.options.map((opt, idx) => {
                 const cd = coupangInv[opt.id];
+                const cGrade = cd ? String(cd.grade || '').trim() : '';
+                const csvIsRet = Boolean(cd && (cd.is_return || cGrade.includes('반품')));
+                const isRet = Boolean(opt.is_return || csvIsRet);
                 const csvInfo = cd
                     ? `현재 ${cd.stock || 0}세트 · 7일출고 ${cd.sales_7d || 0}세트`
                     : 'CSV 미등록';
                 return `
-                    <div class="flex flex-wrap items-center gap-2 bg-white border border-blue-200 rounded-lg p-2">
-                        <span class="font-mono font-bold text-blue-950 w-32 truncate" title="${escapeHtml(opt.id)}">${escapeHtml(opt.id)}</span>
+                    <div class="flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-rose-300 bg-rose-50/35' : 'border-blue-200'} rounded-lg p-2">
+                        <span class="font-mono font-bold ${isRet ? 'text-rose-950' : 'text-blue-950'} w-32 truncate" title="${escapeHtml(opt.id)}">${escapeHtml(opt.id)}</span>
                         <div class="flex items-center space-x-1">
                             <input type="number" min="1" value="${opt.bundle || 1}" oninput="cmState.options[${idx}].bundle = Math.max(1, parseInt(this.value || '1', 10) || 1)" class="w-16 px-2 py-1 border border-slate-300 rounded font-mono text-[11px] text-right font-bold">
                             <span class="text-[11px] text-slate-500">개입</span>
                         </div>
                         <input type="text" value="${escapeHtml(opt.name || '')}" oninput="cmState.options[${idx}].name = this.value" placeholder="옵션명" class="flex-1 min-w-[120px] px-2.5 py-1 border border-slate-300 rounded text-[11px]">
+                        <label class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded border ${isRet ? 'bg-rose-100 border-rose-300 text-rose-900' : 'bg-slate-50 border-slate-200 text-slate-600'} text-[10px] font-bold cursor-pointer shrink-0" title="${csvIsRet ? 'CSV G열(상품등급)에 반품이 포함되어 자동 반품 처리됩니다' : '체크 시 정상 재고에서 제외하고 반품 재고로 관리합니다'}">
+                            <input type="checkbox" ${isRet ? 'checked' : ''} ${csvIsRet ? 'disabled' : ''} onchange="cmState.options[${idx}].is_return = this.checked; renderCmCoupangRows();">
+                            <span>🔄 반품${csvIsRet && cGrade ? ` (${escapeHtml(cGrade)})` : ''}</span>
+                        </label>
                         <span class="text-[10px] font-mono text-slate-500 shrink-0">${csvInfo}</span>
                         <button type="button" onclick="removeCmCoupangRow(${idx})" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-bold">삭제</button>
                     </div>
@@ -7311,6 +8004,7 @@ HTML_TEMPLATE = """
             const idEl = document.getElementById('cm_coupang_id_input');
             const bEl = document.getElementById('cm_coupang_bundle_input');
             const nameEl = document.getElementById('cm_coupang_name_input');
+            const retEl = document.getElementById('cm_coupang_return_input');
             const oid = String(idEl.value || '').trim();
             if (!oid) {
                 alert('쿠팡 옵션 ID를 입력해주세요.');
@@ -7319,12 +8013,16 @@ HTML_TEMPLATE = """
             }
             const bundle = Math.max(1, parseInt(bEl.value || '1', 10) || 1);
             const oname = String(nameEl.value || '').trim() || `${bundle}개`;
+            const isRet = Boolean(retEl && retEl.checked);
             if (!cmState.options.some(o => o.id === oid)) {
-                cmState.options.push({ id: oid, bundle, name: oname });
+                const optObj = { id: oid, bundle, name: oname };
+                if (isRet) optObj.is_return = true;
+                cmState.options.push(optObj);
             }
             idEl.value = '';
             bEl.value = '1';
             nameEl.value = '';
+            if (retEl) retEl.checked = false;
             renderCmCoupangRows();
             renderCmCoupangCsvList();
         }
@@ -7341,28 +8039,44 @@ HTML_TEMPLATE = """
             }
             const idxData = buildMappingOwnershipIndex(cfg);
             const q = String((document.getElementById('cm_coupang_csv_search') || {}).value || '').toLowerCase().trim();
+            const registeredPids = new Set(
+                cmState.options
+                    .map(o => String((coupangInv[o.id] && coupangInv[o.id].product_id) || '').trim())
+                    .filter(Boolean)
+            );
 
             cmCoupangCsvItems = entries
                 .map(([oid, cdata]) => {
                     const oidStr = String(oid || '').trim();
                     const optLabel = String(cdata.option_name || '').trim();
                     const prodName = String(cdata.product_name || '').trim();
+                    const cGrade = String(cdata.grade || '').trim();
+                    const isRet = Boolean(cdata.is_return) || cGrade.includes('반품');
+                    const pid = String(cdata.product_id || '').trim();
                     return {
                         id: oidStr,
+                        product_id: pid,
+                        samePid: Boolean(pid && registeredPids.has(pid)),
                         option_name: optLabel,
                         product_name: prodName,
+                        grade: cGrade,
+                        is_return: isRet,
                         stock: parseInt(cdata.stock || 0, 10) || 0,
                         sales_7d: parseInt(cdata.sales_7d || 0, 10) || 0,
                         guessedBundle: guessCoupangBundle(optLabel || prodName),
                         owners: (idxData.coupangOwners[oidStr] || []).filter(o => o.seller_code !== cmState.seller_code),
-                        searchBlob: `${oidStr} ${optLabel} ${prodName}`.toLowerCase()
+                        searchBlob: `${oidStr} ${pid} ${optLabel} ${prodName} ${cGrade} ${isRet ? '반품' : ''}`.toLowerCase()
                     };
                 })
                 .filter(it => !q || it.searchBlob.includes(q))
                 .sort((a, b) => {
                     const aSel = cmState.options.some(o => o.id === a.id) ? 0 : 1;
                     const bSel = cmState.options.some(o => o.id === b.id) ? 0 : 1;
-                    return aSel !== bSel ? aSel - bSel : a.id.localeCompare(b.id);
+                    if (aSel !== bSel) return aSel - bSel;
+                    const aPid = a.samePid ? 0 : 1;
+                    const bPid = b.samePid ? 0 : 1;
+                    if (aPid !== bPid) return aPid - bPid;
+                    return a.id.localeCompare(b.id);
                 });
 
             if (cmCoupangCsvItems.length === 0) {
@@ -7378,15 +8092,23 @@ HTML_TEMPLATE = """
                 } else if (it.owners.length > 0) {
                     ownerBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px]">타상품: ${escapeHtml(it.owners.map(o => o.seller_code).join(', '))}</span>`;
                 }
+                const retBadge = it.is_return
+                    ? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[10px]">🔄 반품${it.grade ? ` (${escapeHtml(it.grade)})` : ''}</span>`
+                    : '';
+                const pidBadge = !isSelected && it.samePid
+                    ? '<span class="px-1 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-[9px]">🔗 동일 등록ID</span>'
+                    : '';
                 const btnHtml = isSelected
                     ? `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[10px]">해제</button>`
-                    : `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-bold text-[10px]">+ 연결 (${it.guessedBundle}개입)</button>`;
+                    : `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded ${it.is_return ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'} text-white font-bold text-[10px]">+ 연결 (${it.guessedBundle}개입)</button>`;
                 return `
-                    <div class="py-1.5 px-1 flex items-center justify-between gap-2 hover:bg-slate-50">
+                    <div class="py-1.5 px-1 flex items-center justify-between gap-2 ${it.is_return ? 'bg-rose-50/35 hover:bg-rose-50/70' : 'hover:bg-slate-50'}">
                         <div class="min-w-0 flex-1">
                             <div class="flex flex-wrap items-center gap-1.5">
                                 <span class="font-mono font-bold text-slate-900">${escapeHtml(it.id)}</span>
                                 <span class="font-bold text-blue-950 bg-blue-100/70 px-1.5 rounded text-[10px]">${escapeHtml(it.option_name || '옵션명 없음')}</span>
+                                ${retBadge}
+                                ${pidBadge}
                                 ${ownerBadge}
                                 <span class="text-[10px] text-slate-500 font-mono">재고 ${it.stock}세트 · 7일출고 ${it.sales_7d}</span>
                             </div>
@@ -7405,11 +8127,13 @@ HTML_TEMPLATE = """
             if (pos >= 0) {
                 cmState.options.splice(pos, 1);
             } else {
-                cmState.options.push({
+                const newOpt = {
                     id: it.id,
                     bundle: it.guessedBundle || 1,
                     name: it.option_name || `${it.guessedBundle || 1}개`
-                });
+                };
+                if (it.is_return) newOpt.is_return = true;
+                cmState.options.push(newOpt);
             }
             renderCmCoupangRows();
             renderCmCoupangCsvList();
@@ -7422,11 +8146,15 @@ HTML_TEMPLATE = """
                 sales_codes: cmState.sales_is_custom ? cmState.sales_codes : null,
                 gaemi_mappings: cmState.gaemi_mappings,
                 clear_legacy_gaemi: cmState.clear_legacy_gaemi,
-                options: cmState.options.filter(o => o.id).map(o => ({
-                    id: o.id,
-                    bundle: Math.max(1, parseInt(o.bundle || 1, 10) || 1),
-                    name: String(o.name || '').trim() || `${o.bundle || 1}개`
-                }))
+                options: cmState.options.filter(o => o.id).map(o => {
+                    const obj = {
+                        id: o.id,
+                        bundle: Math.max(1, parseInt(o.bundle || 1, 10) || 1),
+                        name: String(o.name || '').trim() || `${o.bundle || 1}개`
+                    };
+                    if (o.is_return) obj.is_return = true;
+                    return obj;
+                })
             };
 
             try {

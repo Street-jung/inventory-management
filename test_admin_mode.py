@@ -1171,6 +1171,287 @@ class TestIljeomodoAdminMode(unittest.TestCase):
             self.assertIn(marker, html)
         print("OK: [Admin Test 14] 입고 예정일·수량 등록 시 입고 대기/예정/소진주의/추가검토 전환 검증 완료")
 
+    def test_15_unmapped_explorer_hide_restore_persistence(self):
+        """CSV 미매핑 탐색기 상품별 숨기기/복원/전체복원 API·정규화·백업복원·자동해제·UI 검증"""
+        # 1. 비인증 차단 확인
+        unauth_res = self.client.post("/api/admin/unmapped-explorer/hidden", json={"key": "sales::TEST1", "hidden": True})
+        self.assertEqual(unauth_res.status_code, 401)
+
+        headers = self._login("1500")
+
+        # 2. 잘못된 요청 검증
+        bad_res1 = self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={"action": "unknown"})
+        self.assertEqual(bad_res1.status_code, 400)
+        bad_res2 = self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={"key": "badformat", "hidden": True})
+        self.assertEqual(bad_res2.status_code, 400)
+
+        # 3. 3개 채널 개별 숨기기 + 대소문자/공백 정규화 + 중복 방지
+        r1 = self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={
+            "key": " sales::unmap_s1 ",
+            "hidden": True,
+            "label": "UNMAP_S1"
+        })
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(json.loads(r1.data)["hidden_unmapped_codes"], ["sales::UNMAP_S1"])
+
+        # 동일 키 대문자 재요청 시 중복 추가되지 않아야 함
+        r1_dup = self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={
+            "key": "SALES::UNMAP_S1",
+            "hidden": True
+        })
+        self.assertEqual(r1_dup.status_code, 200)
+        self.assertEqual(json.loads(r1_dup.data)["hidden_unmapped_codes"], ["sales::UNMAP_S1"])
+
+        r2 = self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={
+            "key": "gaemi::pj_unmap_g1||옵션 A ",
+            "hidden": True
+        })
+        self.assertEqual(r2.status_code, 200)
+        r3 = self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={
+            "key": "coupang:: 999888777 ",
+            "hidden": True
+        })
+        self.assertEqual(r3.status_code, 200)
+        expected_three = ["sales::UNMAP_S1", "gaemi::PJ_UNMAP_G1||옵션 A", "coupang::999888777"]
+        self.assertEqual(json.loads(r3.data)["hidden_unmapped_codes"], expected_three)
+
+        # 4. /api/admin/config 및 로컬 재부팅(load_state), JSON 백업 내보내기/복원 영속성 검증
+        cfg1 = json.loads(self.client.get("/api/admin/config", headers=headers).data)
+        self.assertEqual(cfg1["hidden_unmapped_codes"], expected_three)
+
+        backup_json = json.loads(self.client.get("/api/admin/backup/export", headers=headers).data)
+        self.assertEqual(backup_json["hidden_unmapped_codes"], expected_three)
+
+        with app_module.data_lock:
+            app_module.app_state["hidden_unmapped_codes"] = []
+        app_module.load_state()
+        self.assertEqual(app_module.app_state["hidden_unmapped_codes"], expected_three)
+
+        # 전체 복원(clear) -> 빈 목록
+        clr_res = self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={"action": "clear"})
+        self.assertEqual(clr_res.status_code, 200)
+        self.assertEqual(json.loads(clr_res.data)["hidden_unmapped_codes"], [])
+
+        # JSON 백업 복원(import) 시 3건 다시 복구
+        imp_res = self.client.post("/api/admin/backup/import", headers=headers, json={"data": backup_json})
+        self.assertEqual(imp_res.status_code, 200)
+        cfg2 = json.loads(self.client.get("/api/admin/config", headers=headers).data)
+        self.assertEqual(cfg2["hidden_unmapped_codes"], expected_three)
+
+        # 5. 다건 숨기기 + 개별 복원 + 매핑 연결 시 숨김 목록 자동 해제 검증
+        self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={
+            "action": "hide",
+            "keys": ["sales::KEEP_HIDDEN", "gaemi::PJ_UNMAP_G1||와일드테스트", "coupang::555444333"]
+        })
+        self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={
+            "key": "coupang::999888777",
+            "hidden": False
+        })
+        cfg3 = json.loads(self.client.get("/api/admin/config", headers=headers).data)
+        self.assertNotIn("coupang::999888777", cfg3["hidden_unmapped_codes"])
+        self.assertIn("sales::KEEP_HIDDEN", cfg3["hidden_unmapped_codes"])
+
+        # UNMAP_S1, PJ_UNMAP_G1(와일드카드 *로 2개 옵션 모두), 555444333 을 20DC02에 매핑 -> 숨김에서 자동 해제됨!
+        map_res = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20DC02",
+            "sales_codes": ["20DC02", "UNMAP_S1"],
+            "gaemi_mappings": [{"gaemi_code": "PJ_UNMAP_G1", "option_name": "*"}],
+            "options": [{"id": "555444333", "bundle": 1, "name": "단품"}]
+        })
+        self.assertEqual(map_res.status_code, 200)
+        cfg4 = json.loads(self.client.get("/api/admin/config", headers=headers).data)
+        self.assertEqual(cfg4["hidden_unmapped_codes"], ["sales::KEEP_HIDDEN"])
+
+        # 구버전 백업(hidden_unmapped_codes 없음) 로드 시 [] 안전 초기화
+        app_module._apply_loaded_state({"master_products": copy.deepcopy(app_module.app_state["master_products"])})
+        self.assertEqual(app_module.app_state["hidden_unmapped_codes"], [])
+
+        # 6. 프론트엔드 탐색기 숨기기 UI/JS 마커 및 PIN 미노출 검증
+        html = self.client.get("/").data.decode("utf-8")
+        self.assertNotIn("1500", html)
+        for marker in (
+            'id="acMapCsvHiddenMode"',
+            'id="acMapCsvHiddenSummary"',
+            'id="acMapCsvHiddenCountBadge"',
+            "toggleHideUnmappedCsvRow",
+            "toggleAcMapOnlyHiddenQuick",
+            "clearAllHiddenUnmappedCsvRows",
+            "/api/admin/unmapped-explorer/hidden",
+            "숨김 제외 (필요한 항목만)",
+            "숨김 항목만 보기",
+            "숨기기",
+            "복원",
+        ):
+            self.assertIn(marker, html, f"Missing UI/JS marker: {marker}")
+        print("OK: [Admin Test 15] 미매핑 코드 탐색기 숨기기/복원/전체복원·백업·자동해제·UI 검증 완료")
+
+    def test_16_coupang_return_grade_mapping_and_bundle_display(self):
+        """쿠팡 G열(상품등급 '반품') 파싱·매핑·정상/반품 분리집계·번들별 반품재고·UI 검증"""
+        headers = self._login("1500")
+        self.assertEqual(self.client.post("/api/load-sample", headers=headers).status_code, 200)
+
+        # 1. 실제 샘플 헤더 구조(G열=상품등급, index 6) + 정상/다양한 반품 등급 업로드 파싱 검증
+        header1 = [
+            "No.", "등록상품 ID", "옵션 ID", "SKU ID", "등록상품명", "옵션명", "상품등급",
+            "판매가능재고 (실시간 기준)", "입고예정재고(실시간 기준)", "아이템위너",
+            "최근 매출 (번들 매출 제외)", "", "최근 판매수량", "", "예상 소진일 (DOC)"
+        ]
+        header2 = ["", "", "", "", "", "", "", "", "", "", "지난 7일", "지난 30일", "지난 7일", "지난 30일", ""]
+        sample_rows = [
+            header1,
+            header2,
+            # 정상 1개입 (기존 엘레올로지 20EO02 옵션)
+            ["1", "16323534607", "95844803290", "77323013", "[고항산화]엘레올로지 500ml", "1개 500ml", "NEW", "100", "0", "아이템위너", "0", "0", "5", "20", "20"],
+            # 정상 2개입
+            ["2", "16323534607", "95849997061", "77323012", "[고항산화]엘레올로지 500ml", "2개 500ml", "NEW", "10", "0", "아이템위너", "0", "0", "2", "6", "5"],
+            # 반품 1개입 (최상)
+            ["3", "16323534607", "95999000011", "88000011", "[고항산화]엘레올로지 500ml", "1개 500ml", "반품 - 최상", "3", "0", "아이템위너", "0", "0", "1", "2", "10"],
+            # 반품 1개입 (상 · 동일 번들 다중 반품 등급 합산 확인용)
+            ["4", "16323534607", "95999000013", "88000013", "[고항산화]엘레올로지 500ml", "1개 500ml", "반품-상", "4", "0", "아이템위너", "0", "0", "0", "1", "0"],
+            # 반품 2개입 (미개봉 · 명시적 is_return 플래그 없이 CSV G열만으로 반품 판별되는지도 동시 검증!)
+            ["5", "16323534607", "95999000012", "88000012", "[고항산화]엘레올로지 500ml", "2개 500ml", "반품(미개봉)", "2", "0", "아이템위너", "0", "0", "1", "1", "0"],
+            # 결품 정상재고 0 + 반품재고 5개 테스트용 별도 상품(20TZ03) 반품 행
+            ["6", "16323539035", "95999000021", "88000021", "테라찌노 라비앙콜릴라 250ml", "1개 250ml", "반품 - 최상", "5", "0", "아이템위너", "0", "0", "0", "0", "0"],
+        ]
+
+        parsed = app_module.parse_coupang_rows(sample_rows)
+        self.assertIn("95844803290", parsed)
+        self.assertFalse(parsed["95844803290"]["is_return"])
+        self.assertEqual(parsed["95844803290"]["grade"], "NEW")
+        self.assertEqual(parsed["95844803290"]["product_id"], "16323534607")
+
+        self.assertTrue(parsed["95999000011"]["is_return"])
+        self.assertEqual(parsed["95999000011"]["grade"], "반품 - 최상")
+        self.assertEqual(parsed["95999000011"]["product_id"], "16323534607")
+        self.assertEqual(parsed["95999000011"]["stock"], 3)
+
+        self.assertTrue(parsed["95999000012"]["is_return"])
+        self.assertEqual(parsed["95999000012"]["grade"], "반품(미개봉)")
+
+        # 최소 헤더(상품등급 없는 7열 CSV)에서 6번 인덱스(입고예정/수량)가 등급으로 오인되지 않아야 함
+        minimal_rows = [
+            ["No.", "등록상품 ID", "옵션 ID", "등록상품명", "옵션명", "판매가능재고", "입고예정재고"],
+            ["1", "111", "777000111", "테스트", "1개", "10", "반품아님아니더라도"]
+        ]
+        min_parsed = app_module.parse_coupang_rows(minimal_rows)
+        self.assertFalse(min_parsed["777000111"]["is_return"])
+        self.assertEqual(min_parsed["777000111"]["grade"], "")
+
+        # 업로드 API 반영 확인
+        up_res = self.client.post("/api/upload-file-data", json={"source": "coupang", "rows": sample_rows})
+        self.assertEqual(up_res.status_code, 200)
+        up_json = json.loads(up_res.data)
+        self.assertTrue(up_json["success"])
+        self.assertEqual(up_json["return_count"], 4)
+
+        # 2. 엘레올로지(20EO02)에 정상 + 반품 옵션 매핑 저장
+        # (95999000011, 95999000013 은 is_return=True, 95999000012 는 일부러 is_return 생략해 CSV G열 기반 자동 반품 분류 확인)
+        eo02_options = [
+            {"id": "95844803290", "bundle": 1, "name": "1개 500ml"},
+            {"id": "95849997061", "bundle": 2, "name": "2개 500ml"},
+            {"id": "95999000011", "bundle": 1, "name": "1개 500ml (반품-최상)", "is_return": True},
+            {"id": "95999000013", "bundle": 1, "name": "1개 500ml (반품-상)", "is_return": True},
+            {"id": "95999000012", "bundle": 2, "name": "2개 500ml (반품)"},
+        ]
+        m_res = self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "20EO02",
+            "options": eo02_options
+        })
+        self.assertEqual(m_res.status_code, 200)
+        saved_eo02 = json.loads(m_res.data)["product"]
+        # 정상 옵션은 기존 형식 유지(is_return 키 없음), 반품 지정 옵션은 is_return=True 저장
+        self.assertNotIn("is_return", saved_eo02["options"][0])
+        self.assertTrue(saved_eo02["options"][2]["is_return"])
+
+        # 3. 정상재고=0 / 개미재고=0 인 품목(20TZ03)에 반품재고 5개 매핑 시 정상 총가용재고에 합산되지 않고 결품 유지 확인
+        self.client.post("/api/admin/product/save", headers=headers, json={
+            "seller_code": "20TZ03",
+            "name": "테라찌노 비앙콜릴라 250ml",
+            "gaemi_mappings": [],
+            "gaemi_codes": [],
+            "options": [{"id": "95999000021", "bundle": 1, "name": "1개 250ml (반품)", "is_return": True}],
+            "in_transit_qty": 0
+        })
+
+        # 4. /api/summary 에서 정상 vs 반품 분리 집계 & 번들별 그룹화 검증
+        sum_json = json.loads(self.client.get("/api/summary").data)
+        by_code = {m["seller_code"]: m for m in sum_json["masters"]}
+
+        eo = by_code["20EO02"]
+        # 정상 쿠팡: 1개입 100세트(100개) + 2개입 10세트(20개) = 110세트, 120개
+        self.assertEqual(eo["coupang_package_total"], 110)
+        self.assertEqual(eo["coupang_physical_total"], 120)
+        # 정상 출고: 1개입 5*1 + 2개입 2*2 = 9개 (반품 출고 미포함)
+        self.assertEqual(eo["coupang_sales_7d"], 9)
+        self.assertEqual(eo["master_physical_total"], eo["gaemi_total"] + 120)
+
+        # 반품 쿠팡: 1개입 (3 + 4 = 7세트 -> 7개) + 2개입 (2세트 -> 4개) = 9세트, 11개
+        self.assertEqual(eo["coupang_return_package_total"], 9)
+        self.assertEqual(eo["coupang_return_physical_total"], 11)
+        self.assertEqual(eo["coupang_return_sales_7d"], 1 * 1 + 1 * 2)
+        self.assertTrue(eo["has_coupang_return"])
+
+        # 번들별 그룹화(coupang_bundle_groups) 검증
+        groups = {g["bundle"]: g for g in eo["coupang_bundle_groups"]}
+        self.assertEqual(sorted(groups.keys()), [1, 2])
+        self.assertEqual(groups[1]["normal_package_stock"], 100)
+        self.assertEqual(groups[1]["normal_physical_stock"], 100)
+        self.assertEqual(groups[1]["return_package_stock"], 7)
+        self.assertEqual(groups[1]["return_physical_stock"], 7)
+        self.assertEqual(len(groups[1]["return_options"]), 2)
+        self.assertEqual(groups[1]["return_options"][0]["grade"], "반품 - 최상")
+
+        self.assertEqual(groups[2]["normal_package_stock"], 10)
+        self.assertEqual(groups[2]["normal_physical_stock"], 20)
+        self.assertEqual(groups[2]["return_package_stock"], 2)
+        self.assertEqual(groups[2]["return_physical_stock"], 4)
+        self.assertTrue(groups[2]["return_options"][0]["is_return"])
+        self.assertEqual(groups[2]["return_options"][0]["grade"], "반품(미개봉)")
+
+        # 결품 상품(20TZ03)은 반품 5개가 있어도 정상 재고 0개 / 결품 상태 유지
+        tz03 = by_code["20TZ03"]
+        self.assertEqual(tz03["master_physical_total"], 0)
+        self.assertEqual(tz03["coupang_physical_total"], 0)
+        self.assertEqual(tz03["coupang_return_physical_total"], 5)
+        self.assertEqual(tz03["status"], "🔴 결품 (0개)")
+
+        # stats 전체 반품 합계 확인 (20EO02 11개 + 20TZ03 5개 + 기타 매핑분 이상)
+        self.assertGreaterEqual(sum_json["stats"]["total_coupang_return_stock"], 16)
+
+        # 5. /api/admin/config, JSON 백업 내보내기/복원, CSV 내보내기 검증
+        cfg = json.loads(self.client.get("/api/admin/config", headers=headers).data)
+        self.assertTrue(cfg["coupang_inventory"]["95999000011"]["is_return"])
+        self.assertEqual(cfg["coupang_inventory"]["95999000011"]["grade"], "반품 - 최상")
+        self.assertEqual(cfg["coupang_inventory"]["95999000011"]["product_id"], "16323534607")
+
+        backup_json = json.loads(self.client.get("/api/admin/backup/export", headers=headers).data)
+        imp_res = self.client.post("/api/admin/backup/import", headers=headers, json={"data": backup_json})
+        self.assertEqual(imp_res.status_code, 200)
+        sum_after = json.loads(self.client.get("/api/summary").data)
+        eo_after = next(m for m in sum_after["masters"] if m["seller_code"] == "20EO02")
+        self.assertEqual(eo_after["coupang_return_physical_total"], 11)
+
+        csv_text = self.client.get("/api/export-master-csv").data.decode("utf-8-sig")
+        self.assertIn("쿠팡 반품(실물) 재고", csv_text)
+        self.assertNotIn("비고", csv_text)
+
+        # 6. UI/JS 마커 및 PIN 비노출 확인
+        html = self.client.get("/").data.decode("utf-8")
+        self.assertNotIn("1500", html)
+        for marker in (
+            'id="statCoupangReturnWrap"',
+            'id="statCoupangReturnStock"',
+            'value="coupang_return"',
+            'id="cm_coupang_return_input"',
+            "suggestMasterForCoupangCsvRow",
+            "coupang_bundle_groups",
+            "쿠팡 윙 옵션별 번들 · 실물 재고",
+            "반품 실물",
+            "🔄 반품",
+        ):
+            self.assertIn(marker, html, f"Missing Coupang return marker: {marker}")
+        print("OK: [Admin Test 16] 쿠팡 G열(반품) 파싱·매핑·분리집계·번들별 반품 표시·백업·UI 검증 완료")
+
 
 if __name__ == '__main__':
     unittest.main()
