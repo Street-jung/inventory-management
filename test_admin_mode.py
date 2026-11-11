@@ -1452,6 +1452,152 @@ class TestIljeomodoAdminMode(unittest.TestCase):
             self.assertIn(marker, html, f"Missing Coupang return marker: {marker}")
         print("OK: [Admin Test 16] 쿠팡 G열(반품) 파싱·매핑·분리집계·번들별 반품 표시·백업·UI 검증 완료")
 
+    def test_17_coupang_return_parser_edge_cases_and_legacy_remediation(self):
+        """쿠팡 엑셀/CSV(10행 이상 배너·2단헤더·float ID·NFD·대체컬럼명) 파싱 및 기존 데이터 반품 전환(재업로드/즉시지정) 검증"""
+        import unicodedata
+        headers = self._login("1500")
+
+        # 1. 실제 엑셀/CSV 변형 edge-case 파싱: 상단 8행 배너 + 2단 헤더 + 줄바꿈 헤더 + float ID(.0) + None + NFD 한글
+        banner_rows = [["쿠팡 윙 재고 건전성 리포트"], ["다운로드 일시: 2026-11-11"], [], ["안내"], [""], [""], ["주의"], [""]]
+        split_h1 = [
+            "No.", "등록상품\nID", "옵션\nID", "SKU ID", "등록상품명", "옵션명", "상품\n상태",
+            "판매가능재고\n(실시간 기준)", "입고예정재고\n(실시간 기준)", "아이템위너",
+            "최근 매출", "", "최근\n판매수량", "", "예상 소진일\n(DOC)", "재고예상\n소진일", "고객반품 지난 30일"
+        ]
+        split_h2 = ["", "", "", "", "", "", "", "", "", "", "지난 7일", "지난 30일", "지난 7일", "지난 30일", "", "", ""]
+        nfd_return_grade = unicodedata.normalize("NFD", "반품 - 최상")
+        excel_style_rows = banner_rows + [
+            split_h1,
+            split_h2,
+            [1, 16323600679.0, 95893436821.0, 77764478, "구욘 초코칩 통밀쿠키", "1개 265g", "NEW", 117.0, 0, None, None, None, 57.0, 120.0, 20, "20일 이내", 5],
+            [2, 16323600679.0, 96254147518.0, 88888881, "구욘 초코칩 통밀쿠키", "1개 265g", nfd_return_grade, 1.0, None, None, None, None, 0.0, 0.0, "-", "-", 0],
+            [3, "16323600679.0", "96135189857.0", "88888882", "구욘 초코칩 통밀쿠키", "2개 265g", "Return - Like New", "0.0", "0", "아이템위너", "0", "0", "0", "0", "-", "-", "0"],
+        ]
+
+        parsed = app_module.parse_coupang_rows(excel_style_rows)
+        self.assertIn("95893436821", parsed)
+        self.assertIn("96254147518", parsed)
+        self.assertIn("96135189857", parsed)
+        self.assertFalse(parsed["95893436821"]["is_return"])
+        self.assertEqual(parsed["95893436821"]["stock"], 117)
+        self.assertEqual(parsed["95893436821"]["sales_7d"], 57)
+        self.assertEqual(parsed["95893436821"]["doc"], 20)
+        self.assertEqual(parsed["95893436821"]["product_id"], "16323600679")
+
+        self.assertTrue(parsed["96254147518"]["is_return"])
+        self.assertEqual(parsed["96254147518"]["grade"], "반품 - 최상")
+        self.assertEqual(parsed["96254147518"]["stock"], 1)
+        self.assertTrue(parsed["96135189857"]["is_return"])
+        self.assertEqual(parsed["96135189857"]["stock"], 0)
+
+        # 2. 구버전(등급 G열 업데이트 이전) Google Drive 상태 재현:
+        #    10GL04에 개미 475개 + 95893436821(117) + 96254147518(1, grade/is_return 누락 상태로 매핑) + 96135189857(0)
+        with app_module.data_lock:
+            app_module.app_state["gaemi_inventory"] = {
+                "PJ1489270": [{
+                    "product_name": "구욘 초코칩 쿠키",
+                    "option_name": "구욘 초코칩 쿠키",
+                    "stock": 475,
+                    "reg_date": "",
+                    "expiry_date": "",
+                    "days_left": None
+                }]
+            }
+            app_module.app_state["coupang_inventory"] = {
+                "95893436821": {"product_name": "구욘 초코칩 쿠키", "option_name": "1개 265g", "stock": 117, "inbound": 0, "sales_7d": 57, "sales_30d": 120, "doc": 20},
+                "96254147518": {"product_name": "구욘 초코칩 쿠키", "option_name": "1개 265g", "stock": 1, "inbound": 0, "sales_7d": 0, "sales_30d": 0, "doc": 0},
+                "96135189857": {"product_name": "구욘 초코칩 쿠키", "option_name": "2개 265g", "stock": 0, "inbound": 0, "sales_7d": 0, "sales_30d": 0, "doc": 0},
+            }
+
+        self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "10GL04",
+            "options": [
+                {"id": "95893436821", "bundle": 1, "name": "1개 265g"},
+                {"id": "96254147518", "bundle": 1, "name": "1개 265g"},
+                {"id": "95893661910", "bundle": 2, "name": "2개 265g"},
+                {"id": "96135189857", "bundle": 2, "name": "2개 265g"},
+                {"id": "95893661912", "bundle": 3, "name": "3개 265g"},
+            ]
+        })
+
+        s_legacy = json.loads(self.client.get("/api/summary").data)
+        self.assertEqual(s_legacy["stats"]["coupang_missing_grade_count"], 3)
+        gl04_legacy = next(m for m in s_legacy["masters"] if m["seller_code"] == "10GL04")
+        opt_9625_legacy = next(o for o in gl04_legacy["options"] if o["id"] == "96254147518")
+        self.assertTrue(opt_9625_legacy["grade_missing"])
+        self.assertFalse(opt_9625_legacy["is_return"])
+        # 업데이트 전에는 정상 118로 잡히고 총 가용 593
+        self.assertEqual(gl04_legacy["coupang_physical_total"], 118)
+        self.assertEqual(gl04_legacy["master_physical_total"], 593)
+
+        # 3-A. 관리자 즉시 반품 전환(toggleCoupangOptionReturn 동작): CSV 재업로드 전에도 96254147518 만 is_return=True 지정 시 즉시 분리
+        self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "10GL04",
+            "options": [
+                {"id": "95893436821", "bundle": 1, "name": "1개 265g"},
+                {"id": "96254147518", "bundle": 1, "name": "1개 265g", "is_return": True},
+                {"id": "95893661910", "bundle": 2, "name": "2개 265g"},
+                {"id": "96135189857", "bundle": 2, "name": "2개 265g"},
+                {"id": "95893661912", "bundle": 3, "name": "3개 265g"},
+            ]
+        })
+        s_toggled = json.loads(self.client.get("/api/summary").data)
+        gl04_tog = next(m for m in s_toggled["masters"] if m["seller_code"] == "10GL04")
+        self.assertEqual(gl04_tog["coupang_physical_total"], 117)
+        self.assertEqual(gl04_tog["coupang_return_physical_total"], 1)
+        self.assertEqual(gl04_tog["master_physical_total"], 592)
+
+        # 다시 수동 플래그 해제 후, 3-B. 새 쿠팡 파일 재업로드만으로 자동 반품 분리되는지 확인
+        self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+            "seller_code": "10GL04",
+            "options": [
+                {"id": "95893436821", "bundle": 1, "name": "1개 265g"},
+                {"id": "96254147518", "bundle": 1, "name": "1개 265g"},
+                {"id": "95893661910", "bundle": 2, "name": "2개 265g"},
+                {"id": "96135189857", "bundle": 2, "name": "2개 265g"},
+                {"id": "95893661912", "bundle": 3, "name": "3개 265g"},
+            ]
+        })
+        up_res = self.client.post("/api/upload-file-data", json={"source": "coupang", "rows": excel_style_rows})
+        self.assertEqual(up_res.status_code, 200)
+        self.assertEqual(json.loads(up_res.data)["return_count"], 2)
+
+        s_after_upload = json.loads(self.client.get("/api/summary").data)
+        self.assertEqual(s_after_upload["stats"]["coupang_missing_grade_count"], 0)
+        self.assertEqual(s_after_upload["stats"]["coupang_return_option_count"], 2)
+        gl04_auto = next(m for m in s_after_upload["masters"] if m["seller_code"] == "10GL04")
+        self.assertEqual(gl04_auto["coupang_physical_total"], 117)
+        self.assertEqual(gl04_auto["coupang_return_physical_total"], 1)
+        self.assertEqual(gl04_auto["master_physical_total"], 592)
+        b_groups = {g["bundle"]: g for g in gl04_auto["coupang_bundle_groups"]}
+        self.assertEqual(b_groups[1]["normal_physical_stock"], 117)
+        self.assertEqual(b_groups[1]["return_physical_stock"], 1)
+        self.assertEqual(len(b_groups[1]["return_options"]), 1)
+        self.assertEqual(b_groups[1]["return_options"][0]["id"], "96254147518")
+        self.assertTrue(b_groups[1]["return_options"][0]["csv_is_return"])
+        self.assertEqual(len(b_groups[2]["return_options"]), 1)
+        self.assertEqual(b_groups[2]["return_options"][0]["id"], "96135189857")
+
+        # 4. UI/JS 마커 및 인코딩/시트/즉시전환 코드, PIN 비노출 검증
+        html = self.client.get("/").data.decode("utf-8")
+        self.assertNotIn("1500", html)
+        for marker in (
+            "decodeTextBytes",
+            "TextDecoder",
+            "euc-kr",
+            "pickWorkbookRows",
+            "defval: ''",
+            "toggleCoupangOptionReturn",
+            'id="acMapCoupangLegacyAlert"',
+            "ac-map-exp-return",
+            "coupang_missing_grade_count",
+            "🔄 반품 지정",
+            "↩️ 정상 복귀",
+            "등급미확인",
+        ):
+            self.assertIn(marker, html, f"Missing marker: {marker}")
+        print("OK: [Admin Test 17] 쿠팡 파서 edge-case·인코딩·등급누락 경고·즉시반품지정·자동분리 검증 완료")
+
 
 if __name__ == '__main__':
     unittest.main()

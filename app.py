@@ -16,6 +16,7 @@ import json
 import csv
 import io
 import re
+import unicodedata
 import copy
 import hmac
 import uuid
@@ -702,6 +703,37 @@ def parse_gaemi_rows(rows):
 # -------------------------------------------------------------
 # 파서 2: 쿠팡 윙 재고 건강도 CSV 파서
 # -------------------------------------------------------------
+def _clean_cell_str(val):
+    if val is None or isinstance(val, bool):
+        return ""
+    if isinstance(val, float):
+        if val != val:
+            return ""
+        if val.is_integer():
+            return str(int(val))
+    return unicodedata.normalize("NFC", str(val)).strip()
+
+def _clean_id_cell(val):
+    s = _clean_cell_str(val)
+    if not s:
+        return ""
+    if re.fullmatch(r"\d+\.0+", s):
+        s = s.split(".", 1)[0]
+    return s
+
+def _clean_int_cell(val):
+    s = _clean_cell_str(val).replace(",", "")
+    if not s or s == "-":
+        return 0
+    if s.isdigit():
+        return int(s)
+    if re.fullmatch(r"-?\d+(?:\.\d+)?", s):
+        try:
+            return max(0, int(round(float(s))))
+        except Exception:
+            return 0
+    return 0
+
 def parse_coupang_rows(rows):
     """
     쿠팡 파일: 등록상품 ID, 옵션 ID, 등록상품명, 옵션명, 상품등급(G열: NEW / 반품...), 판매가능재고 (실시간 기준), 입고예정재고, 최근 판매수량(지난 7일, 지난 30일), 예상 소진일(DOC)
@@ -710,69 +742,135 @@ def parse_coupang_rows(rows):
         return {}
 
     header_idx = -1
-    for i, r in enumerate(rows[:6]):
-        line_str = " ".join([str(c) for c in r])
-        if "옵션 ID" in line_str or "옵션ID" in line_str:
+    for i, r in enumerate(rows[:25]):
+        if not isinstance(r, (list, tuple)):
+            continue
+        compact_cells = [re.sub(r"\s+", "", _clean_cell_str(c)) for c in r]
+        line_compact = " ".join(compact_cells)
+        if "옵션ID" in line_compact or "옵션번호" in line_compact:
             header_idx = i
             break
 
     if header_idx == -1:
         return {}
 
-    headers = [str(c).strip() for c in rows[header_idx]]
-    col_oid = next((i for i, h in enumerate(headers) if "옵션 ID" in h or "옵션ID" in h), 2)
-    col_pname = next((i for i, h in enumerate(headers) if "등록상품명" in h or "상품명" in h), 4)
-    col_oname = next((i for i, h in enumerate(headers) if "옵션명" in h), 5)
-    col_stock = next((i for i, h in enumerate(headers) if "판매가능재고" in h), 7)
-    col_inbound = next((i for i, h in enumerate(headers) if "입고예정재고" in h), 8)
-    
+    raw_h1 = [_clean_cell_str(c) for c in rows[header_idx]]
+    h1_compact = [re.sub(r"\s+", "", h) for h in raw_h1]
+    prelim_oid = next((i for i, hc in enumerate(h1_compact) if "옵션ID" in hc or "옵션번호" in hc), 2)
+
+    has_subheader = False
+    raw_h2 = []
+    if header_idx + 1 < len(rows) and isinstance(rows[header_idx + 1], (list, tuple)):
+        r_next = rows[header_idx + 1]
+        next_oid_val = _clean_id_cell(r_next[prelim_oid]) if len(r_next) > prelim_oid else ""
+        if not (next_oid_val and next_oid_val.isdigit()):
+            if any(_clean_cell_str(c) for c in r_next):
+                has_subheader = True
+                raw_h2 = [_clean_cell_str(c) for c in r_next]
+
+    max_cols = max(len(raw_h1), len(raw_h2))
+    headers = []
+    for i in range(max_cols):
+        p1 = raw_h1[i] if i < len(raw_h1) else ""
+        p2 = raw_h2[i] if i < len(raw_h2) else ""
+        if p1 and p2 and p2 not in p1:
+            headers.append(f"{p1} {p2}".strip())
+        else:
+            headers.append(p1 or p2)
+
+    headers_compact = [re.sub(r"\s+", "", h) for h in headers]
+
+    col_oid = next((i for i, hc in enumerate(headers_compact) if "옵션ID" in hc), -1)
+    if col_oid == -1:
+        col_oid = next((i for i, hc in enumerate(headers_compact) if "옵션번호" in hc), 2)
+    col_pname = next((i for i, hc in enumerate(headers_compact) if "등록상품명" in hc or "상품명" in hc), 4)
+    col_oname = next((i for i, hc in enumerate(headers_compact) if "옵션명" in hc), 5)
+    col_stock = next((i for i, hc in enumerate(headers_compact) if "판매가능재고" in hc), 7)
+    col_inbound = next((i for i, hc in enumerate(headers_compact) if "입고예정재고" in hc), 8)
+
     col_sales7 = 12
     col_sales30 = 13
     col_doc = 14
-    
-    for i, h in enumerate(headers):
-        if "판매수량" in h:
+    found_sales_qty = False
+    found_doc = False
+
+    for i, hc in enumerate(headers_compact):
+        if not found_sales_qty and "판매수량" in hc:
             col_sales7 = i
             col_sales30 = i + 1
-            break
-        elif "DOC" in h or "소진일" in h:
+            found_sales_qty = True
+        if not found_doc and "DOC" in hc.upper():
             col_doc = i
+            found_doc = True
+    if not found_doc:
+        col_doc = next((i for i, hc in enumerate(headers_compact) if "소진일" in hc), 14)
+
+    col_sku = next((i for i, hc in enumerate(headers_compact) if "SKUID" in hc.upper()), -1)
+    col_winner = next((i for i, hc in enumerate(headers_compact) if "아이템위너" in hc), -1)
 
     used_cols = {col_oid, col_pname, col_oname, col_stock, col_inbound, col_sales7, col_sales30, col_doc}
-    col_pid = next((i for i, h in enumerate(headers) if "등록상품 ID" in h or "등록상품ID" in h), -1)
+    if col_sku >= 0:
+        used_cols.add(col_sku)
+    if col_winner >= 0:
+        used_cols.add(col_winner)
+
+    col_pid = next((i for i, hc in enumerate(headers_compact) if "등록상품ID" in hc), -1)
     if col_pid == -1 and len(headers) > 1 and 1 not in used_cols:
         col_pid = 1
     if col_pid >= 0:
         used_cols.add(col_pid)
 
-    col_grade = next((i for i, h in enumerate(headers) if "상품등급" in h or h == "등급" or "등급" in h), -1)
+    def _is_grade_col_excluded(hc):
+        return any(bad in hc for bad in ("고객반품", "반품지난", "반품수", "반품률", "반품율"))
+
+    col_grade = next(
+        (i for i, hc in enumerate(headers_compact)
+         if not _is_grade_col_excluded(hc) and ("상품등급" in hc or "품질등급" in hc or "재고등급" in hc)),
+        -1
+    )
+    if col_grade == -1:
+        col_grade = next(
+            (i for i, hc in enumerate(headers_compact)
+             if i not in used_cols and not _is_grade_col_excluded(hc)
+             and (hc in ("등급", "상품상태", "재고상태", "아이템상태", "상태", "컨디션")
+                  or hc.lower() in ("grade", "itemgrade", "condition", "status"))),
+            -1
+        )
+    if col_grade == -1:
+        col_grade = next(
+            (i for i, hc in enumerate(headers_compact)
+             if i not in used_cols and not _is_grade_col_excluded(hc) and "등급" in hc),
+            -1
+        )
+    if col_grade == -1:
+        col_grade = next(
+            (i for i, hc in enumerate(headers_compact)
+             if i not in used_cols and not _is_grade_col_excluded(hc) and ("상태" in hc or "컨디션" in hc)),
+            -1
+        )
     if col_grade == -1 and len(headers) > 6 and 6 not in used_cols:
         col_grade = 6
 
+    data_start_idx = header_idx + (2 if has_subheader else 1)
+    updated_label = now_kst().strftime("%m-%d %H:%M")
     coupang_dict = {}
-    for r in rows[header_idx + 1:]:
-        if len(r) <= col_oid:
+    for r in rows[data_start_idx:]:
+        if not isinstance(r, (list, tuple)) or len(r) <= col_oid:
             continue
-        oid = str(r[col_oid]).strip()
+        oid = _clean_id_cell(r[col_oid])
         if not oid or not oid.isdigit():
             continue
-            
-        pid = str(r[col_pid]).strip() if (col_pid >= 0 and len(r) > col_pid) else ""
-        pname = str(r[col_pname]).strip() if len(r) > col_pname else ""
-        oname = str(r[col_oname]).strip() if len(r) > col_oname else ""
-        grade = str(r[col_grade]).strip() if (col_grade >= 0 and len(r) > col_grade) else ""
-        is_return = ("반품" in grade)
-        stock_s = str(r[col_stock]).replace(",", "").strip() if len(r) > col_stock else "0"
-        inbound_s = str(r[col_inbound]).replace(",", "").strip() if len(r) > col_inbound else "0"
-        sales7_s = str(r[col_sales7]).replace(",", "").strip() if len(r) > col_sales7 else "0"
-        sales30_s = str(r[col_sales30]).replace(",", "").strip() if len(r) > col_sales30 else "0"
-        doc_s = str(r[col_doc]).strip() if len(r) > col_doc else "-"
 
-        stock = int(stock_s) if stock_s.isdigit() else 0
-        inbound = int(inbound_s) if inbound_s.isdigit() else 0
-        sales7 = int(sales7_s) if sales7_s.isdigit() else 0
-        sales30 = int(sales30_s) if sales30_s.isdigit() else 0
-        doc = int(doc_s) if doc_s.isdigit() else 0
+        pid = _clean_id_cell(r[col_pid]) if (col_pid >= 0 and len(r) > col_pid) else ""
+        pname = _clean_cell_str(r[col_pname]) if (col_pname >= 0 and len(r) > col_pname) else ""
+        oname = _clean_cell_str(r[col_oname]) if (col_oname >= 0 and len(r) > col_oname) else ""
+        grade = _clean_cell_str(r[col_grade]) if (col_grade >= 0 and len(r) > col_grade) else ""
+        is_return = ("반품" in grade) or ("return" in grade.lower())
+        stock = _clean_int_cell(r[col_stock]) if len(r) > col_stock else 0
+        inbound = _clean_int_cell(r[col_inbound]) if len(r) > col_inbound else 0
+        sales7 = _clean_int_cell(r[col_sales7]) if len(r) > col_sales7 else 0
+        sales30 = _clean_int_cell(r[col_sales30]) if len(r) > col_sales30 else 0
+        doc = _clean_int_cell(r[col_doc]) if len(r) > col_doc else 0
 
         coupang_dict[oid] = {
             "product_id": pid,
@@ -785,7 +883,7 @@ def parse_coupang_rows(rows):
             "sales_7d": sales7,
             "sales_30d": sales30,
             "doc": doc,
-            "updated_at": now_kst().strftime("%m-%d %H:%M")
+            "updated_at": updated_label
         }
 
     return coupang_dict
@@ -1078,15 +1176,17 @@ def get_summary():
         for opt in m.get("options", []):
             oid = str(opt.get("id", "")).strip()
             bundle = max(1, int(opt.get("bundle", 1) or 1))
-            c_data = coupang.get(oid, {})
-            c_stock = int(c_data.get("stock", 0) or 0)
-            c_inbound = int(c_data.get("inbound", 0) or 0)
-            c_sales7 = int(c_data.get("sales_7d", 0) or 0)
-            c_sales30 = int(c_data.get("sales_30d", 0) or 0)
-            doc = int(c_data.get("doc", 0) or 0)
-            c_grade = str(c_data.get("grade", "") or "").strip()
-            c_pid = str(c_data.get("product_id", "") or "").strip()
-            eff_is_return = bool(opt.get("is_return") or c_data.get("is_return") or ("반품" in c_grade))
+            c_data = coupang.get(oid)
+            c_stock = int(c_data.get("stock", 0) or 0) if c_data else 0
+            c_inbound = int(c_data.get("inbound", 0) or 0) if c_data else 0
+            c_sales7 = int(c_data.get("sales_7d", 0) or 0) if c_data else 0
+            c_sales30 = int(c_data.get("sales_30d", 0) or 0) if c_data else 0
+            doc = int(c_data.get("doc", 0) or 0) if c_data else 0
+            c_grade = str(c_data.get("grade", "") or "").strip() if c_data else ""
+            c_pid = str(c_data.get("product_id", "") or "").strip() if c_data else ""
+            csv_is_return = bool(c_data and (c_data.get("is_return") or ("반품" in c_grade) or ("return" in c_grade.lower())))
+            grade_missing = bool(c_data is not None and "grade" not in c_data)
+            eff_is_return = bool(opt.get("is_return") or csv_is_return)
 
             phys_stock = c_stock * bundle
             phys_sales7 = c_sales7 * bundle
@@ -1109,6 +1209,8 @@ def get_summary():
                 "name": opt.get("name", f"{bundle}개입"),
                 "is_return": eff_is_return,
                 "option_is_return_flag": bool(opt.get("is_return")),
+                "csv_is_return": csv_is_return,
+                "grade_missing": grade_missing,
                 "grade": c_grade or ("반품" if eff_is_return else ""),
                 "product_id": c_pid,
                 "coupang_stock": c_stock,
@@ -1663,6 +1765,18 @@ def get_summary():
 
     # 하위 호환성 유지 카운터 (테스트 코드 호환)
     legacy_leadtime_count = sum(1 for m in master_summaries if m["product_type"] == "수입" and m["total_runway"] <= m["effective_prepare_limit"])
+    coupang_missing_grade_count = sum(
+        1 for v in coupang.values()
+        if isinstance(v, dict) and "grade" not in v
+    )
+    coupang_return_option_count = sum(
+        1 for v in coupang.values()
+        if isinstance(v, dict) and (
+            v.get("is_return")
+            or ("반품" in str(v.get("grade", "") or ""))
+            or ("return" in str(v.get("grade", "") or "").lower())
+        )
+    )
 
     return jsonify({
         "masters": master_summaries,
@@ -1695,7 +1809,9 @@ def get_summary():
             "upload_timestamps": upload_timestamps,
             "has_gaemi_data": len(app_state["gaemi_inventory"]) > 0,
             "has_coupang_data": len(app_state["coupang_inventory"]) > 0,
-            "has_sales_data": len(app_state["sales_inventory"]) > 0
+            "has_sales_data": len(app_state["sales_inventory"]) > 0,
+            "coupang_missing_grade_count": coupang_missing_grade_count,
+            "coupang_return_option_count": coupang_return_option_count
         },
         "settings": {
             "default_import_lead_time": default_import_lt,
@@ -3589,6 +3705,7 @@ HTML_TEMPLATE = """
                 <!-- TAB 2: 상품 3채널 코드 매핑 수동 지정 -->
                 <div id="acTab_mapping" class="hidden space-y-4">
                     <div id="acMapToast" class="hidden px-3 py-2 rounded-lg text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900"></div>
+                    <div id="acMapCoupangLegacyAlert" class="hidden px-3 py-2 rounded-lg text-[11px] font-semibold bg-amber-50 border border-amber-300 text-amber-950"></div>
 
                     <!-- 상단: 업로드된 CSV 미매핑/전체 코드 탐색기 -->
                     <details open id="acMapExplorerDetails" class="bg-sky-50/50 border border-sky-200 rounded-xl p-3 space-y-2.5">
@@ -4321,13 +4438,56 @@ HTML_TEMPLATE = """
                 if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0], source);
             });
             fileEl.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) processFile(e.target.files[0], source);
+                if (e.target.files.length > 0) {
+                    const selectedFile = e.target.files[0];
+                    e.target.value = '';
+                    processFile(selectedFile, source);
+                }
             });
         };
 
         setupDropZone('dropGaemi', 'fileGaemi', 'gaemi');
         setupDropZone('dropCoupang', 'fileCoupang', 'coupang');
         setupDropZone('dropSales', 'fileSales', 'sales');
+
+        function decodeTextBytes(u8) {
+            if (u8.length >= 2 && u8[0] === 0xFF && u8[1] === 0xFE) {
+                return new TextDecoder('utf-16le').decode(u8.subarray(2));
+            }
+            if (u8.length >= 2 && u8[0] === 0xFE && u8[1] === 0xFF) {
+                return new TextDecoder('utf-16be').decode(u8.subarray(2));
+            }
+            if (u8.length >= 3 && u8[0] === 0xEF && u8[1] === 0xBB && u8[2] === 0xBF) {
+                return new TextDecoder('utf-8').decode(u8.subarray(3));
+            }
+            try {
+                return new TextDecoder('utf-8', { fatal: true }).decode(u8);
+            } catch (e) {
+                return new TextDecoder('euc-kr').decode(u8);
+            }
+        }
+
+        function pickWorkbookRows(wb, source) {
+            const names = (wb && wb.SheetNames) || [];
+            if (names.length === 0) return [];
+            const matchSheet = (sheetRows) => {
+                const preview = sheetRows.slice(0, 25).map(r =>
+                    (Array.isArray(r) ? r : []).map(c => String(c == null ? '' : c)).join(' ')
+                ).join(' ').replace(/\\s+/g, '');
+                if (source === 'coupang') return preview.includes('옵션ID') || preview.includes('판매가능재고');
+                if (source === 'gaemi') return preview.includes('상품코드') && preview.includes('재고량');
+                if (source === 'sales') return preview.includes('관리코드') || preview.includes('주문수량');
+                return true;
+            };
+            let firstRows = [];
+            for (let i = 0; i < names.length; i++) {
+                const sheet = wb.Sheets[names[i]];
+                const sRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                if (i === 0) firstRows = sRows;
+                if (matchSheet(sRows)) return sRows;
+            }
+            return firstRows;
+        }
 
         // SheetJS 파일 파싱
         function processFile(file, source) {
@@ -4342,9 +4502,15 @@ HTML_TEMPLATE = """
             reader.onload = async function(e) {
                 try {
                     const data = new Uint8Array(e.target.result);
-                    const wb = XLSX.read(data, { type: 'array' });
-                    const sheet = wb.Sheets[wb.SheetNames[0]];
-                    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                    const isTextCsv = /\\.(csv|tsv|txt)$/i.test(file.name || '');
+                    let wb;
+                    if (isTextCsv) {
+                        const textStr = decodeTextBytes(data).replace(/^\\uFEFF/, '');
+                        wb = XLSX.read(textStr, { type: 'string' });
+                    } else {
+                        wb = XLSX.read(data, { type: 'array' });
+                    }
+                    const rows = pickWorkbookRows(wb, source);
 
                     const res = await fetch('/api/upload-file-data', {
                         method: 'POST',
@@ -4353,8 +4519,14 @@ HTML_TEMPLATE = """
                     });
                     const resJson = await res.json();
                     if (resJson.success) {
-                        statusEl.innerText = `✅ ${file.name} 반영 완료!`;
-                        fetchSummary();
+                        statusEl.innerText = `✅ ${resJson.message || (file.name + ' 반영 완료!')}`;
+                        adminConfigCache = null;
+                        await fetchSummary();
+                        const centerEl = document.getElementById('adminCenterModal');
+                        if (isAdminMode && centerEl && !centerEl.classList.contains('hidden')) {
+                            await ensureAdminConfig();
+                            renderAdminCenterTabs();
+                        }
                     } else {
                         statusEl.innerText = `❌ ${resJson.message}`;
                         alert(resJson.message);
@@ -4420,6 +4592,62 @@ HTML_TEMPLATE = """
                 syncSubrowViewportWidth();
             } else {
                 expandedRowIds.delete(prodId);
+            }
+        }
+
+        async function toggleCoupangOptionReturn(prodId, optId, makeReturn, btnEl) {
+            if (!isAdminMode) {
+                openPinModal();
+                return;
+            }
+            if (btnEl) btnEl.disabled = true;
+            try {
+                if (!adminConfigCache) {
+                    await ensureAdminConfig();
+                }
+                const masters = (adminConfigCache && adminConfigCache.master_products) || [];
+                const target = masters.find(m => m.id === prodId || m.seller_code === prodId);
+                if (!target) {
+                    if (btnEl) btnEl.disabled = false;
+                    alert('대상 마스터 상품을 찾지 못했습니다.');
+                    return;
+                }
+                const nextOpts = (target.options || []).map(o => {
+                    const oid = String(o.id || '').trim();
+                    const entry = {
+                        id: oid,
+                        bundle: Math.max(1, parseInt(o.bundle || 1, 10) || 1),
+                        name: o.name || `${o.bundle || 1}개`
+                    };
+                    const flag = (oid === String(optId || '').trim()) ? Boolean(makeReturn) : Boolean(o.is_return);
+                    if (flag) entry.is_return = true;
+                    return entry;
+                }).filter(o => o.id);
+
+                const res = await adminFetch('/api/admin/product/mappings/save', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        id: target.id,
+                        seller_code: target.seller_code,
+                        options: nextOpts
+                    })
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    if (btnEl) btnEl.disabled = false;
+                    alert(json.message || '반품 구분 변경 실패');
+                    return;
+                }
+                expandedRowIds.add(prodId);
+                await ensureAdminConfig();
+                await fetchSummary();
+                const centerEl = document.getElementById('adminCenterModal');
+                if (centerEl && !centerEl.classList.contains('hidden')) {
+                    renderAdminCenterTabs();
+                }
+            } catch (err) {
+                if (btnEl) btnEl.disabled = false;
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('반품 구분 변경 오류: ' + err.message);
             }
         }
 
@@ -4751,8 +4979,17 @@ HTML_TEMPLATE = """
                     document.getElementById('gaemiStatusText').className = "text-[10px] text-amber-700 font-semibold";
                 }
                 if (data.stats.has_coupang_data) {
-                    document.getElementById('coupangStatusText').innerText = "✅ 쿠팡 윙 재고 로드됨" + (ut.coupang ? ` (${ut.coupang})` : "");
-                    document.getElementById('coupangStatusText').className = "text-[10px] text-blue-700 font-semibold";
+                    const missGrade = data.stats.coupang_missing_grade_count || 0;
+                    const retOptCnt = data.stats.coupang_return_option_count || 0;
+                    const tsSuffix = ut.coupang ? ` (${ut.coupang})` : "";
+                    if (missGrade > 0) {
+                        document.getElementById('coupangStatusText').innerText = `⚠️ 등급(반품) 미포함 ${missGrade}건 · 파일 재업로드 시 반품 자동 분리${tsSuffix}`;
+                        document.getElementById('coupangStatusText').className = "text-[10px] text-amber-700 font-bold";
+                    } else {
+                        const retBadgeTxt = retOptCnt > 0 ? ` · 🔄 반품옵션 ${retOptCnt}건` : "";
+                        document.getElementById('coupangStatusText').innerText = `✅ 쿠팡 윙 재고 로드됨${retBadgeTxt}${tsSuffix}`;
+                        document.getElementById('coupangStatusText').className = "text-[10px] text-blue-700 font-semibold";
+                    }
                 }
                 if (data.stats.has_sales_data) {
                     document.getElementById('salesStatusText').innerText = "✅ 쿠팡외 통합 매출 로드됨" + (ut.sales ? ` (${ut.sales})` : "");
@@ -5286,38 +5523,70 @@ HTML_TEMPLATE = """
                                                 </div>
                                             ` : '';
 
-                                            const normalRowsHtml = nOpts.map(opt => `
-                                                <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-blue-50/20">
-                                                    <div class="min-w-0 flex-1">
-                                                        <div class="font-bold text-slate-800 truncate">${escapeHtml(opt.name)}</div>
-                                                        <div class="text-[10px] text-slate-500 font-mono truncate">${escapeHtml(opt.id)} · ${opt.bundle}개입</div>
-                                                    </div>
-                                                    <div class="text-right shrink-0 font-mono">
-                                                        <div class="font-extrabold text-blue-700">${opt.coupang_stock}세트 <span class="text-slate-600 font-semibold">(실물 ${opt.physical_stock}개)</span></div>
-                                                        <div class="text-[10px] text-slate-500">7일 출고: <strong class="text-slate-700">${opt.sales_7d_physical}개</strong></div>
-                                                    </div>
-                                                </div>
-                                            `).join('');
-
-                                            const returnRowsHtml = rOpts.map(opt => `
-                                                <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-rose-50/60">
-                                                    <div class="min-w-0 flex-1">
-                                                        <div class="flex flex-wrap items-center gap-1">
-                                                            <span class="px-1.5 py-0.2 rounded bg-rose-600 text-white font-bold text-[9px] shrink-0">🔄 반품</span>
-                                                            ${opt.grade ? `<span class="px-1.5 py-0.2 rounded bg-rose-100 text-rose-900 border border-rose-200 font-mono font-bold text-[9px] shrink-0">${escapeHtml(opt.grade)}</span>` : ''}
-                                                            <span class="font-bold text-rose-950 truncate">${escapeHtml(opt.name)}</span>
+                                            const normalRowsHtml = nOpts.map(opt => {
+                                                const missBadge = opt.grade_missing
+                                                    ? `<span class="px-1 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-bold text-[9px] shrink-0" title="기존 업로드 데이터에 상품등급(G열) 정보가 없어 정상으로 표시될 수 있습니다. 쿠팡 파일 재업로드 또는 관리자 반품 지정을 이용하세요.">등급미확인</span>`
+                                                    : '';
+                                                const toggleBtnHtml = isAdminMode
+                                                    ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, true, this)" class="px-1.5 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[9px] font-bold transition shrink-0" title="이 옵션 ID를 정상 재고에서 제외하고 반품 재고로 지정합니다">🔄 반품 지정</button>`
+                                                    : '';
+                                                return `
+                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-blue-50/20">
+                                                        <div class="min-w-0 flex-1">
+                                                            <div class="flex flex-wrap items-center gap-1">
+                                                                <span class="font-bold text-slate-800 truncate">${escapeHtml(opt.name)}</span>
+                                                                ${missBadge}
+                                                            </div>
+                                                            <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                                                <span class="text-[10px] text-slate-500 font-mono truncate">${escapeHtml(opt.id)} · ${opt.bundle}개입</span>
+                                                                ${toggleBtnHtml}
+                                                            </div>
                                                         </div>
-                                                        <div class="text-[10px] text-rose-700/80 font-mono truncate mt-0.5">${escapeHtml(opt.id)} · ${opt.bundle}개입</div>
+                                                        <div class="text-right shrink-0 font-mono">
+                                                            <div class="font-extrabold text-blue-700">${opt.coupang_stock}세트 <span class="text-slate-600 font-semibold">(실물 ${opt.physical_stock}개)</span></div>
+                                                            <div class="text-[10px] text-slate-500">7일 출고: <strong class="text-slate-700">${opt.sales_7d_physical}개</strong></div>
+                                                        </div>
                                                     </div>
-                                                    <div class="text-right shrink-0 font-mono">
-                                                        <div class="font-extrabold text-rose-700">${opt.coupang_stock}세트 <span class="text-rose-950 font-semibold">(반품 실물 ${opt.physical_stock}개)</span></div>
-                                                        <div class="text-[10px] text-rose-700/80">7일 출고: <strong class="text-rose-900">${opt.sales_7d_physical}개</strong></div>
+                                                `;
+                                            }).join('');
+
+                                            const returnRowsHtml = rOpts.map(opt => {
+                                                let retActionHtml = '';
+                                                if (opt.csv_is_return) {
+                                                    retActionHtml = `<span class="px-1 py-0.2 rounded bg-rose-100 text-rose-800 text-[9px] font-semibold shrink-0">CSV G열 반품 자동감지</span>`;
+                                                } else if (isAdminMode && opt.option_is_return_flag) {
+                                                    retActionHtml = `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, false, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-[9px] font-bold transition shrink-0" title="수동 반품 지정을 해제하고 정상 재고로 복귀합니다">↩️ 정상 복귀</button>`;
+                                                }
+                                                return `
+                                                    <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] bg-rose-50/60">
+                                                        <div class="min-w-0 flex-1">
+                                                            <div class="flex flex-wrap items-center gap-1">
+                                                                <span class="px-1.5 py-0.2 rounded bg-rose-600 text-white font-bold text-[9px] shrink-0">🔄 반품</span>
+                                                                ${opt.grade ? `<span class="px-1.5 py-0.2 rounded bg-rose-100 text-rose-900 border border-rose-200 font-mono font-bold text-[9px] shrink-0">${escapeHtml(opt.grade)}</span>` : ''}
+                                                                <span class="font-bold text-rose-950 truncate">${escapeHtml(opt.name)}</span>
+                                                            </div>
+                                                            <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                                                <span class="text-[10px] text-rose-700/80 font-mono truncate">${escapeHtml(opt.id)} · ${opt.bundle}개입</span>
+                                                                ${retActionHtml}
+                                                            </div>
+                                                        </div>
+                                                        <div class="text-right shrink-0 font-mono">
+                                                            <div class="font-extrabold text-rose-700">${opt.coupang_stock}세트 <span class="text-rose-950 font-semibold">(반품 실물 ${opt.physical_stock}개)</span></div>
+                                                            <div class="text-[10px] text-rose-700/80">7일 출고: <strong class="text-rose-900">${opt.sales_7d_physical}개</strong></div>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            `).join('');
+                                                `;
+                                            }).join('');
 
                                             return `<div class="divide-y divide-blue-100/70">${groupHeaderHtml}${normalRowsHtml}${returnRowsHtml}</div>`;
                                         }).join('');
+
+                                        const hasGradeMissingNormal = opts.some(o => o.grade_missing && !o.is_return);
+                                        const gradeMissingHintHtml = hasGradeMissingNormal ? `
+                                            <div class="px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-950 font-semibold break-words">
+                                                ⚠️ 기존 쿠팡 업로드 데이터에 G열(상품등급) 정보가 누락되어 반품이 정상으로 합산될 수 있습니다. <strong>쿠팡 재고건전성 파일 재업로드</strong> 시 자동 분리되며${isAdminMode ? ', 위 <strong>[🔄 반품 지정]</strong> 버튼으로 즉시 변경 가능합니다.' : ', 관리자 모드에서도 수동 지정 가능합니다.'}
+                                            </div>
+                                        ` : '';
 
                                         return `
                                             <div class="p-2.5 sm:p-3 space-y-1.5">
@@ -5331,6 +5600,7 @@ HTML_TEMPLATE = """
                                                 <div class="rounded-lg border border-blue-200 divide-y divide-blue-200 bg-white overflow-hidden">
                                                     ${groupsHtml}
                                                 </div>
+                                                ${gradeMissingHintHtml}
                                             </div>
                                         `;
                                     })()}
@@ -5948,7 +6218,7 @@ HTML_TEMPLATE = """
             const row = document.createElement('div');
             const cd = (adminConfigCache && adminConfigCache.coupang_inventory && opt.id) ? adminConfigCache.coupang_inventory[opt.id] : null;
             const cGrade = cd ? String(cd.grade || '').trim() : '';
-            const csvIsRet = Boolean(cd && (cd.is_return || cGrade.includes('반품')));
+            const csvIsRet = Boolean(cd && (cd.is_return || cGrade.includes('반품') || cGrade.toLowerCase().includes('return')));
             const isRet = Boolean(opt.is_return || csvIsRet);
             row.className = `ep-opt-row flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-rose-300 bg-rose-50/40' : 'border-slate-200'} rounded-lg p-2`;
             row.innerHTML = `
@@ -6951,6 +7221,7 @@ HTML_TEMPLATE = """
             let gaemiTotal = 0, gaemiVisibleUnmapped = 0;
             let coupangTotal = 0, coupangVisibleUnmapped = 0;
             let coupangReturnTotal = 0, coupangReturnVisibleUnmapped = 0;
+            let coupangMissingGradeCnt = 0;
             let hiddenInCsvCount = 0;
 
             Object.entries(salesInv).sort((a, b) => a[0].localeCompare(b[0])).forEach(([code, sdata]) => {
@@ -7014,7 +7285,9 @@ HTML_TEMPLATE = """
                 if (!oidStr) return;
                 coupangTotal += 1;
                 const cGrade = String(cdata.grade || '').trim();
-                const isReturn = Boolean(cdata.is_return) || cGrade.includes('반품');
+                const gradeMissing = !(cdata && Object.prototype.hasOwnProperty.call(cdata, 'grade'));
+                if (gradeMissing) coupangMissingGradeCnt += 1;
+                const isReturn = Boolean(cdata.is_return) || cGrade.includes('반품') || cGrade.toLowerCase().includes('return');
                 if (isReturn) coupangReturnTotal += 1;
                 const owners = idxData.coupangOwners[oidStr] || [];
                 const isMapped = owners.length > 0;
@@ -7039,6 +7312,7 @@ HTML_TEMPLATE = """
                     option_name: optLabel,
                     product_name: prodName,
                     grade: cGrade,
+                    gradeMissing,
                     isReturn,
                     stock: parseInt(cdata.stock || 0, 10) || 0,
                     sales_7d: parseInt(cdata.sales_7d || 0, 10) || 0,
@@ -7051,6 +7325,16 @@ HTML_TEMPLATE = """
                 cRow.suggested = suggestMasterForCoupangCsvRow(cRow, cfg, idxData);
                 allCsvItems.push(cRow);
             });
+
+            const legacyAlertEl = document.getElementById('acMapCoupangLegacyAlert');
+            if (legacyAlertEl) {
+                if (coupangMissingGradeCnt > 0) {
+                    legacyAlertEl.innerHTML = `⚠️ 현재 저장된 쿠팡 데이터 중 <strong>${coupangMissingGradeCnt}건</strong>이 G열(상품등급·반품) 기능 업데이트 이전에 업로드된 상태입니다. <strong>최신 쿠팡 재고건전성 파일을 다시 업로드</strong>하면 '반품' 옵션이 자동 분류되며, 아래 목록에서 <strong>🔄 반품</strong> 체크 후 연결/재연결할 수도 있습니다.`;
+                    legacyAlertEl.classList.remove('hidden');
+                } else {
+                    legacyAlertEl.classList.add('hidden');
+                }
+            }
 
             const countsEl = document.getElementById('acMapCsvCounts');
             if (countsEl) {
@@ -7133,9 +7417,12 @@ HTML_TEMPLATE = """
                         ? `<div class="mt-0.5"><span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[9px]">🔄 반품</span></div>`
                         : '';
                     chBadge = `<span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px]">쿠팡옵션</span>${retBadge}`;
-                    const gradeChip = row.grade && (row.isReturn || row.grade.toUpperCase() !== 'NEW')
-                        ? `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-rose-50 text-rose-800 border border-rose-200 font-mono font-bold text-[9px]">${escapeHtml(row.grade)}</span></div>`
-                        : '';
+                    let gradeChip = '';
+                    if (row.grade && (row.isReturn || row.grade.toUpperCase() !== 'NEW')) {
+                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-rose-50 text-rose-800 border border-rose-200 font-mono font-bold text-[9px]">${escapeHtml(row.grade)}</span></div>`;
+                    } else if (row.gradeMissing && !row.isReturn) {
+                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-bold text-[9px]" title="등급(G열) 업데이트 이전 업로드 데이터입니다">등급미확인</span></div>`;
+                    }
                     codeCell = `<div class="font-mono font-bold text-blue-950">${escapeHtml(row.option_id)}</div><div class="text-[10px] text-slate-600">${escapeHtml(row.option_name || '')}</div>${gradeChip}`;
                     const pidTxt = row.product_id ? ` · 등록ID ${escapeHtml(row.product_id)}` : '';
                     infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock}세트 · 7일출고 ${row.sales_7d}세트 (추천 ${row.guessedBundle}개입${pidTxt})</div>`;
@@ -7157,6 +7444,9 @@ HTML_TEMPLATE = """
 
                 const bundleInputHtml = row.channel === 'coupang'
                     ? `<input type="number" min="1" value="${row.guessedBundle}" class="ac-map-exp-bundle w-12 px-1 py-1 border border-slate-300 rounded font-mono text-[10px] text-right" title="개입(배수)">`
+                    : '';
+                const returnCheckHtml = row.channel === 'coupang'
+                    ? `<label class="inline-flex items-center space-x-1 px-1.5 py-1 rounded border ${row.isReturn ? 'bg-rose-100 border-rose-300 text-rose-900' : 'bg-white border-slate-300 text-slate-600'} text-[10px] font-bold cursor-pointer shrink-0" title="체크 시 반품 재고로 연결됩니다"><input type="checkbox" class="ac-map-exp-return" ${row.isReturn ? 'checked' : ''} onchange="this.closest('label').className='inline-flex items-center space-x-1 px-1.5 py-1 rounded border '+(this.checked?'bg-rose-100 border-rose-300 text-rose-900':'bg-white border-slate-300 text-slate-600')+' text-[10px] font-bold cursor-pointer shrink-0'"><span>🔄 반품</span></label>`
                     : '';
 
                 let hideBtnHtml = '';
@@ -7187,8 +7477,9 @@ HTML_TEMPLATE = """
                                 <select class="ac-map-exp-target flex-1 min-w-[130px] max-w-[185px] px-1.5 py-1 border ${suggestedId ? 'border-emerald-400 bg-emerald-50/40' : 'border-slate-300 bg-white'} rounded text-[10px]" data-suggested="${escapeHtml(suggestedId)}">${masterOptsHtml}</select>
                                 ${suggestedBadge}
                                 ${bundleInputHtml}
+                                ${returnCheckHtml}
                                 <button type="button" onclick="quickLinkCsvRow(${idx}, this)" class="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded font-bold text-[10px] shrink-0">연결</button>
-                                <button type="button" onclick="quickCreateFromCsvRow(${idx})" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded font-bold text-[10px] shrink-0" title="이 코드로 신규 단품 마스터 생성">+ 신규</button>
+                                <button type="button" onclick="quickCreateFromCsvRow(${idx}, this)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded font-bold text-[10px] shrink-0" title="이 코드로 신규 단품 마스터 생성">+ 신규</button>
                                 ${hideBtnHtml}
                             </div>
                         </td>
@@ -7321,15 +7612,20 @@ HTML_TEMPLATE = """
             } else if (row.channel === 'coupang') {
                 const bundleEl = tr ? tr.querySelector('.ac-map-exp-bundle') : null;
                 const bundleVal = Math.max(1, parseInt((bundleEl && bundleEl.value) || row.guessedBundle || '1', 10) || 1);
+                const retEl = tr ? tr.querySelector('.ac-map-exp-return') : null;
+                const isRetVal = Boolean((retEl && retEl.checked) || row.isReturn);
                 const curOpts = (target.options || []).map(o => {
                     const entry = { id: String(o.id || '').trim(), bundle: o.bundle || 1, name: o.name || '' };
                     if (o.is_return) entry.is_return = true;
                     return entry;
                 }).filter(o => o.id);
-                if (!curOpts.some(o => o.id === row.option_id)) {
+                const existingOpt = curOpts.find(o => o.id === row.option_id);
+                if (!existingOpt) {
                     const newOpt = { id: row.option_id, bundle: bundleVal, name: row.option_name || `${bundleVal}개` };
-                    if (row.isReturn) newOpt.is_return = true;
+                    if (isRetVal) newOpt.is_return = true;
                     curOpts.push(newOpt);
+                } else if (isRetVal) {
+                    existingOpt.is_return = true;
                 }
                 payload.options = curOpts;
             }
@@ -7353,9 +7649,10 @@ HTML_TEMPLATE = """
             }
         }
 
-        function quickCreateFromCsvRow(idx) {
+        function quickCreateFromCsvRow(idx, btnEl) {
             const row = acMapExplorerRows[idx];
             if (!row) return;
+            const tr = btnEl ? btnEl.closest('tr') : null;
             const prefill = {};
             if (row.channel === 'sales') {
                 prefill.seller_code = row.code;
@@ -7366,9 +7663,13 @@ HTML_TEMPLATE = """
                 prefill.gaemi_mappings = [{ gaemi_code: row.gaemi_code, option_name: row.option_name }];
                 prefill.gaemi_codes = row.gaemi_code;
             } else if (row.channel === 'coupang') {
+                const retEl = tr ? tr.querySelector('.ac-map-exp-return') : null;
+                const isRetVal = Boolean((retEl && retEl.checked) || row.isReturn);
+                const bundleEl = tr ? tr.querySelector('.ac-map-exp-bundle') : null;
+                const bundleVal = Math.max(1, parseInt((bundleEl && bundleEl.value) || row.guessedBundle || '1', 10) || 1);
                 prefill.name = row.product_name || '';
-                const newOpt = { id: row.option_id, bundle: row.guessedBundle || 1, name: row.option_name || `${row.guessedBundle || 1}개` };
-                if (row.isReturn) newOpt.is_return = true;
+                const newOpt = { id: row.option_id, bundle: bundleVal, name: row.option_name || `${bundleVal}개` };
+                if (isRetVal) newOpt.is_return = true;
                 prefill.options = [newOpt];
             }
             openCreateProductModal(prefill);
@@ -7470,7 +7771,7 @@ HTML_TEMPLATE = """
                         const oidStr = String(o.id || '').trim();
                         const cd = coupangInv[oidStr];
                         const cGrade = cd ? String(cd.grade || '').trim() : '';
-                        const isRet = Boolean(o.is_return) || Boolean(cd && cd.is_return) || cGrade.includes('반품');
+                        const isRet = Boolean(o.is_return) || Boolean(cd && cd.is_return) || cGrade.includes('반품') || cGrade.toLowerCase().includes('return');
                         const stTxt = cd ? ` · ${cd.stock}세트` : '';
                         const retTag = isRet ? '<span class="px-1 rounded bg-rose-200 text-rose-900 font-bold mr-1">반품</span>' : '';
                         const cls = isRet
@@ -7964,10 +8265,11 @@ HTML_TEMPLATE = """
             box.innerHTML = cmState.options.map((opt, idx) => {
                 const cd = coupangInv[opt.id];
                 const cGrade = cd ? String(cd.grade || '').trim() : '';
-                const csvIsRet = Boolean(cd && (cd.is_return || cGrade.includes('반품')));
+                const gradeMissing = Boolean(cd && !Object.prototype.hasOwnProperty.call(cd, 'grade'));
+                const csvIsRet = Boolean(cd && (cd.is_return || cGrade.includes('반품') || cGrade.toLowerCase().includes('return')));
                 const isRet = Boolean(opt.is_return || csvIsRet);
                 const csvInfo = cd
-                    ? `현재 ${cd.stock || 0}세트 · 7일출고 ${cd.sales_7d || 0}세트`
+                    ? `현재 ${cd.stock || 0}세트 · 7일출고 ${cd.sales_7d || 0}세트${gradeMissing && !isRet ? ' (등급미확인)' : ''}`
                     : 'CSV 미등록';
                 return `
                     <div class="flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-rose-300 bg-rose-50/35' : 'border-blue-200'} rounded-lg p-2">
@@ -8051,7 +8353,7 @@ HTML_TEMPLATE = """
                     const optLabel = String(cdata.option_name || '').trim();
                     const prodName = String(cdata.product_name || '').trim();
                     const cGrade = String(cdata.grade || '').trim();
-                    const isRet = Boolean(cdata.is_return) || cGrade.includes('반품');
+                    const isRet = Boolean(cdata.is_return) || cGrade.includes('반품') || cGrade.toLowerCase().includes('return');
                     const pid = String(cdata.product_id || '').trim();
                     return {
                         id: oidStr,
