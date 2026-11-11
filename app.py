@@ -3616,10 +3616,28 @@ HTML_TEMPLATE = """
                                 </div>
                                 <span class="text-[10px] text-slate-500">* B2B S코드는 'B2B/세트' 탭 규칙으로 별도 판정</span>
                             </div>
+                            <div id="acMapCsvBulkBar" class="hidden flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <label class="inline-flex items-center space-x-1.5 cursor-pointer select-none font-semibold text-slate-700" title="현재 표시된 미매핑 항목 전체 선택/해제">
+                                        <input type="checkbox" id="acMapCsvSelectAllBar" onchange="toggleSelectAllAcMapExplorerRows(this.checked)" class="rounded border-slate-300 cursor-pointer">
+                                        <span>전체 선택</span>
+                                    </label>
+                                    <span id="acMapCsvSelectedCountText" class="text-[10px] font-mono text-slate-500">0건 선택</span>
+                                    <span class="hidden sm:inline text-[10px] text-slate-400">· Shift+클릭 범위 선택</span>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-1.5">
+                                    <button type="button" id="btnAcMapBulkHideSelected" onclick="bulkToggleHideAcMapCsvRows(true, 'selected', this)" disabled class="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 disabled:bg-slate-100 disabled:text-slate-400 text-white font-semibold text-[10px] transition">선택 일괄 숨김</button>
+                                    <button type="button" id="btnAcMapBulkRestoreSelected" onclick="bulkToggleHideAcMapCsvRows(false, 'selected', this)" disabled class="hidden px-2.5 py-1 rounded bg-white hover:bg-slate-100 disabled:opacity-40 border border-slate-300 text-slate-700 font-semibold text-[10px] transition">선택 일괄 복원</button>
+                                    <button type="button" id="btnAcMapBulkHideFiltered" onclick="bulkToggleHideAcMapCsvRows(true, 'filtered', this)" class="hidden px-2.5 py-1 rounded bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold text-[10px] transition" title="현재 필터에 조회된 미매핑 항목을 한 번에 모두 숨김 처리합니다">필터 전체 숨김</button>
+                                </div>
+                            </div>
                             <div class="max-h-60 overflow-x-auto overflow-y-auto bg-white border border-slate-200 rounded-lg">
                                 <table class="w-full text-left border-collapse text-[11px]">
                                     <thead class="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
                                         <tr>
+                                            <th class="p-2 w-8 text-center">
+                                                <input type="checkbox" id="acMapCsvSelectAll" onchange="toggleSelectAllAcMapExplorerRows(this.checked)" class="rounded border-slate-300 cursor-pointer" title="현재 표시된 미매핑 항목 전체 선택/해제">
+                                            </th>
                                             <th class="p-2 w-24">채널</th>
                                             <th class="p-2 min-w-[190px]">CSV 코드 / 옵션명</th>
                                             <th class="p-2">CSV 품목 정보 · 수량/매출</th>
@@ -6827,6 +6845,9 @@ HTML_TEMPLATE = """
         // 상품 3채널 코드 매핑 수동 지정 (탐색기 + 마스터 현황표 + 전용 모달)
         // -------------------------------------------------------------
         let acMapExplorerRows = [];
+        let acMapVisibleRows = [];
+        let acMapSelectedExpKeys = new Set();
+        let acMapLastCheckedIdx = null;
         let cmState = {
             id: '',
             seller_code: '',
@@ -7262,14 +7283,18 @@ HTML_TEMPLATE = """
 
             const tbody = document.getElementById('acMapCsvTbody');
             if (!tbody) return;
+            acMapLastCheckedIdx = null;
             if (acMapExplorerRows.length === 0) {
+                acMapVisibleRows = [];
+                acMapSelectedExpKeys.clear();
                 let emptyMsg = '표시할 CSV 코드가 없습니다. (모든 코드가 매핑되었거나 CSV가 아직 업로드되지 않았습니다)';
                 if (hiddenMode === 'only_hidden') {
                     emptyMsg = '숨김 처리된 미매핑 코드가 없습니다.';
                 } else if (hiddenMode === 'exclude' && hiddenInCsvCount > 0 && onlyUnmapped && !q) {
                     emptyMsg = `필요한 미매핑 코드가 모두 처리되었습니다. (숨김 처리된 ${hiddenInCsvCount}건 제외 — 상단 '숨김 항목만 보기'로 언제든 복원 가능)`;
                 }
-                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">${escapeHtml(emptyMsg)}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-400">${escapeHtml(emptyMsg)}</td></tr>`;
+                updateAcMapExplorerSelectionUI();
                 return;
             }
 
@@ -7283,6 +7308,11 @@ HTML_TEMPLATE = """
 
             const MAX_ROWS = 200;
             const visibleRows = acMapExplorerRows.slice(0, MAX_ROWS);
+            acMapVisibleRows = visibleRows;
+            const visibleEligibleKeySet = new Set(visibleRows.filter(r => !r.isMapped).map(r => r.expKey));
+            Array.from(acMapSelectedExpKeys).forEach(k => {
+                if (!visibleEligibleKeySet.has(k)) acMapSelectedExpKeys.delete(k);
+            });
             let html = visibleRows.map((row, idx) => {
                 let chBadge = '';
                 let codeCell = '';
@@ -7345,12 +7375,19 @@ HTML_TEMPLATE = """
                 const suggestedBadge = (row.suggested && row.suggested.master)
                     ? `<span class="text-[9px] text-emerald-700 font-semibold whitespace-nowrap" title="${escapeHtml(row.suggested.reason || '추천 매핑')}">✨ 추천 ${escapeHtml(row.suggested.master.seller_code)}</span>`
                     : '';
-                const rowBgClass = row.isHidden
-                    ? 'bg-slate-50/90 opacity-85 hover:bg-slate-100/80'
-                    : (row.isReturn ? 'bg-slate-50/60 hover:bg-slate-100/70' : 'hover:bg-slate-50');
+                const isChecked = !row.isMapped && acMapSelectedExpKeys.has(row.expKey);
+                const checkCellHtml = !row.isMapped
+                    ? `<input type="checkbox" class="ac-map-exp-select rounded border-slate-300 cursor-pointer" data-exp-idx="${idx}" ${isChecked ? 'checked' : ''} onclick="onClickAcMapExplorerCheckbox(event, ${idx}, this)">`
+                    : `<span class="text-slate-300 text-[10px]" title="이미 매핑된 항목은 숨김 대상이 아닙니다">—</span>`;
+                const rowBgClass = isChecked
+                    ? 'bg-slate-100/90 hover:bg-slate-100'
+                    : (row.isHidden
+                        ? 'bg-slate-50/90 opacity-85 hover:bg-slate-100/80'
+                        : (row.isReturn ? 'bg-slate-50/60 hover:bg-slate-100/70' : 'hover:bg-slate-50'));
 
                 return `
                     <tr class="${rowBgClass}" data-exp-idx="${idx}">
+                        <td class="p-2 align-top text-center">${checkCellHtml}</td>
                         <td class="p-2 align-top">${chBadge}</td>
                         <td class="p-2 align-top">${codeCell}</td>
                         <td class="p-2 align-top">${infoCell}</td>
@@ -7371,13 +7408,194 @@ HTML_TEMPLATE = """
             }).join('');
 
             if (acMapExplorerRows.length > MAX_ROWS) {
-                html += `<tr><td colspan="5" class="p-2 text-center text-[10px] text-slate-500 bg-slate-50">상위 ${MAX_ROWS}건만 표시 중입니다 (전체 ${acMapExplorerRows.length}건 — 검색어로 좁혀보세요).</td></tr>`;
+                html += `<tr><td colspan="6" class="p-2 text-center text-[10px] text-slate-500 bg-slate-50">상위 ${MAX_ROWS}건만 표시 중입니다 (전체 ${acMapExplorerRows.length}건 — 검색어로 좁혀보세요).</td></tr>`;
             }
             tbody.innerHTML = html;
             tbody.querySelectorAll('select.ac-map-exp-target[data-suggested]').forEach(sel => {
                 const sug = sel.dataset.suggested;
                 if (sug) sel.value = sug;
             });
+            updateAcMapExplorerSelectionUI();
+        }
+
+        function updateAcMapExplorerRowVisual(idx) {
+            const tbody = document.getElementById('acMapCsvTbody');
+            if (!tbody) return;
+            const row = acMapVisibleRows[idx];
+            const tr = tbody.querySelector(`tr[data-exp-idx="${idx}"]`);
+            if (!row || !tr) return;
+            const cb = tr.querySelector('input.ac-map-exp-select');
+            const isChecked = !row.isMapped && acMapSelectedExpKeys.has(row.expKey);
+            if (cb) cb.checked = isChecked;
+            tr.className = isChecked
+                ? 'bg-slate-100/90 hover:bg-slate-100'
+                : (row.isHidden
+                    ? 'bg-slate-50/90 opacity-85 hover:bg-slate-100/80'
+                    : (row.isReturn ? 'bg-slate-50/60 hover:bg-slate-100/70' : 'hover:bg-slate-50'));
+        }
+
+        function updateAcMapExplorerSelectionUI() {
+            const barEl = document.getElementById('acMapCsvBulkBar');
+            const selectAllHead = document.getElementById('acMapCsvSelectAll');
+            const selectAllBar = document.getElementById('acMapCsvSelectAllBar');
+            const countTextEl = document.getElementById('acMapCsvSelectedCountText');
+            const btnHideSel = document.getElementById('btnAcMapBulkHideSelected');
+            const btnRestoreSel = document.getElementById('btnAcMapBulkRestoreSelected');
+            const btnHideFilt = document.getElementById('btnAcMapBulkHideFiltered');
+
+            const eligibleVisible = acMapVisibleRows.filter(r => !r.isMapped);
+            const selectedVisible = eligibleVisible.filter(r => acMapSelectedExpKeys.has(r.expKey));
+            const selToHide = selectedVisible.filter(r => !r.isHidden);
+            const selToRestore = selectedVisible.filter(r => r.isHidden);
+            const allFilteredToHide = acMapExplorerRows.filter(r => !r.isMapped && !r.isHidden);
+            const anyVisibleHidden = eligibleVisible.some(r => r.isHidden);
+
+            if (barEl) {
+                if (eligibleVisible.length > 0) {
+                    barEl.classList.remove('hidden');
+                    barEl.classList.add('flex');
+                } else {
+                    barEl.classList.add('hidden');
+                    barEl.classList.remove('flex');
+                }
+            }
+
+            const allChecked = eligibleVisible.length > 0 && selectedVisible.length === eligibleVisible.length;
+            const someChecked = selectedVisible.length > 0 && selectedVisible.length < eligibleVisible.length;
+            [selectAllHead, selectAllBar].forEach(cb => {
+                if (!cb) return;
+                cb.disabled = (eligibleVisible.length === 0);
+                cb.checked = allChecked;
+                cb.indeterminate = someChecked;
+            });
+
+            if (countTextEl) {
+                countTextEl.innerText = eligibleVisible.length > 0
+                    ? `${selectedVisible.length}건 선택 / 표시 ${eligibleVisible.length}건`
+                    : '0건 선택';
+            }
+
+            if (btnHideSel) {
+                if (allFilteredToHide.length > 0 || selToHide.length > 0) {
+                    btnHideSel.classList.remove('hidden');
+                } else {
+                    btnHideSel.classList.add('hidden');
+                }
+                btnHideSel.disabled = (selToHide.length === 0);
+                btnHideSel.innerText = selToHide.length > 0
+                    ? `선택 일괄 숨김 (${selToHide.length})`
+                    : '선택 일괄 숨김';
+            }
+
+            if (btnRestoreSel) {
+                if (anyVisibleHidden || selToRestore.length > 0) {
+                    btnRestoreSel.classList.remove('hidden');
+                } else {
+                    btnRestoreSel.classList.add('hidden');
+                }
+                btnRestoreSel.disabled = (selToRestore.length === 0);
+                btnRestoreSel.innerText = selToRestore.length > 0
+                    ? `선택 일괄 복원 (${selToRestore.length})`
+                    : '선택 일괄 복원';
+            }
+
+            if (btnHideFilt) {
+                if (allFilteredToHide.length > 0) {
+                    btnHideFilt.classList.remove('hidden');
+                    btnHideFilt.innerText = `필터 전체 숨김 (${allFilteredToHide.length})`;
+                } else {
+                    btnHideFilt.classList.add('hidden');
+                }
+            }
+        }
+
+        function onClickAcMapExplorerCheckbox(ev, idx, cbEl) {
+            if (ev) ev.stopPropagation();
+            const row = acMapVisibleRows[idx];
+            if (!row || row.isMapped) return;
+            const targetState = Boolean(cbEl && cbEl.checked);
+            if (ev && ev.shiftKey && acMapLastCheckedIdx !== null && acMapLastCheckedIdx !== idx) {
+                const start = Math.min(acMapLastCheckedIdx, idx);
+                const end = Math.max(acMapLastCheckedIdx, idx);
+                for (let i = start; i <= end; i++) {
+                    const r = acMapVisibleRows[i];
+                    if (!r || r.isMapped) continue;
+                    if (targetState) acMapSelectedExpKeys.add(r.expKey);
+                    else acMapSelectedExpKeys.delete(r.expKey);
+                    updateAcMapExplorerRowVisual(i);
+                }
+            } else {
+                if (targetState) acMapSelectedExpKeys.add(row.expKey);
+                else acMapSelectedExpKeys.delete(row.expKey);
+                updateAcMapExplorerRowVisual(idx);
+            }
+            acMapLastCheckedIdx = idx;
+            updateAcMapExplorerSelectionUI();
+        }
+
+        function toggleSelectAllAcMapExplorerRows(shouldSelect) {
+            acMapVisibleRows.forEach((row, idx) => {
+                if (!row || row.isMapped) return;
+                if (shouldSelect) acMapSelectedExpKeys.add(row.expKey);
+                else acMapSelectedExpKeys.delete(row.expKey);
+                updateAcMapExplorerRowVisual(idx);
+            });
+            acMapLastCheckedIdx = null;
+            updateAcMapExplorerSelectionUI();
+        }
+
+        async function bulkToggleHideAcMapCsvRows(shouldHide, scope, btnEl) {
+            const sourceRows = (scope === 'filtered')
+                ? acMapExplorerRows.filter(r => !r.isMapped && (shouldHide ? !r.isHidden : r.isHidden))
+                : acMapVisibleRows.filter(r => !r.isMapped && acMapSelectedExpKeys.has(r.expKey) && (shouldHide ? !r.isHidden : r.isHidden));
+
+            const keys = [];
+            const seen = new Set();
+            sourceRows.forEach(r => {
+                if (r && r.expKey && !seen.has(r.expKey)) {
+                    seen.add(r.expKey);
+                    keys.push(r.expKey);
+                }
+            });
+            if (keys.length === 0) return;
+
+            if (scope === 'filtered' && keys.length > 1) {
+                const verb = shouldHide ? '숨김 처리' : '복원';
+                if (!confirm(`현재 필터 결과의 미매핑 항목 ${keys.length}건을 한 번에 ${verb}하시겠습니까?`)) return;
+            }
+
+            if (btnEl) btnEl.disabled = true;
+            try {
+                const res = await adminFetch('/api/admin/unmapped-explorer/hidden', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: shouldHide ? 'hide' : 'unhide',
+                        keys,
+                        label: keys.length > 1 ? `일괄 ${keys.length}건` : (sourceRows[0].displayLabel || '')
+                    })
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    alert(json.message || '일괄 변경 실패');
+                    return;
+                }
+                keys.forEach(k => acMapSelectedExpKeys.delete(k));
+                if (adminConfigCache) {
+                    adminConfigCache.hidden_unmapped_codes = Array.isArray(json.hidden_unmapped_codes)
+                        ? json.hidden_unmapped_codes
+                        : [];
+                }
+                renderAdminMappingExplorer();
+                const toastMsg = shouldHide
+                    ? `🙈 ${keys.length}건을 미매핑 목록에서 일괄 숨김 처리했습니다. ('숨김 항목만 보기'로 언제든 복원 가능)`
+                    : `👁️ ${keys.length}건의 숨김을 일괄 복원했습니다.`;
+                showAcMapToast(toastMsg);
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('일괄 변경 오류: ' + err.message);
+            } finally {
+                if (btnEl) btnEl.disabled = false;
+                updateAcMapExplorerSelectionUI();
+            }
         }
 
         function toggleAcMapOnlyHiddenQuick() {
@@ -7406,6 +7624,7 @@ HTML_TEMPLATE = """
                     alert(json.message || '숨김 처리 저장 실패');
                     return;
                 }
+                acMapSelectedExpKeys.delete(row.expKey);
                 if (adminConfigCache) {
                     adminConfigCache.hidden_unmapped_codes = Array.isArray(json.hidden_unmapped_codes)
                         ? json.hidden_unmapped_codes
@@ -7438,6 +7657,7 @@ HTML_TEMPLATE = """
                     alert(json.message || '전체 복원 실패');
                     return;
                 }
+                acMapSelectedExpKeys.clear();
                 if (adminConfigCache) {
                     adminConfigCache.hidden_unmapped_codes = Array.isArray(json.hidden_unmapped_codes)
                         ? json.hidden_unmapped_codes

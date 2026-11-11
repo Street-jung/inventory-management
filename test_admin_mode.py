@@ -1238,11 +1238,18 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         cfg2 = json.loads(self.client.get("/api/admin/config", headers=headers).data)
         self.assertEqual(cfg2["hidden_unmapped_codes"], expected_three)
 
-        # 5. 다건 숨기기 + 개별 복원 + 매핑 연결 시 숨김 목록 자동 해제 검증
+        # 5. 다건 일괄 숨기기/일괄 복원 + 단건 복원 + 매핑 연결 시 숨김 목록 자동 해제 검증
         self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={
             "action": "hide",
-            "keys": ["sales::KEEP_HIDDEN", "gaemi::PJ_UNMAP_G1||와일드테스트", "coupang::555444333"]
+            "keys": ["sales::KEEP_HIDDEN", "gaemi::PJ_UNMAP_G1||와일드테스트", "coupang::555444333", "sales::BULK_RESTORE_1", "coupang::777666555"]
         })
+        batch_unhide = self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={
+            "action": "unhide",
+            "keys": ["sales::BULK_RESTORE_1", "coupang::777666555"]
+        })
+        self.assertEqual(batch_unhide.status_code, 200)
+        self.assertNotIn("sales::BULK_RESTORE_1", json.loads(batch_unhide.data)["hidden_unmapped_codes"])
+        self.assertNotIn("coupang::777666555", json.loads(batch_unhide.data)["hidden_unmapped_codes"])
         self.client.post("/api/admin/unmapped-explorer/hidden", headers=headers, json={
             "key": "coupang::999888777",
             "hidden": False
@@ -1266,19 +1273,31 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         app_module._apply_loaded_state({"master_products": copy.deepcopy(app_module.app_state["master_products"])})
         self.assertEqual(app_module.app_state["hidden_unmapped_codes"], [])
 
-        # 6. 프론트엔드 탐색기 숨기기 UI/JS 마커 및 PIN 미노출 검증
+        # 6. 프론트엔드 탐색기 숨기기 및 일괄 변경 UI/JS 마커 및 PIN 미노출 검증
         html = self.client.get("/").data.decode("utf-8")
         self.assertNotIn("1500", html)
         for marker in (
             'id="acMapCsvHiddenMode"',
             'id="acMapCsvHiddenSummary"',
             'id="acMapCsvHiddenCountBadge"',
+            'id="acMapCsvBulkBar"',
+            'id="acMapCsvSelectAll"',
+            'id="acMapCsvSelectAllBar"',
+            'id="btnAcMapBulkHideSelected"',
+            'id="btnAcMapBulkRestoreSelected"',
+            'id="btnAcMapBulkHideFiltered"',
             "toggleHideUnmappedCsvRow",
             "toggleAcMapOnlyHiddenQuick",
             "clearAllHiddenUnmappedCsvRows",
+            "toggleSelectAllAcMapExplorerRows",
+            "onClickAcMapExplorerCheckbox",
+            "bulkToggleHideAcMapCsvRows",
             "/api/admin/unmapped-explorer/hidden",
             "숨김 제외 (필요한 항목만)",
             "숨김 항목만 보기",
+            "선택 일괄 숨김",
+            "선택 일괄 복원",
+            "필터 전체 숨김",
             "숨기기",
             "복원",
         ):
