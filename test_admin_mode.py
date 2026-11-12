@@ -1912,6 +1912,114 @@ class TestIljeomodoAdminMode(unittest.TestCase):
 
         print("OK: [Admin Test 20] 쿠팡 번들 전용 인라인 확장 + 세부정보보기 팝업 모달 분리 + 매출 주문일 정규화 검증 완료")
 
+    def test_21_in_app_toast_confirm_and_bulk_save_feedback(self):
+        """Google Sites iframe(alert/confirm 차단 환경) 호환 인앱 토스트·확인 모달·일괄저장 피드백 및 부분 일괄저장 무손실 검증"""
+        headers = self._login("1500")
+
+        # 1. 관리자 일괄저장(/api/admin/products/bulk-save) 부분 품목 저장 시 타 품목 무손실 + /api/summary 즉시 반영 검증
+        summary_before = json.loads(self.client.get("/api/summary").data)
+        tz01 = next(m for m in summary_before["masters"] if m["seller_code"] == "20TZ01")
+        tz03 = next(m for m in summary_before["masters"] if m["seller_code"] == "20TZ03")
+        other = next(m for m in summary_before["masters"] if m["seller_code"] == "10GL04")
+        other_note_before = other.get("note", "")
+
+        bulk_res = self.client.post("/api/admin/products/bulk-save", headers=headers, json={
+            "products": [
+                {
+                    "id": tz01["id"],
+                    "seller_code": "20TZ01",
+                    "name": tz01["name"],
+                    "product_type": tz01["product_type"],
+                    "category": tz01["category"],
+                    "lead_time_days": "",
+                    "in_transit_qty": 996,
+                    "expected_arrival_date": "2026-11-26",
+                    "default_expiry_date": "2027-07-31",
+                    "is_active": True,
+                    "note": "테스트 입고 996",
+                },
+                {
+                    "id": tz03["id"],
+                    "seller_code": "20TZ03",
+                    "name": tz03["name"],
+                    "product_type": tz03["product_type"],
+                    "category": tz03["category"],
+                    "lead_time_days": "",
+                    "in_transit_qty": 768,
+                    "expected_arrival_date": "2026-11-26",
+                    "default_expiry_date": "2027-11-30",
+                    "is_active": True,
+                    "note": "",
+                },
+            ]
+        })
+        self.assertEqual(bulk_res.status_code, 200)
+        bulk_json = json.loads(bulk_res.data)
+        self.assertTrue(bulk_json.get("success"))
+        self.assertIn("2개 품목", bulk_json.get("message", ""))
+        self.assertIn("drive_sync", bulk_json)
+
+        summary_after = json.loads(self.client.get("/api/summary").data)
+        tz01_after = next(m for m in summary_after["masters"] if m["seller_code"] == "20TZ01")
+        tz03_after = next(m for m in summary_after["masters"] if m["seller_code"] == "20TZ03")
+        other_after = next(m for m in summary_after["masters"] if m["seller_code"] == "10GL04")
+        self.assertEqual(tz01_after["in_transit_qty"], 996)
+        self.assertEqual(tz01_after["expected_arrival_date"], "2026-11-26")
+        self.assertEqual(tz03_after["in_transit_qty"], 768)
+        self.assertEqual(tz03_after["expected_arrival_date"], "2026-11-26")
+        self.assertEqual(other_after.get("note", ""), other_note_before)
+
+        # 2. HTML/JS 인앱 알림 토스트 + 확인 모달 + 일괄저장 UI 피드백 검증 (alert()/confirm() 미사용 + 보안 유지)
+        html = self.client.get("/").data.decode("utf-8")
+        self.assertNotIn("1500", html)
+        self.assertNotIn("비고", html)
+        self.assertNotIn("'biko'", html)
+
+        for marker in (
+            'id="appToastContainer"',
+            'id="appConfirmModal"',
+            'id="adminCenterToast"',
+            'id="acBulkToast"',
+            'id="acBulkSaveBtn"',
+            'id="acExpirySaveBtn"',
+            'id="acB2bSaveBtn"',
+            'id="acSettingsSaveBtn"',
+            'id="epSaveBtn"',
+            'id="cmSaveBtn"',
+            "function showAppToast(",
+            "function showAdminCenterToast(",
+            "function showAcBulkToast(",
+            "function notifyUser(",
+            "function getSaveFeedbackInfo(",
+            "function setButtonBusy(",
+            "function showConfirmModal(",
+            "function resolveConfirmModal(",
+        ):
+            self.assertIn(marker, html, f"Missing notification/modal marker: {marker}")
+
+        # <script> 내부에 브라우저 기본 alert(...) / confirm(...) 호출이 남아있지 않아야 함 (Google Sites sandbox 대응)
+        import re
+        script_blocks = re.findall(r"<script(?![^>]*src=)[^>]*>(.*?)</script>", html, flags=re.S | re.I)
+        self.assertEqual(len(script_blocks), 1)
+        script_no_comments = re.sub(r"//.*", "", script_blocks[0])
+        self.assertIsNone(
+            re.search(r"(?<![A-Za-z0-9_$])(?:alert|confirm)\s*\(", script_no_comments),
+            "Native alert()/confirm() call still exists in inline script and would be silently blocked inside Google Sites iframe"
+        )
+
+        # saveAdminBulkProducts 는 renderAdminCenterTabs() 호출 이후에 bulkToast 로 성공 알림을 표시해야 함
+        fn_start = html.find("async function saveAdminBulkProducts(")
+        fn_end = html.find("function renderAdminExpiryTable(")
+        self.assertGreater(fn_start, 0)
+        self.assertGreater(fn_end, fn_start)
+        fn_body = html[fn_start:fn_end]
+        self.assertIn("setButtonBusy(", fn_body)
+        self.assertIn("getSaveFeedbackInfo(", fn_body)
+        self.assertIn("bulkToast: true", fn_body)
+        self.assertGreater(fn_body.rfind("bulkToast: true"), fn_body.find("renderAdminCenterTabs()"))
+
+        print("OK: [Admin Test 21] 인앱 토스트·확인 모달·일괄저장 피드백 및 alert()/confirm() 제거 검증 완료")
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -3926,7 +3926,7 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="flex items-center space-x-2">
                     <button type="button" onclick="closeEditProductModal()" class="px-4 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 transition">취소</button>
-                    <button type="button" onclick="saveProductModal()" class="px-5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition flex items-center space-x-1.5">
+                    <button type="button" id="epSaveBtn" onclick="saveProductModal(this)" class="px-5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed text-white transition flex items-center space-x-1.5">
                         <i class="fa-solid fa-floppy-disk"></i>
                         <span>저장 및 영구 반영</span>
                     </button>
@@ -3958,6 +3958,9 @@ HTML_TEMPLATE = """
                 <button data-tab="drive" onclick="switchAdminTab('drive')" class="ac-tab-btn px-3.5 py-2 rounded-t-lg font-semibold border border-b-0 bg-slate-100 text-slate-600 hover:bg-white">Google Drive · 백업</button>
             </div>
 
+            <!-- 관리자 센터 공용 고정 알림 배너 -->
+            <div id="adminCenterToast" class="hidden shrink-0 mx-4 sm:mx-5 mt-3 px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-start justify-between gap-2"></div>
+
             <!-- 탭 컨텐츠 -->
             <div class="p-4 sm:p-5 overflow-y-auto flex-1 text-xs space-y-4">
 
@@ -3971,11 +3974,12 @@ HTML_TEMPLATE = """
                                 <span class="font-medium text-slate-700">숨김 품목 포함 보기</span>
                             </label>
                         </div>
-                        <button onclick="saveAdminBulkProducts()" class="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold flex items-center space-x-1.5">
+                        <button type="button" id="acBulkSaveBtn" onclick="saveAdminBulkProducts(this)" class="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg font-semibold flex items-center space-x-1.5 transition">
                             <i class="fa-solid fa-floppy-disk"></i>
                             <span>표 변경사항 일괄 저장</span>
                         </button>
                     </div>
+                    <div id="acBulkToast" class="hidden px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-start justify-between gap-2"></div>
                     <div class="overflow-x-auto border border-slate-200 rounded-xl">
                         <table class="w-full text-left border-collapse text-xs">
                             <thead class="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
@@ -4118,7 +4122,7 @@ HTML_TEMPLATE = """
                             </select>
                             <input type="text" id="acExpirySearch" oninput="renderAdminExpiryTable()" placeholder="상품명 또는 코드 검색..." class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white w-52">
                         </div>
-                        <button onclick="saveAdminExpiryBulk()" class="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold flex items-center space-x-1.5">
+                        <button type="button" id="acExpirySaveBtn" onclick="saveAdminExpiryBulk(this)" class="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg font-semibold flex items-center space-x-1.5 transition">
                             <i class="fa-regular fa-calendar-check"></i>
                             <span>소비기한 일괄 저장</span>
                         </button>
@@ -4149,8 +4153,8 @@ HTML_TEMPLATE = """
                             S코드(B2B/세트)는 메인 보드에서 숨겨지며, 주문 시 지정한 <strong>단품 관리코드</strong> 출고량에 배수만큼 자동 합산됩니다.
                         </div>
                         <div class="flex items-center space-x-2">
-                            <button onclick="addAdminB2bRow()" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-semibold">+ S코드 매핑 추가</button>
-                            <button onclick="saveAdminB2bMappings()" class="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">매핑 저장</button>
+                            <button type="button" onclick="addAdminB2bRow()" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-semibold">+ S코드 매핑 추가</button>
+                            <button type="button" id="acB2bSaveBtn" onclick="saveAdminB2bMappings(this)" class="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg font-semibold inline-flex items-center space-x-1.5 transition">매핑 저장</button>
                         </div>
                     </div>
                     <div class="overflow-x-auto border border-slate-200 rounded-xl">
@@ -4209,7 +4213,7 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                     <div class="flex justify-end">
-                        <button onclick="saveAdminSettings()" class="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">
+                        <button type="button" id="acSettingsSaveBtn" onclick="saveAdminSettings(this)" class="px-5 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg font-semibold inline-flex items-center space-x-1.5 transition">
                             전역 기준 & PIN 저장
                         </button>
                     </div>
@@ -4228,10 +4232,10 @@ HTML_TEMPLATE = """
                             </div>
                             <div id="acDriveStatusBox" class="text-xs bg-white border border-slate-200 rounded-lg p-3 space-y-1"></div>
                             <div class="flex flex-wrap gap-2">
-                                <button onclick="syncDriveNow()" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">
+                                <button type="button" id="acDriveSyncBtn" onclick="syncDriveNow(false, this)" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg font-semibold inline-flex items-center space-x-1.5 transition">
                                     ☁️ Drive에 즉시 저장
                                 </button>
-                                <button onclick="pullDriveNow()" class="px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-semibold">
+                                <button type="button" id="acDrivePullBtn" onclick="pullDriveNow(this)" class="px-3.5 py-2 bg-white hover:bg-slate-100 disabled:opacity-60 disabled:cursor-not-allowed border border-slate-300 text-slate-800 rounded-lg font-semibold inline-flex items-center space-x-1.5 transition">
                                     ⬇️ Drive에서 즉시 복원
                                 </button>
                             </div>
@@ -4241,10 +4245,10 @@ HTML_TEMPLATE = """
                         <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                             <h4 class="font-bold text-slate-900 text-sm border-b border-slate-200 pb-2">로컬 JSON 백업 파일 & 시스템 도구</h4>
                             <div class="flex flex-wrap gap-2">
-                                <button onclick="downloadBackupJson()" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">
+                                <button type="button" onclick="downloadBackupJson()" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold">
                                     📥 전체 데이터 JSON 다운로드
                                 </button>
-                                <button onclick="document.getElementById('acBackupFileInput').click()" class="px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-semibold">
+                                <button type="button" onclick="document.getElementById('acBackupFileInput').click()" class="px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-semibold">
                                     📤 JSON 백업 파일 복원
                                 </button>
                                 <input type="file" id="acBackupFileInput" accept=".json" class="hidden" onchange="importBackupJsonFile(this)">
@@ -4253,7 +4257,7 @@ HTML_TEMPLATE = """
                                 <div class="text-[11px] text-slate-500">
                                     <strong class="text-slate-700">[테스트용] 샘플 CSV 로드</strong>: 실데이터가 샘플 CSV로 덮어씌워집니다.
                                 </div>
-                                <button onclick="loadSampleData()" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg font-semibold shrink-0">
+                                <button type="button" id="acSampleLoadBtn" onclick="loadSampleData(this)" class="px-3 py-1.5 bg-white hover:bg-slate-100 disabled:opacity-60 disabled:cursor-not-allowed border border-slate-300 text-slate-800 rounded-lg font-semibold shrink-0 inline-flex items-center space-x-1.5 transition">
                                     샘플 데이터 로드
                                 </button>
                             </div>
@@ -4405,7 +4409,7 @@ HTML_TEMPLATE = """
 
             <div class="bg-slate-50 border-t border-slate-200 px-5 py-3 flex items-center justify-end space-x-2 shrink-0">
                 <button type="button" onclick="closeCodeMappingModal()" class="px-4 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 transition">취소</button>
-                <button type="button" onclick="saveCodeMappingModal()" class="px-5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition flex items-center space-x-1.5">
+                <button type="button" id="cmSaveBtn" onclick="saveCodeMappingModal(this)" class="px-5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed text-white transition flex items-center space-x-1.5">
                     <i class="fa-solid fa-link"></i>
                     <span>코드 매핑 저장 및 반영</span>
                 </button>
@@ -4433,6 +4437,31 @@ HTML_TEMPLATE = """
             <div class="bg-slate-50 border-t border-slate-200 px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <div id="pd_modal_admin_actions" class="flex flex-wrap items-center gap-2"></div>
                 <button type="button" onclick="closeProductDetailModal()" class="ml-auto px-4 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 6. 인앱 알림 토스트 컨테이너 (z-[220]: Google Sites iframe alert() 차단 환경 대응) -->
+    <div id="appToastContainer" aria-live="polite" style="z-index: 220;" class="fixed top-4 left-1/2 -translate-x-1/2 z-[220] w-[calc(100%-1.5rem)] max-w-lg flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- 7. 인앱 확인(Confirm) 모달 (z-[210]: Google Sites iframe confirm() 차단 환경 대응) -->
+    <div id="appConfirmModal" onclick="if(event.target === this) resolveConfirmModal(false);" style="z-index: 210;" class="hidden fixed inset-0 z-[210] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden">
+            <div class="bg-slate-50 border-b border-slate-200 px-5 py-3 flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <i id="appConfirmIcon" class="fa-solid fa-circle-question text-slate-700"></i>
+                    <h3 id="appConfirmTitle" class="font-bold text-sm text-slate-900">확인</h3>
+                </div>
+                <button type="button" onclick="resolveConfirmModal(false)" class="text-slate-400 hover:text-slate-700 text-sm">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-5 space-y-4">
+                <p id="appConfirmMessage" class="text-xs sm:text-sm text-slate-700 leading-relaxed whitespace-pre-line break-words"></p>
+                <div class="flex items-center justify-end space-x-2 pt-1">
+                    <button type="button" id="appConfirmCancelBtn" onclick="resolveConfirmModal(false)" class="px-3.5 py-2 rounded-lg text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 transition">취소</button>
+                    <button type="button" id="appConfirmOkBtn" onclick="resolveConfirmModal(true)" class="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition">확인</button>
+                </div>
             </div>
         </div>
     </div>
@@ -4634,11 +4663,13 @@ HTML_TEMPLATE = """
             const m3 = document.getElementById('adminCenterModal');
             const m4 = document.getElementById('codeMappingModal');
             const m5 = document.getElementById('productDetailModal');
+            const m6 = document.getElementById('appConfirmModal');
             return (m1 && !m1.classList.contains('hidden')) ||
                    (m2 && !m2.classList.contains('hidden')) ||
                    (m3 && !m3.classList.contains('hidden')) ||
                    (m4 && !m4.classList.contains('hidden')) ||
-                   (m5 && !m5.classList.contains('hidden'));
+                   (m5 && !m5.classList.contains('hidden')) ||
+                   (m6 && !m6.classList.contains('hidden'));
         }
 
         function closeAdminMenu() {
@@ -4767,6 +4798,243 @@ HTML_TEMPLATE = """
             fetchSummary();
         }
 
+        // -------------------------------------------------------------
+        // Google Sites iframe 호환 인앱 알림 토스트 & 확인 모달 & 버튼 상태
+        // (sandboxed iframe에서 브라우저 기본 alert()/confirm() 차단 대응)
+        // -------------------------------------------------------------
+        function showAppToast(msg, variant = 'success', duration = null) {
+            const container = document.getElementById('appToastContainer');
+            const text = String(msg || '').trim();
+            if (!container || !text) return;
+
+            const v = (variant === 'error' || variant === 'warning' || variant === 'info') ? variant : 'success';
+            const styleMap = {
+                success: {
+                    card: 'bg-emerald-50 border-emerald-300 text-emerald-950 shadow-lg shadow-emerald-950/10',
+                    icon: 'fa-solid fa-circle-check text-emerald-600',
+                    closeBtn: 'text-emerald-700/70 hover:text-emerald-950'
+                },
+                warning: {
+                    card: 'bg-amber-50 border-amber-300 text-amber-950 shadow-lg shadow-amber-950/10',
+                    icon: 'fa-solid fa-triangle-exclamation text-amber-600',
+                    closeBtn: 'text-amber-700/70 hover:text-amber-950'
+                },
+                error: {
+                    card: 'bg-rose-50 border-rose-300 text-rose-950 shadow-lg shadow-rose-950/10',
+                    icon: 'fa-solid fa-circle-xmark text-rose-600',
+                    closeBtn: 'text-rose-700/70 hover:text-rose-950'
+                },
+                info: {
+                    card: 'bg-slate-900 border-slate-700 text-white shadow-lg shadow-slate-950/20',
+                    icon: 'fa-solid fa-circle-info text-sky-300',
+                    closeBtn: 'text-slate-300 hover:text-white'
+                }
+            }[v];
+
+            while (container.children.length >= 3 && container.firstElementChild) {
+                container.firstElementChild.remove();
+            }
+
+            const toastEl = document.createElement('div');
+            toastEl.setAttribute('role', v === 'error' ? 'alert' : 'status');
+            toastEl.className = `pointer-events-auto border rounded-xl px-4 py-3 text-xs font-bold flex items-start gap-2.5 transition-all duration-200 ${styleMap.card}`;
+
+            const iconEl = document.createElement('i');
+            iconEl.className = `${styleMap.icon} text-sm mt-0.5 shrink-0`;
+
+            const bodyEl = document.createElement('div');
+            bodyEl.className = 'flex-1 min-w-0 whitespace-pre-line break-words leading-relaxed';
+            bodyEl.textContent = text;
+
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.setAttribute('aria-label', '알림 닫기');
+            closeBtn.className = `shrink-0 px-1 text-sm leading-none transition ${styleMap.closeBtn}`;
+            closeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+
+            let removed = false;
+            const removeToast = () => {
+                if (removed) return;
+                removed = true;
+                toastEl.remove();
+            };
+            closeBtn.onclick = removeToast;
+
+            toastEl.appendChild(iconEl);
+            toastEl.appendChild(bodyEl);
+            toastEl.appendChild(closeBtn);
+            container.appendChild(toastEl);
+
+            const ms = (typeof duration === 'number' && duration >= 0)
+                ? duration
+                : (v === 'error' || v === 'warning' ? 7500 : 5000);
+            if (ms > 0) {
+                setTimeout(removeToast, ms);
+            }
+        }
+
+        function _renderInlineBanner(elId, timerKey, msg, variant = 'success', duration = 10000) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            const v = (variant === 'error' || variant === 'warning' || variant === 'info') ? variant : 'success';
+            const clsMap = {
+                success: 'px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-start justify-between gap-2 bg-emerald-50 border-emerald-300 text-emerald-900',
+                warning: 'px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-start justify-between gap-2 bg-amber-50 border-amber-300 text-amber-950',
+                error: 'px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-start justify-between gap-2 bg-rose-50 border-rose-300 text-rose-900',
+                info: 'px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-start justify-between gap-2 bg-slate-100 border-slate-300 text-slate-900'
+            };
+            el.className = clsMap[v];
+            if (elId === 'adminCenterToast') {
+                el.className += ' shrink-0 mx-4 sm:mx-5 mt-3';
+            }
+            el.innerHTML = '';
+
+            const textEl = document.createElement('div');
+            textEl.className = 'flex-1 min-w-0 whitespace-pre-line break-words leading-relaxed';
+            textEl.textContent = String(msg || '');
+
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.setAttribute('aria-label', '배너 닫기');
+            closeBtn.className = 'shrink-0 opacity-60 hover:opacity-100 text-sm leading-none px-1';
+            closeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+            closeBtn.onclick = () => el.classList.add('hidden');
+
+            el.appendChild(textEl);
+            el.appendChild(closeBtn);
+            el.classList.remove('hidden');
+
+            clearTimeout(window[timerKey]);
+            if (duration > 0) {
+                window[timerKey] = setTimeout(() => {
+                    el.classList.add('hidden');
+                }, duration);
+            }
+        }
+
+        function showAdminCenterToast(msg, variant = 'success', duration = 9000) {
+            const v = (variant === true) ? 'error' : (variant === false ? 'success' : variant);
+            _renderInlineBanner('adminCenterToast', '_adminCenterToastTimer', msg, v, duration);
+        }
+
+        function showAcBulkToast(msg, variant = 'success', duration = 10000) {
+            const v = (variant === true) ? 'error' : (variant === false ? 'success' : variant);
+            _renderInlineBanner('acBulkToast', '_acBulkToastTimer', msg, v, duration);
+        }
+
+        function hideAdminCenterToasts() {
+            ['adminCenterToast', 'acBulkToast', 'acMapToast'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
+            });
+        }
+
+        function getSaveFeedbackInfo(baseMsg, ds) {
+            const cleanBase = String(baseMsg || '저장 완료').replace(/^[✅⚠️\\s]+/, '').trim();
+            const hhmmss = new Date().toTimeString().slice(0, 8);
+            const warnNotice = formatDriveSyncNotice(ds);
+            if (warnNotice) {
+                return {
+                    variant: 'warning',
+                    message: `⚠️ ${cleanBase} (${hhmmss})${warnNotice}`
+                };
+            }
+            const syncedSuffix = (ds && ds.configured && ds.status === 'synced')
+                ? ' · Google Drive 동기화 완료'
+                : '';
+            return {
+                variant: 'success',
+                message: `✅ ${cleanBase}${syncedSuffix} (${hhmmss})`
+            };
+        }
+
+        function notifyUser(msg, variant = 'info', opts = {}) {
+            const text = String(msg || '').trim();
+            if (!text) return;
+            showAppToast(text, variant, opts.duration ?? null);
+            if (opts.bulkToast) {
+                showAcBulkToast(text, variant, opts.inlineDuration || 10000);
+            } else if (opts.mapToast && typeof showAcMapToast === 'function') {
+                showAcMapToast(text, variant === 'error' || variant === 'warning', { skipGlobalToast: true });
+            } else if (opts.centerToast) {
+                const centerEl = document.getElementById('adminCenterModal');
+                if (centerEl && !centerEl.classList.contains('hidden')) {
+                    showAdminCenterToast(text, variant, opts.inlineDuration || 9000);
+                }
+            }
+        }
+
+        function setButtonBusy(btnEl, isBusy, busyHtml = '<i class="fa-solid fa-spinner fa-spin"></i><span>저장 중...</span>') {
+            if (!btnEl) return;
+            if (isBusy) {
+                if (btnEl.dataset.busy !== '1') {
+                    btnEl.dataset.origHtml = btnEl.innerHTML;
+                    btnEl.dataset.origDisabled = btnEl.disabled ? '1' : '0';
+                }
+                btnEl.dataset.busy = '1';
+                btnEl.disabled = true;
+                if (busyHtml) btnEl.innerHTML = busyHtml;
+            } else {
+                delete btnEl.dataset.busy;
+                if (btnEl.dataset.origHtml !== undefined) {
+                    btnEl.innerHTML = btnEl.dataset.origHtml;
+                    delete btnEl.dataset.origHtml;
+                }
+                btnEl.disabled = (btnEl.dataset.origDisabled === '1');
+                delete btnEl.dataset.origDisabled;
+            }
+        }
+
+        let _appConfirmResolver = null;
+
+        function resolveConfirmModal(result) {
+            const modal = document.getElementById('appConfirmModal');
+            if (modal) modal.classList.add('hidden');
+            const resolver = _appConfirmResolver;
+            _appConfirmResolver = null;
+            if (resolver) resolver(Boolean(result));
+        }
+
+        function showConfirmModal(message, opts = {}) {
+            if (_appConfirmResolver) {
+                resolveConfirmModal(false);
+            }
+            const modal = document.getElementById('appConfirmModal');
+            const titleEl = document.getElementById('appConfirmTitle');
+            const msgEl = document.getElementById('appConfirmMessage');
+            const iconEl = document.getElementById('appConfirmIcon');
+            const okBtn = document.getElementById('appConfirmOkBtn');
+            const cancelBtn = document.getElementById('appConfirmCancelBtn');
+
+            if (!modal || !msgEl || !okBtn || !cancelBtn) {
+                return Promise.resolve(false);
+            }
+
+            const isDanger = Boolean(opts.danger);
+            if (titleEl) titleEl.textContent = opts.title || '확인';
+            msgEl.textContent = String(message || '');
+            okBtn.textContent = opts.okText || '확인';
+            cancelBtn.textContent = opts.cancelText || '취소';
+
+            if (iconEl) {
+                iconEl.className = isDanger
+                    ? 'fa-solid fa-triangle-exclamation text-rose-600'
+                    : 'fa-solid fa-circle-question text-slate-700';
+            }
+            okBtn.className = isDanger
+                ? 'px-4 py-2 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white transition'
+                : 'px-4 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition';
+
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                (isDanger ? cancelBtn : okBtn).focus();
+            }, 30);
+
+            return new Promise((resolve) => {
+                _appConfirmResolver = resolve;
+            });
+        }
+
         async function adminFetch(url, options = {}) {
             const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
             if (adminToken) headers['X-Admin-Token'] = adminToken;
@@ -4776,7 +5044,7 @@ HTML_TEMPLATE = """
                 adminToken = '';
                 try { sessionStorage.removeItem(ADMIN_TOKEN_KEY); } catch (e) {}
                 updateAdminUI();
-                alert('관리자 세션이 만료되었거나 인증이 필요합니다. 다시 PIN을 입력해주세요.');
+                notifyUser('관리자 세션이 만료되었거나 인증이 필요합니다. 다시 PIN을 입력해주세요.', 'warning');
                 openPinModal();
                 throw new Error('ADMIN_AUTH_REQUIRED');
             }
@@ -4883,10 +5151,13 @@ HTML_TEMPLATE = """
                         const ds = resJson.drive_sync || {};
                         if (ds.sync_blocked || ds.status === 'blocked') {
                             statusEl.innerText = `⚠️ ${resJson.message || (file.name + ' 반영')} · Drive 덮어쓰기 차단 상태 (상단 배너에서 Drive 복원 필요)`;
+                            notifyUser(statusEl.innerText, 'warning');
                         } else if (ds.status === 'error') {
                             statusEl.innerText = `⚠️ ${resJson.message || (file.name + ' 반영')} · Drive 동기화 실패 (${ds.last_error || '오류'})`;
+                            notifyUser(statusEl.innerText, 'warning');
                         } else {
                             statusEl.innerText = `✅ ${resJson.message || (file.name + ' 반영 완료!')}`;
+                            notifyUser(statusEl.innerText, 'success');
                         }
                         adminConfigCache = null;
                         await fetchSummary();
@@ -4897,44 +5168,80 @@ HTML_TEMPLATE = """
                         }
                     } else {
                         statusEl.innerText = `❌ ${resJson.message}`;
-                        alert(resJson.message);
+                        notifyUser(resJson.message || '파일 업로드 반영 실패', 'error');
                     }
                 } catch (err) {
                     statusEl.innerText = `❌ 오류: ${err.message}`;
-                    alert("파일 파싱 실패: " + err.message);
+                    notifyUser("파일 파싱 실패: " + err.message, 'error');
                 }
             };
             reader.readAsArrayBuffer(file);
         }
 
-        async function loadSampleData() {
+        async function loadSampleData(btnEl = null) {
             if (!isAdminMode) {
                 openPinModal();
                 return;
             }
-            if (!confirm("현재 재고 수량을 테스트용 샘플 CSV 데이터로 덮어쓰시겠습니까? (관리자 마스터 설정은 유지됩니다)")) return;
+            const ok = await showConfirmModal(
+                "현재 재고 수량을 테스트용 샘플 CSV 데이터로 덮어쓰시겠습니까?\\n(관리자 마스터 설정은 유지됩니다)",
+                { title: '샘플 데이터 로드', okText: '덮어쓰고 로드', danger: true }
+            );
+            if (!ok) return;
+            const targetBtn = btnEl || document.getElementById('acSampleLoadBtn');
+            if (targetBtn && targetBtn.dataset.busy === '1') return;
+            setButtonBusy(targetBtn, true, '<i class="fa-solid fa-spinner fa-spin"></i><span>로드 중...</span>');
             try {
                 const res = await adminFetch('/api/load-sample', { method: 'POST' });
                 const json = await res.json();
                 if (json.success) {
-                    alert("✨ 개미창고(소비기한 포함), 쿠팡윙, 타채널 매출 샘플 데이터가 성공적으로 로드되었습니다!");
-                    fetchSummary();
+                    const fb = getSaveFeedbackInfo("개미창고(소비기한 포함), 쿠팡윙, 타채널 매출 샘플 데이터가 성공적으로 로드되었습니다!", json.drive_sync);
+                    notifyUser(fb.message, fb.variant, { centerToast: true });
+                    adminConfigCache = null;
+                    await fetchSummary();
+                    const centerEl = document.getElementById('adminCenterModal');
+                    if (centerEl && !centerEl.classList.contains('hidden')) {
+                        await ensureAdminConfig();
+                        renderAdminCenterTabs();
+                    }
                 } else {
-                    alert("로드 실패: " + json.message);
+                    notifyUser("로드 실패: " + json.message, 'error', { centerToast: true });
                 }
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert("샘플 로드 오류: " + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser("샘플 로드 오류: " + err.message, 'error', { centerToast: true });
+            } finally {
+                setButtonBusy(targetBtn, false);
             }
         }
 
         function copyPublicUrl() {
             if (!publicTunnelUrl) {
-                alert("아직 연동 주소가 생성되지 않았습니다.");
+                notifyUser("아직 연동 주소가 생성되지 않았습니다.", 'warning');
                 return;
             }
-            navigator.clipboard.writeText(publicTunnelUrl).then(() => {
-                alert("구글 사이트 연동용 HTTPS 주소가 복사되었습니다!\\n\\n" + publicTunnelUrl);
-            });
+            const fallbackCopy = () => {
+                const ta = document.createElement('textarea');
+                ta.value = publicTunnelUrl;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                let ok = false;
+                try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+                ta.remove();
+                if (ok) {
+                    notifyUser("✅ 구글 사이트 연동용 HTTPS 주소가 복사되었습니다!\\n" + publicTunnelUrl, 'success');
+                } else {
+                    notifyUser("⚠️ 자동 복사가 차단되었습니다. 주소: " + publicTunnelUrl, 'warning');
+                }
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(publicTunnelUrl).then(() => {
+                    notifyUser("✅ 구글 사이트 연동용 HTTPS 주소가 복사되었습니다!\\n" + publicTunnelUrl, 'success');
+                }).catch(fallbackCopy);
+            } else {
+                fallbackCopy();
+            }
         }
 
         function toggleAllOptionDetails() {
@@ -5282,6 +5589,8 @@ HTML_TEMPLATE = """
 
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Escape') return;
+            const acf = document.getElementById('appConfirmModal');
+            if (acf && !acf.classList.contains('hidden')) { resolveConfirmModal(false); return; }
             const cm = document.getElementById('codeMappingModal');
             if (cm && !cm.classList.contains('hidden')) { closeCodeMappingModal(); return; }
             const ep = document.getElementById('editProductModal');
@@ -5306,7 +5615,7 @@ HTML_TEMPLATE = """
                 const target = masters.find(m => m.id === prodId || m.seller_code === prodId);
                 if (!target) {
                     if (btnEl) btnEl.disabled = false;
-                    alert('대상 마스터 상품을 찾지 못했습니다.');
+                    notifyUser('대상 마스터 상품을 찾지 못했습니다.', 'error');
                     return;
                 }
                 const nextOpts = (target.options || []).map(o => {
@@ -5332,7 +5641,7 @@ HTML_TEMPLATE = """
                 const json = await res.json();
                 if (!res.ok || !json.success) {
                     if (btnEl) btnEl.disabled = false;
-                    alert(json.message || '반품 구분 변경 실패');
+                    notifyUser(json.message || '반품 구분 변경 실패', 'error');
                     return;
                 }
                 expandedRowIds.add(prodId);
@@ -5342,9 +5651,12 @@ HTML_TEMPLATE = """
                 if (centerEl && !centerEl.classList.contains('hidden')) {
                     renderAdminCenterTabs();
                 }
+                const retMsg = makeReturn ? '반품 재고 옵션으로 분류되었습니다.' : '정상 재고 옵션으로 복원되었습니다.';
+                const fb = getSaveFeedbackInfo(retMsg, json.drive_sync);
+                notifyUser(fb.message, fb.variant);
             } catch (err) {
                 if (btnEl) btnEl.disabled = false;
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('반품 구분 변경 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('반품 구분 변경 오류: ' + err.message, 'error');
             }
         }
 
@@ -6663,7 +6975,7 @@ HTML_TEMPLATE = """
                 });
             }
             if (!item) {
-                alert('대상 상품 정보를 찾을 수 없습니다.');
+                notifyUser('대상 상품 정보를 찾을 수 없습니다.', 'error');
                 return;
             }
 
@@ -6960,11 +7272,11 @@ HTML_TEMPLATE = """
             box.innerHTML = html;
         }
 
-        async function saveProductModal() {
+        async function saveProductModal(btnEl = null) {
             const sellerCode = document.getElementById('ep_seller_code').value.trim();
             const name = document.getElementById('ep_name').value.trim();
             if (!sellerCode || !name) {
-                alert('판매자관리코드와 마스터 상품명은 필수입니다.');
+                notifyUser('판매자관리코드와 마스터 상품명은 필수입니다.', 'warning');
                 return;
             }
 
@@ -7056,6 +7368,9 @@ HTML_TEMPLATE = """
                 payload.gaemi_mappings = [];
             }
 
+            const targetBtn = btnEl || document.getElementById('epSaveBtn');
+            if (targetBtn && targetBtn.dataset.busy === '1') return;
+            setButtonBusy(targetBtn, true, '<i class="fa-solid fa-spinner fa-spin"></i><span>저장 중...</span>');
             try {
                 const res = await adminFetch('/api/admin/product/save', {
                     method: 'POST',
@@ -7063,20 +7378,24 @@ HTML_TEMPLATE = """
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    alert(json.message || '저장 실패');
+                    notifyUser(json.message || '저장 실패', 'error');
                     return;
                 }
                 closeEditProductModal();
                 await fetchSummary();
-                if (adminConfigCache || !document.getElementById('adminCenterModal').classList.contains('hidden')) {
+                const centerOpen = !document.getElementById('adminCenterModal').classList.contains('hidden');
+                if (adminConfigCache || centerOpen) {
                     await ensureAdminConfig();
-                    if (!document.getElementById('adminCenterModal').classList.contains('hidden')) {
+                    if (centerOpen) {
                         renderAdminCenterTabs();
                     }
                 }
-                alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
+                const fb = getSaveFeedbackInfo(json.message, json.drive_sync);
+                notifyUser(fb.message, fb.variant, { centerToast: centerOpen });
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('저장 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('저장 오류: ' + err.message, 'error');
+            } finally {
+                setButtonBusy(targetBtn, false);
             }
         }
 
@@ -7087,13 +7406,21 @@ HTML_TEMPLATE = """
             const msg = isCurrentlyActive
                 ? '이 상품을 메인 대시보드에서 숨기시겠습니까? (관리자 센터에서 언제든 복원 가능)'
                 : '이 상품을 메인 대시보드에 다시 노출하시겠습니까?';
-            if (!confirm(msg)) return;
+            const ok = await showConfirmModal(msg, {
+                title: isCurrentlyActive ? '상품 숨김 확인' : '상품 노출 복원',
+                okText: isCurrentlyActive ? '숨김 처리' : '다시 노출'
+            });
+            if (!ok) return;
             await executeDeleteProduct(mode);
         }
 
         async function deleteCurrentProductHard() {
             const code = document.getElementById('ep_seller_code').value.trim();
-            if (!confirm(`[${code}] 상품을 마스터 목록에서 영구 삭제하시겠습니까?\\n이 작업은 되돌릴 수 없습니다.`)) return;
+            const ok = await showConfirmModal(
+                `[${code}] 상품을 마스터 목록에서 영구 삭제하시겠습니까?\\n이 작업은 되돌릴 수 없습니다.`,
+                { title: '상품 영구 삭제 확인', okText: '영구 삭제', danger: true }
+            );
+            if (!ok) return;
             await executeDeleteProduct('hard');
         }
 
@@ -7109,17 +7436,23 @@ HTML_TEMPLATE = """
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    alert(json.message || '처리 실패');
+                    notifyUser(json.message || '처리 실패', 'error');
                     return;
                 }
                 closeEditProductModal();
                 await fetchSummary();
-                if (!document.getElementById('adminCenterModal').classList.contains('hidden')) {
+                const centerOpen = !document.getElementById('adminCenterModal').classList.contains('hidden');
+                if (centerOpen) {
                     await ensureAdminConfig();
                     renderAdminCenterTabs();
                 }
+                const defaultMsg = mode === 'hard'
+                    ? '상품이 영구 삭제되었습니다.'
+                    : (mode === 'hide' ? '상품이 대시보드에서 숨김 처리되었습니다.' : '상품이 대시보드에 다시 노출되었습니다.');
+                const fb = getSaveFeedbackInfo(json.message || defaultMsg, json.drive_sync);
+                notifyUser(fb.message, fb.variant, { centerToast: centerOpen });
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('처리 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('처리 오류: ' + err.message, 'error');
             }
         }
 
@@ -7130,17 +7463,19 @@ HTML_TEMPLATE = """
 
         async function openAdminCenter(tabName = 'bulk') {
             if (!isAdminMode) { openPinModal(); return; }
+            hideAdminCenterToasts();
             document.getElementById('adminCenterModal').classList.remove('hidden');
             switchAdminTab(tabName);
             try {
                 await ensureAdminConfig();
                 renderAdminCenterTabs();
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('관리자 설정 불러오기 실패: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('관리자 설정 불러오기 실패: ' + err.message, 'error', { centerToast: true });
             }
         }
 
         function closeAdminCenter() {
+            hideAdminCenterToasts();
             const m = document.getElementById('adminCenterModal');
             if (m) m.classList.add('hidden');
             fetchSummary();
@@ -7214,7 +7549,10 @@ HTML_TEMPLATE = """
             }).join('');
         }
 
-        async function saveAdminBulkProducts() {
+        async function saveAdminBulkProducts(btnEl = null) {
+            const targetBtn = btnEl || document.getElementById('acBulkSaveBtn');
+            if (targetBtn && targetBtn.dataset.busy === '1') return;
+
             const products = [];
             document.querySelectorAll('#acBulkTbody .ac-bulk-row').forEach(tr => {
                 products.push({
@@ -7231,6 +7569,11 @@ HTML_TEMPLATE = """
                     note: tr.querySelector('.ac-b-note').value.trim()
                 });
             });
+            if (products.length === 0) {
+                notifyUser('저장할 표시 품목이 없습니다. 검색어 또는 숨김 필터를 확인해주세요.', 'warning', { bulkToast: true });
+                return;
+            }
+            setButtonBusy(targetBtn, true, '<i class="fa-solid fa-spinner fa-spin"></i><span>저장 중...</span>');
             try {
                 const res = await adminFetch('/api/admin/products/bulk-save', {
                     method: 'POST',
@@ -7238,15 +7581,18 @@ HTML_TEMPLATE = """
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    alert(json.message || '일괄 저장 실패');
+                    notifyUser(json.message || '일괄 저장 실패', 'error', { bulkToast: true });
                     return;
                 }
                 await ensureAdminConfig();
                 await fetchSummary();
                 renderAdminCenterTabs();
-                alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
+                const fb = getSaveFeedbackInfo(json.message, json.drive_sync);
+                notifyUser(fb.message, fb.variant, { bulkToast: true });
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('일괄 저장 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('일괄 저장 오류: ' + err.message, 'error', { bulkToast: true });
+            } finally {
+                setButtonBusy(targetBtn, false);
             }
         }
 
@@ -7358,7 +7704,9 @@ HTML_TEMPLATE = """
             }).join('');
         }
 
-        async function saveAdminExpiryBulk() {
+        async function saveAdminExpiryBulk(btnEl = null) {
+            const targetBtn = btnEl || document.getElementById('acExpirySaveBtn');
+            if (targetBtn && targetBtn.dataset.busy === '1') return;
             const products = [];
             const lotOverrides = {};
 
@@ -7384,10 +7732,11 @@ HTML_TEMPLATE = """
             });
 
             if (products.length === 0 && Object.keys(lotOverrides).length === 0) {
-                alert('변경된 소비기한 항목이 없습니다.');
+                notifyUser('변경된 소비기한 항목이 없습니다.', 'warning', { centerToast: true });
                 return;
             }
 
+            setButtonBusy(targetBtn, true, '<i class="fa-solid fa-spinner fa-spin"></i><span>저장 중...</span>');
             try {
                 const res = await adminFetch('/api/admin/products/bulk-save', {
                     method: 'POST',
@@ -7395,15 +7744,18 @@ HTML_TEMPLATE = """
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    alert(json.message || '소비기한 일괄 저장 실패');
+                    notifyUser(json.message || '소비기한 일괄 저장 실패', 'error', { centerToast: true });
                     return;
                 }
                 await ensureAdminConfig();
                 await fetchSummary();
                 renderAdminCenterTabs();
-                alert('✅ 소비기한 일괄 반영 완료!' + formatDriveSyncNotice(json.drive_sync));
+                const fb = getSaveFeedbackInfo('소비기한 일괄 반영 완료!', json.drive_sync);
+                notifyUser(fb.message, fb.variant, { centerToast: true });
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('소비기한 저장 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('소비기한 저장 오류: ' + err.message, 'error', { centerToast: true });
+            } finally {
+                setButtonBusy(targetBtn, false);
             }
         }
 
@@ -7441,7 +7793,9 @@ HTML_TEMPLATE = """
             tbody.appendChild(tr);
         }
 
-        async function saveAdminB2bMappings() {
+        async function saveAdminB2bMappings(btnEl = null) {
+            const targetBtn = btnEl || document.getElementById('acB2bSaveBtn');
+            if (targetBtn && targetBtn.dataset.busy === '1') return;
             const mappings = [];
             document.querySelectorAll('#acB2bTbody .ac-b2b-row').forEach(tr => {
                 const s_code = tr.querySelector('.ac-b2b-s').value.trim().toUpperCase();
@@ -7450,6 +7804,7 @@ HTML_TEMPLATE = """
                 const desc = tr.querySelector('.ac-b2b-desc').value.trim();
                 if (s_code && base_code) mappings.push({ s_code, base_code, multiplier, desc });
             });
+            setButtonBusy(targetBtn, true, '<i class="fa-solid fa-spinner fa-spin"></i><span>저장 중...</span>');
             try {
                 const res = await adminFetch('/api/admin/b2b-mappings/save', {
                     method: 'POST',
@@ -7457,15 +7812,18 @@ HTML_TEMPLATE = """
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    alert(json.message || 'B2B 매핑 저장 실패');
+                    notifyUser(json.message || 'B2B 매핑 저장 실패', 'error', { centerToast: true });
                     return;
                 }
                 await ensureAdminConfig();
                 await fetchSummary();
                 renderAdminCenterTabs();
-                alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
+                const fb = getSaveFeedbackInfo(json.message, json.drive_sync);
+                notifyUser(fb.message, fb.variant, { centerToast: true });
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('B2B 매핑 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('B2B 매핑 오류: ' + err.message, 'error', { centerToast: true });
+            } finally {
+                setButtonBusy(targetBtn, false);
             }
         }
 
@@ -7490,7 +7848,9 @@ HTML_TEMPLATE = """
             }
         }
 
-        async function saveAdminSettings() {
+        async function saveAdminSettings(btnEl = null) {
+            const targetBtn = btnEl || document.getElementById('acSettingsSaveBtn');
+            if (targetBtn && targetBtn.dataset.busy === '1') return;
             const payload = {
                 default_import_lead_time: parseInt(document.getElementById('acSetImportLt').value || '110', 10),
                 default_import_buffer: parseInt(document.getElementById('acSetImportBuf').value || '20', 10),
@@ -7499,6 +7859,7 @@ HTML_TEMPLATE = """
                 default_expiry_warn_days: parseInt(document.getElementById('acSetExpWarn').value || '120', 10),
                 new_pin: document.getElementById('acSetNewPin').value.trim()
             };
+            setButtonBusy(targetBtn, true, '<i class="fa-solid fa-spinner fa-spin"></i><span>저장 중...</span>');
             try {
                 const res = await adminFetch('/api/admin/settings/save', {
                     method: 'POST',
@@ -7506,7 +7867,7 @@ HTML_TEMPLATE = """
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    alert(json.message || '설정 저장 실패');
+                    notifyUser(json.message || '설정 저장 실패', 'error', { centerToast: true });
                     return;
                 }
                 if (json.new_token) {
@@ -7516,9 +7877,12 @@ HTML_TEMPLATE = """
                 await ensureAdminConfig();
                 await fetchSummary();
                 renderAdminCenterTabs();
-                alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
+                const fb = getSaveFeedbackInfo(json.message, json.drive_sync);
+                notifyUser(fb.message, fb.variant, { centerToast: true });
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('설정 저장 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('설정 저장 오류: ' + err.message, 'error', { centerToast: true });
+            } finally {
+                setButtonBusy(targetBtn, false);
             }
         }
 
@@ -7543,7 +7907,10 @@ HTML_TEMPLATE = """
             document.getElementById('acGasCodePreview').textContent = adminConfigCache.gas_script || '// google_apps_script_bridge.gs 파일 내용을 불러올 수 없습니다.';
         }
 
-        async function syncDriveNow(force = false) {
+        async function syncDriveNow(force = false, btnEl = null) {
+            const targetBtn = btnEl || document.getElementById('acDriveSyncBtn');
+            if (targetBtn && targetBtn.dataset.busy === '1') return;
+            setButtonBusy(targetBtn, true, '<i class="fa-solid fa-spinner fa-spin"></i><span>Drive 저장 중...</span>');
             try {
                 const res = await adminFetch('/api/admin/drive/sync-now', {
                     method: 'POST',
@@ -7551,8 +7918,13 @@ HTML_TEMPLATE = """
                 });
                 const json = await res.json();
                 if (res.status === 409 && json.require_force && !force) {
-                    if (confirm(`⚠️ ${json.message}\\n\\n정말 현재 서버 상태로 Google Drive 기존 데이터를 강제 덮어쓰기(백업)하시겠습니까?`)) {
-                        return await syncDriveNow(true);
+                    setButtonBusy(targetBtn, false);
+                    const ok = await showConfirmModal(
+                        `⚠️ ${json.message}\\n\\n정말 현재 서버 상태로 Google Drive 기존 데이터를 강제 덮어쓰기(백업)하시겠습니까?`,
+                        { title: 'Google Drive 강제 덮어쓰기 확인', okText: '강제 덮어쓰기', danger: true }
+                    );
+                    if (ok) {
+                        return await syncDriveNow(true, targetBtn);
                     }
                     await ensureAdminConfig();
                     renderAdminDriveTab();
@@ -7562,23 +7934,42 @@ HTML_TEMPLATE = """
                 await ensureAdminConfig();
                 renderAdminDriveTab();
                 fetchSummary();
-                alert(json.success ? ('✅ ' + json.message) : ('⚠️ ' + json.message));
+                if (json.success) {
+                    notifyUser('✅ ' + json.message, 'success', { centerToast: true });
+                } else {
+                    notifyUser('⚠️ ' + (json.message || 'Drive 저장 실패'), 'warning', { centerToast: true });
+                }
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('Drive 저장 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('Drive 저장 오류: ' + err.message, 'error', { centerToast: true });
+            } finally {
+                setButtonBusy(targetBtn, false);
             }
         }
 
-        async function pullDriveNow() {
-            if (!confirm('Google Drive에 저장된 최신 백업으로 현재 서버의 모든 데이터를 덮어쓰고 복원하시겠습니까?')) return;
+        async function pullDriveNow(btnEl = null) {
+            const ok = await showConfirmModal(
+                'Google Drive에 저장된 최신 백업으로 현재 서버의 모든 데이터를 덮어쓰고 복원하시겠습니까?',
+                { title: 'Google Drive 복원 확인', okText: 'Drive에서 복원', danger: true }
+            );
+            if (!ok) return;
+            const targetBtn = btnEl || document.getElementById('acDrivePullBtn');
+            if (targetBtn && targetBtn.dataset.busy === '1') return;
+            setButtonBusy(targetBtn, true, '<i class="fa-solid fa-spinner fa-spin"></i><span>복원 중...</span>');
             try {
                 const res = await adminFetch('/api/admin/drive/pull-now', { method: 'POST' });
                 const json = await res.json();
                 await ensureAdminConfig();
                 renderAdminCenterTabs();
                 await fetchSummary();
-                alert(json.success ? ('✅ ' + json.message) : ('⚠️ ' + json.message));
+                if (json.success) {
+                    notifyUser('✅ ' + json.message, 'success', { centerToast: true });
+                } else {
+                    notifyUser('⚠️ ' + (json.message || 'Drive 복원 실패'), 'warning', { centerToast: true });
+                }
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('Drive 복원 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('Drive 복원 오류: ' + err.message, 'error', { centerToast: true });
+            } finally {
+                setButtonBusy(targetBtn, false);
             }
         }
 
@@ -7594,8 +7985,9 @@ HTML_TEMPLATE = """
                 a.click();
                 a.remove();
                 URL.revokeObjectURL(url);
+                notifyUser('✅ 전체 데이터 JSON 백업 파일을 다운로드했습니다.', 'success', { centerToast: true });
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('백업 다운로드 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('백업 다운로드 오류: ' + err.message, 'error', { centerToast: true });
             }
         }
 
@@ -7606,22 +7998,27 @@ HTML_TEMPLATE = """
             reader.onload = async function(e) {
                 try {
                     const parsed = JSON.parse(e.target.result);
-                    if (!confirm(`'${file.name}' 백업 파일로 전체 마스터/재고 데이터를 복원하시겠습니까?`)) return;
+                    const ok = await showConfirmModal(
+                        `'${file.name}' 백업 파일로 전체 마스터/재고 데이터를 복원하시겠습니까?`,
+                        { title: 'JSON 백업 파일 복원', okText: '복원 실행', danger: true }
+                    );
+                    if (!ok) return;
                     const res = await adminFetch('/api/admin/backup/import', {
                         method: 'POST',
                         body: JSON.stringify({ data: parsed })
                     });
                     const json = await res.json();
                     if (!res.ok || !json.success) {
-                        alert(json.message || '백업 복원 실패');
+                        notifyUser(json.message || '백업 복원 실패', 'error', { centerToast: true });
                         return;
                     }
                     await ensureAdminConfig();
                     renderAdminCenterTabs();
                     await fetchSummary();
-                    alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
+                    const fb = getSaveFeedbackInfo(json.message, json.drive_sync);
+                    notifyUser(fb.message, fb.variant, { centerToast: true });
                 } catch (err) {
-                    if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('JSON 백업 파일 파싱/복원 오류: ' + err.message);
+                    if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('JSON 백업 파일 파싱/복원 오류: ' + err.message, 'error', { centerToast: true });
                 } finally {
                     inputEl.value = '';
                 }
@@ -7632,7 +8029,7 @@ HTML_TEMPLATE = """
         function copyGasScript() {
             const code = (adminConfigCache && adminConfigCache.gas_script) || document.getElementById('acGasCodePreview').textContent;
             if (!code) {
-                alert('복사할 스크립트 내용이 없습니다.');
+                notifyUser('복사할 스크립트 내용이 없습니다.', 'warning', { centerToast: true });
                 return;
             }
             const fallbackCopy = () => {
@@ -7642,14 +8039,15 @@ HTML_TEMPLATE = """
                 ta.style.opacity = '0';
                 document.body.appendChild(ta);
                 ta.select();
-                const ok = document.execCommand('copy');
+                let ok = false;
+                try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
                 ta.remove();
-                if (ok) alert('Google Apps Script (.gs) 전체 코드가 클립보드에 복사되었습니다!');
-                else alert('자동 복사가 차단되었습니다. 아래 코드 영역을 직접 선택해 복사해주세요.');
+                if (ok) notifyUser('✅ Google Apps Script (.gs) 전체 코드가 클립보드에 복사되었습니다!', 'success', { centerToast: true });
+                else notifyUser('⚠️ 자동 복사가 차단되었습니다. 아래 코드 영역을 직접 선택해 복사해주세요.', 'warning', { centerToast: true });
             };
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(code).then(() => {
-                    alert('Google Apps Script (.gs) 전체 코드가 클립보드에 복사되었습니다!');
+                    notifyUser('✅ Google Apps Script (.gs) 전체 코드가 클립보드에 복사되었습니다!', 'success', { centerToast: true });
                 }).catch(fallbackCopy);
             } else {
                 fallbackCopy();
@@ -7908,18 +8306,22 @@ HTML_TEMPLATE = """
             return null;
         }
 
-        function showAcMapToast(msg, isError = false) {
+        function showAcMapToast(msg, isError = false, opts = {}) {
             const el = document.getElementById('acMapToast');
-            if (!el) return;
-            el.className = isError
-                ? 'px-3 py-2 rounded-lg text-xs font-bold bg-rose-50 border border-rose-300 text-rose-900'
-                : 'px-3 py-2 rounded-lg text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900';
-            el.innerText = msg;
-            el.classList.remove('hidden');
-            clearTimeout(window._acMapToastTimer);
-            window._acMapToastTimer = setTimeout(() => {
-                el.classList.add('hidden');
-            }, 3500);
+            if (el) {
+                el.className = isError
+                    ? 'px-3 py-2 rounded-lg text-xs font-bold bg-rose-50 border border-rose-300 text-rose-900'
+                    : 'px-3 py-2 rounded-lg text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900';
+                el.innerText = msg;
+                el.classList.remove('hidden');
+                clearTimeout(window._acMapToastTimer);
+                window._acMapToastTimer = setTimeout(() => {
+                    el.classList.add('hidden');
+                }, 5000);
+            }
+            if (!opts.skipGlobalToast) {
+                showAppToast(msg, isError ? 'error' : 'success');
+            }
         }
 
         function renderAdminMappingTab() {
@@ -8378,7 +8780,11 @@ HTML_TEMPLATE = """
 
             if (scope === 'filtered' && keys.length > 1) {
                 const verb = shouldHide ? '숨김 처리' : '복원';
-                if (!confirm(`현재 필터 결과의 미매핑 항목 ${keys.length}건을 한 번에 ${verb}하시겠습니까?`)) return;
+                const ok = await showConfirmModal(
+                    `현재 필터 결과의 미매핑 항목 ${keys.length}건을 한 번에 ${verb}하시겠습니까?`,
+                    { title: `미매핑 일괄 ${verb}`, okText: verb }
+                );
+                if (!ok) return;
             }
 
             if (btnEl) btnEl.disabled = true;
@@ -8393,7 +8799,7 @@ HTML_TEMPLATE = """
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    alert(json.message || '일괄 변경 실패');
+                    notifyUser(json.message || '일괄 변경 실패', 'error', { mapToast: true });
                     return;
                 }
                 keys.forEach(k => acMapSelectedExpKeys.delete(k));
@@ -8408,7 +8814,7 @@ HTML_TEMPLATE = """
                     : `👁️ ${keys.length}건의 숨김을 일괄 복원했습니다.`;
                 showAcMapToast(toastMsg);
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('일괄 변경 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('일괄 변경 오류: ' + err.message, 'error', { mapToast: true });
             } finally {
                 if (btnEl) btnEl.disabled = false;
                 updateAcMapExplorerSelectionUI();
@@ -8438,7 +8844,7 @@ HTML_TEMPLATE = """
                 const json = await res.json();
                 if (!res.ok || !json.success) {
                     if (btnEl) btnEl.disabled = false;
-                    alert(json.message || '숨김 처리 저장 실패');
+                    notifyUser(json.message || '숨김 처리 저장 실패', 'error', { mapToast: true });
                     return;
                 }
                 acMapSelectedExpKeys.delete(row.expKey);
@@ -8454,7 +8860,7 @@ HTML_TEMPLATE = """
                 showAcMapToast(actionDesc);
             } catch (err) {
                 if (btnEl) btnEl.disabled = false;
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('숨김 처리 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('숨김 처리 오류: ' + err.message, 'error', { mapToast: true });
             }
         }
 
@@ -8463,7 +8869,11 @@ HTML_TEMPLATE = """
                 ? adminConfigCache.hidden_unmapped_codes.length
                 : 0;
             if (hiddenCount === 0) return;
-            if (!confirm(`숨김 처리된 미매핑 항목 ${hiddenCount}건을 모두 다시 표시(복원)하시겠습니까?`)) return;
+            const ok = await showConfirmModal(
+                `숨김 처리된 미매핑 항목 ${hiddenCount}건을 모두 다시 표시(복원)하시겠습니까?`,
+                { title: '미매핑 숨김 전체 복원', okText: '전체 복원' }
+            );
+            if (!ok) return;
             try {
                 const res = await adminFetch('/api/admin/unmapped-explorer/hidden', {
                     method: 'POST',
@@ -8471,7 +8881,7 @@ HTML_TEMPLATE = """
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    alert(json.message || '전체 복원 실패');
+                    notifyUser(json.message || '전체 복원 실패', 'error', { mapToast: true });
                     return;
                 }
                 acMapSelectedExpKeys.clear();
@@ -8487,7 +8897,7 @@ HTML_TEMPLATE = """
                 renderAdminMappingExplorer();
                 showAcMapToast(`👁️ 숨김 처리되었던 ${hiddenCount}건이 모두 복원되었습니다.`);
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('전체 복원 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('전체 복원 오류: ' + err.message, 'error', { mapToast: true });
             }
         }
 
@@ -8498,12 +8908,12 @@ HTML_TEMPLATE = """
             const selectEl = tr ? tr.querySelector('.ac-map-exp-target') : null;
             const targetId = selectEl ? selectEl.value : '';
             if (!targetId) {
-                alert('먼저 연결할 마스터 상품을 선택하세요.');
+                notifyUser('먼저 연결할 마스터 상품을 선택하세요.', 'warning', { mapToast: true });
                 return;
             }
             const target = (adminConfigCache.master_products || []).find(m => m.id === targetId || m.seller_code === targetId);
             if (!target) {
-                alert('선택한 마스터 상품을 찾을 수 없습니다.');
+                notifyUser('선택한 마스터 상품을 찾을 수 없습니다.', 'error', { mapToast: true });
                 return;
             }
 
@@ -8557,7 +8967,7 @@ HTML_TEMPLATE = """
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    alert(json.message || '연결 실패');
+                    notifyUser(json.message || '연결 실패', 'error', { mapToast: true });
                     return;
                 }
                 await ensureAdminConfig();
@@ -8565,7 +8975,7 @@ HTML_TEMPLATE = """
                 await fetchSummary();
                 showAcMapToast(`✅ [${target.seller_code}] ${target.name}에 코드가 연결되었습니다.`);
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('연결 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('연결 오류: ' + err.message, 'error', { mapToast: true });
             }
         }
 
@@ -8731,7 +9141,7 @@ HTML_TEMPLATE = """
             const cfg = adminConfigCache || {};
             const target = (cfg.master_products || []).find(m => m.id === prodId || m.seller_code === prodId);
             if (!target) {
-                alert('대상 마스터 상품을 찾을 수 없습니다.');
+                notifyUser('대상 마스터 상품을 찾을 수 없습니다.', 'error');
                 return;
             }
 
@@ -9068,7 +9478,7 @@ HTML_TEMPLATE = """
             const gCode = String(codeEl.value || '').trim();
             const optName = String(optEl.value || '').trim();
             if (!gCode) {
-                alert('개미 상품코드를 입력해주세요.');
+                notifyUser('개미 상품코드를 입력해주세요.', 'warning');
                 codeEl.focus();
                 return;
             }
@@ -9229,7 +9639,7 @@ HTML_TEMPLATE = """
             const retEl = document.getElementById('cm_coupang_return_input');
             const oid = String(idEl.value || '').trim();
             if (!oid) {
-                alert('쿠팡 옵션 ID를 입력해주세요.');
+                notifyUser('쿠팡 옵션 ID를 입력해주세요.', 'warning');
                 idEl.focus();
                 return;
             }
@@ -9361,7 +9771,9 @@ HTML_TEMPLATE = """
             renderCmCoupangCsvList();
         }
 
-        async function saveCodeMappingModal() {
+        async function saveCodeMappingModal(btnEl = null) {
+            const targetBtn = btnEl || document.getElementById('cmSaveBtn');
+            if (targetBtn && targetBtn.dataset.busy === '1') return;
             const payload = {
                 id: cmState.id,
                 seller_code: cmState.seller_code,
@@ -9379,6 +9791,7 @@ HTML_TEMPLATE = """
                 })
             };
 
+            setButtonBusy(targetBtn, true, '<i class="fa-solid fa-spinner fa-spin"></i><span>저장 중...</span>');
             try {
                 const res = await adminFetch('/api/admin/product/mappings/save', {
                     method: 'POST',
@@ -9386,7 +9799,7 @@ HTML_TEMPLATE = """
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    alert(json.message || '코드 매핑 저장 실패');
+                    notifyUser(json.message || '코드 매핑 저장 실패', 'error');
                     return;
                 }
                 closeCodeMappingModal();
@@ -9394,16 +9807,21 @@ HTML_TEMPLATE = """
                 await fetchSummary();
                 syncEditModalFromSavedProduct(json.product);
                 const centerOpen = !document.getElementById('adminCenterModal').classList.contains('hidden');
+                const fb = getSaveFeedbackInfo(json.message, json.drive_sync);
                 if (centerOpen) {
                     renderAdminCenterTabs();
-                    if (activeAdminTab === 'mapping') {
-                        showAcMapToast('✅ ' + json.message);
-                    }
+                    notifyUser(fb.message, fb.variant, {
+                        mapToast: activeAdminTab === 'mapping',
+                        bulkToast: activeAdminTab === 'bulk',
+                        centerToast: activeAdminTab !== 'mapping' && activeAdminTab !== 'bulk'
+                    });
                 } else {
-                    alert('✅ ' + json.message + formatDriveSyncNotice(json.drive_sync));
+                    notifyUser(fb.message, fb.variant);
                 }
             } catch (err) {
-                if (err.message !== 'ADMIN_AUTH_REQUIRED') alert('코드 매핑 저장 오류: ' + err.message);
+                if (err.message !== 'ADMIN_AUTH_REQUIRED') notifyUser('코드 매핑 저장 오류: ' + err.message, 'error');
+            } finally {
+                setButtonBusy(targetBtn, false);
             }
         }
 

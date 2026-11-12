@@ -133,3 +133,24 @@
 5. **남은 문제 및 다음 작업 시 주의사항**:
    - 현재 변경사항은 로컬 워킹 트리(`app.py`, `test_admin_mode.py`, `DEVELOPMENT_LOG.md`)에만 반영되어 있으며, `origin/main` 원격 푸시는 사용자 승인 후 진행해야 함.
    - 관리자 모드에서 재고 0개 수동 반품 옵션 플래그를 해제/조정해야 할 때는 팝업 하단 또는 테이블 우측 `[🔗 코드 매핑]` 모달에서 전체 옵션 목록을 확인할 수 있음.
+
+---
+
+## [2026-11-12] Google Sites iframe 환경 알림 차단 대응 — 인앱 토스트·확인 모달·저장 중 로딩 UI 구현
+1. **작업 날짜와 변경한 기능**: `2026-11-12` / Google Sites 임베드 iframe(`allow-modals` 미허용)에서 `window.alert()`·`confirm()`이 무음 차단되어 일괄저장 완료 메시지가 뜨지 않던 문제 해결 (인앱 토스트·확인 모달·일괄저장 배너·버튼 스피너 적용)
+2. **수정한 파일과 핵심 변경 사항**:
+   - `app.py`:
+     - 전역 플로팅 토스트 컨테이너(`#appToastContainer`, `z-[220]`), 인앱 확인 모달(`#appConfirmModal`, `z-[210]`, Promise 기반 `showConfirmModal`/`resolveConfirmModal`, Esc 닫기 우선 처리), 관리자 센터 공용 고정 배너(`#adminCenterToast`) 및 일괄편집 전용 배너(`#acBulkToast`) 추가
+     - `showAppToast`, `showAdminCenterToast`, `showAcBulkToast`, `hideAdminCenterToasts`, `getSaveFeedbackInfo`, `notifyUser`, `setButtonBusy` 헬퍼 구현 및 기존 `showAcMapToast`가 전역 플로팅 토스트도 함께 표시하도록 확장
+     - `saveAdminBulkProducts(this)` 등 관리자 센터·수정/매핑 모달 주요 저장/Drive/샘플 버튼에 `type="button"`, 고유 ID(`#acBulkSaveBtn`, `#acExpirySaveBtn`, `#acB2bSaveBtn`, `#acSettingsSaveBtn`, `#epSaveBtn`, `#cmSaveBtn`, `#acDriveSyncBtn`, `#acDrivePullBtn`, `#acSampleLoadBtn`) 및 저장 중 스피너/중복클릭 방지 적용, 저장 완료 시 `HH:MM:SS` 시각 및 Google Drive 동기화 상태 표시
+     - 인라인 `<script>` 내 모든 브라우저 기본 `alert()`/`confirm()` 호출을 `notifyUser()` / `await showConfirmModal()`로 전면 교체하고 `copyPublicUrl`·`copyGasScript` 클립보드 폴백 강화
+   - `test_admin_mode.py`: `test_21_in_app_toast_confirm_and_bulk_save_feedback` 추가(`/api/admin/products/bulk-save` 부분 일괄저장 무손실·요약 반영 검증, 인앱 토스트/확인 모달/버튼 ID/함수 마커 및 `<script>` 내 `alert()`/`confirm()` 미존재 검증, PIN/금지 컬럼 미노출 검증)
+3. **변경 이유 및 중요한 설계 결정**: 운영 Render API(`/api/summary`) 대조 결과 관리자 일괄저장(`20TZ01`=996, `20TZ03`=768)은 실제로 정상 저장 및 Drive 동기화까지 완료되었으나, 사용자가 대시보드를 Google Sites(`sites.google.com`) iframe 내부에서 사용 중이어서 Chrome의 sandbox 정책(`allow-modals` 부재)에 의해 `window.alert()`와 `window.confirm()`이 예외 없이 무음 무시되고 있었음. 또한 `표 변경사항 일괄 저장` 버튼에 로딩 표시가 없어 완료 여부를 체감할 수 없었으므로, 모든 `alert()`/`confirm()`을 iframe 정책 영향을 받지 않는 순수 DOM 토스트(`#appToastContainer`)·컨텍스트 배너(`#acBulkToast`, `#adminCenterToast`)·비동기 확인 모달(`#appConfirmModal`) 및 버튼 스피너로 대체함.
+4. **실행한 테스트와 그 결과**:
+   - `python -W error::SyntaxWarning -m py_compile app.py test_app.py test_business_logic.py test_admin_mode.py` — 통과 (exit code 0)
+   - 정적 HTML/JS 검증(`verify_html_js.py`, 스크래치) — 통과 (`JS delimiter & string/template balance OK`, 174개 정적 `document.getElementById()` 타겟 확인, 147개 인라인 이벤트 핸들러 확인, `GET /` 408,679 chars, `GET /api/summary` 38 masters)
+   - `python -m unittest discover -p "test_*.py" -v` — 36개 테스트 전부 통과 (`Ran 36 tests in 2.168s`, `OK`)
+   - `git diff --stat inventory_master_store.json` — 출력 없음 (운영 원본 데이터 무수정 확인)
+5. **남은 문제 및 다음 작업 시 주의사항**:
+   - 현재 변경사항은 로컬 워킹 트리(`app.py`, `test_admin_mode.py`, `DEVELOPMENT_LOG.md`)에만 반영되어 있으며, `origin/main` 원격 푸시 및 Render 재배포는 사용자 확인 후 진행해야 함.
+   - 추후 신규 UI 기능을 추가할 때도 Google Sites iframe 호환성을 위해 `window.alert()` / `window.confirm()`을 직접 호출하지 말고 반드시 `notifyUser()` / `await showConfirmModal()`을 사용할 것 (`test_21`에서 회귀 방지).
