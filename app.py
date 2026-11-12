@@ -2092,6 +2092,7 @@ def get_summary():
             "has_manual_lots": has_manual_lots,
             "has_unassigned_stock": has_unassigned_stock,
             "has_admin_expiry": has_admin_expiry,
+            "shelf_life_months": _parse_optional_shelf_life_months(m.get("shelf_life_months")),
             "default_expiry_date": normalize_date_str(m.get("default_expiry_date", "")),
             "nearest_expiry_date": nearest_expiry_date,
             "nearest_days_left": nearest_days_left,
@@ -2550,6 +2551,21 @@ def _parse_optional_positive_int(val):
     except Exception:
         return None
 
+def _parse_optional_shelf_life_months(val):
+    if val is None or isinstance(val, bool):
+        return None
+    s = str(val).strip()
+    if not s or s.lower() == "null":
+        return None
+    s = re.sub(r"(?:개월|월)$", "", s).strip()
+    if not s:
+        return None
+    try:
+        n = int(float(s))
+        return n if n > 0 else None
+    except Exception:
+        return None
+
 def _parse_sales_codes_input(raw_val):
     if raw_val is None:
         return None
@@ -2631,6 +2647,7 @@ def admin_save_product():
     expiry_warn_days = _parse_optional_positive_int(body.get("expiry_warn_days"))
     in_transit_qty = max(0, _parse_optional_positive_int(body.get("in_transit_qty")) or 0)
     expected_arrival_date = normalize_date_str(body.get("expected_arrival_date", ""))
+    shelf_life_months = _parse_optional_shelf_life_months(body.get("shelf_life_months"))
     default_expiry_date = normalize_date_str(body.get("default_expiry_date", ""))
 
     # 개미창고 코드 파싱 (배열 또는 쉼표 문자열 지원)
@@ -2711,6 +2728,7 @@ def admin_save_product():
                 "expiry_warn_days": expiry_warn_days,
                 "in_transit_qty": in_transit_qty,
                 "expected_arrival_date": expected_arrival_date,
+                "shelf_life_months": shelf_life_months,
                 "default_expiry_date": default_expiry_date,
                 "gaemi_codes": eff_g_codes,
                 "gaemi_filter": eff_g_filter,
@@ -2747,6 +2765,8 @@ def admin_save_product():
                 record["in_transit_qty"] = in_transit_qty
             if "expected_arrival_date" in body:
                 record["expected_arrival_date"] = expected_arrival_date
+            if "shelf_life_months" in body:
+                record["shelf_life_months"] = shelf_life_months
             if "default_expiry_date" in body:
                 record["default_expiry_date"] = default_expiry_date
             if has_sales_codes:
@@ -3033,6 +3053,8 @@ def admin_bulk_save_products():
                 m["in_transit_qty"] = max(0, _parse_optional_positive_int(row["in_transit_qty"]) or 0)
             if "expected_arrival_date" in row:
                 m["expected_arrival_date"] = normalize_date_str(row["expected_arrival_date"])
+            if "shelf_life_months" in row:
+                m["shelf_life_months"] = _parse_optional_shelf_life_months(row["shelf_life_months"])
             if "default_expiry_date" in row:
                 m["default_expiry_date"] = normalize_date_str(row["default_expiry_date"])
             if "note" in row:
@@ -3578,7 +3600,7 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- 이동 및 너비 조정 가능한 액션보드 테이블 (13개 열) -->
+            <!-- 이동 및 너비 조정 가능한 액션보드 테이블 (11개 열) -->
             <div id="masterTableScrollWrap" class="overflow-x-auto relative">
                 <table id="masterTable" class="text-left text-xs border-collapse">
                     <colgroup id="masterTableColGroup"></colgroup>
@@ -3847,12 +3869,22 @@ HTML_TEMPLATE = """
                         <div id="ep_manual_lots_sum_bar" class="hidden text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border"></div>
                     </div>
 
-                    <!-- 3-C. 대표/기본 소비기한 -->
-                    <div class="pt-2 border-t border-slate-200 flex flex-wrap items-center gap-3">
-                        <div class="flex-1 min-w-[200px]">
-                            <label class="block font-semibold text-slate-700 mb-1 text-[11px]">기본 소비기한 (개미 CSV 기한이 미기재일 때 대체 사용)</label>
-                            <input type="date" id="ep_default_expiry_date" class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
-                            <button type="button" onclick="document.getElementById('ep_default_expiry_date').value=''" class="ml-1.5 px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded text-[10px] font-semibold">지우기</button>
+                    <!-- 3-C. 제조일 기준 기본 소비기한(개월) & 대체 날짜 -->
+                    <div class="pt-2 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1 text-[11px]">기본 소비기한 (제조일로부터 개월수 · 상세정보 표시)</label>
+                            <div class="flex items-center gap-1.5">
+                                <input type="number" min="1" max="1200" step="1" id="ep_shelf_life_months" placeholder="예: 18" class="w-28 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-right focus:outline-none focus:ring-2 focus:ring-slate-400">
+                                <span class="text-[11px] font-semibold text-slate-600 shrink-0">개월</span>
+                                <button type="button" onclick="document.getElementById('ep_shelf_life_months').value=''" class="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded text-[10px] font-semibold shrink-0">지우기</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1 text-[11px]">대체 소비기한 날짜 (개미 CSV 기한이 미기재일 때 사용)</label>
+                            <div class="flex items-center gap-1.5">
+                                <input type="date" id="ep_default_expiry_date" class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
+                                <button type="button" onclick="document.getElementById('ep_default_expiry_date').value=''" class="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded text-[10px] font-semibold shrink-0">지우기</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -3991,7 +4023,7 @@ HTML_TEMPLATE = """
                                     <th class="p-2 w-20">리드타임(일)</th>
                                     <th class="p-2 w-20">입고예정수</th>
                                     <th class="p-2 w-32">입고예정일</th>
-                                    <th class="p-2 w-32">기본소비기한</th>
+                                    <th class="p-2 w-28" title="제조일로부터 소비기한 개월수 (상품 클릭 시 상세정보에 표시)">기본소비기한<span class="block text-[10px] font-normal text-slate-400">제조일 기준(개월)</span></th>
                                     <th class="p-2 w-14 text-center">노출</th>
                                     <th class="p-2 min-w-[140px]">메모</th>
                                 </tr>
@@ -4468,40 +4500,44 @@ HTML_TEMPLATE = """
 
     <!-- 스크립트 로직 -->
     <script>
-        // 열 정의 (13개 열): 개미창고와 쿠팡창고 각각의 재고량, 런웨이, 소비기한 미니태그, 추천 조치 버튼 포함
+        // 열 정의 (11개 열): 관리코드 제외, 발주 권고·추천 조치 통합, 개미/쿠팡 재고·런웨이·소비기한 미니태그 포함
         const COLUMN_DEFS = {
             'no':            { id: 'no',            label: 'No',               width: 52,  minWidth: 42,  thClass: 'text-center text-[11px]', tdClass: 'py-2 px-1.5 text-center font-mono text-slate-400 text-[11px]' },
-            'status':        { id: 'status',        label: '발주 권고 상태',    width: 170, minWidth: 96,  thClass: 'text-center', tdClass: 'py-2 px-1.5 text-center' },
+            'status':        { id: 'status',        label: '발주 권고 · 조치',  width: 184, minWidth: 104, thClass: 'text-center', tdClass: 'py-2 px-1.5 text-center' },
             'type':          { id: 'type',          label: '구분',             width: 58,  minWidth: 46,  thClass: 'text-center', tdClass: 'py-2 px-1.5 text-center' },
-            'code':          { id: 'code',          label: '관리코드',          width: 96,  minWidth: 68,  thClass: 'text-center font-mono text-[11px]', tdClass: 'py-2 px-1.5 text-center font-mono font-semibold text-slate-600 text-[11px]' },
-            'name':          { id: 'name',          label: '마스터 상품명',     width: 230, minWidth: 110, thClass: 'text-left', tdClass: 'py-2 px-2 text-left' },
+            'name':          { id: 'name',          label: '마스터 상품명',     width: 245, minWidth: 110, thClass: 'text-left', tdClass: 'py-2 px-2 text-left' },
             'total_stock':   { id: 'total_stock',   label: '총 가용재고',       width: 96,  minWidth: 68,  thClass: 'text-right font-bold text-slate-800 text-xs', tdClass: 'py-2 px-2 text-right font-mono font-bold text-xs text-slate-900' },
             'gaemi_stock':   { id: 'gaemi_stock',   label: '개미창고(3PL)',     width: 140, minWidth: 85,  thClass: 'text-right font-semibold text-slate-700', tdClass: 'py-2 px-2 text-right text-slate-800' },
             'gaemi_runway':  { id: 'gaemi_runway',  label: '개미 런웨이',       width: 84,  minWidth: 62,  thClass: 'text-center text-slate-600 text-[11px] font-semibold', tdClass: 'py-2 px-1.5 text-center font-mono text-slate-700 text-[11px]' },
             'coupang_stock': { id: 'coupang_stock', label: '쿠팡창고(실물)',    width: 98,  minWidth: 68,  thClass: 'text-right font-semibold text-slate-700', tdClass: 'py-2 px-2 text-right text-slate-800' },
             'coupang_runway':{ id: 'coupang_runway',label: '쿠팡 런웨이',       width: 88,  minWidth: 62,  thClass: 'text-center text-slate-600 text-[11px] font-semibold', tdClass: 'py-2 px-1.5 text-center font-mono text-slate-700 text-[11px]' },
             'total_sales':   { id: 'total_sales',   label: '출고량 (7일/30일)', width: 152, minWidth: 96,  thClass: 'text-right font-semibold text-slate-800', tdClass: 'py-2 px-2 text-right font-mono font-semibold text-slate-800' },
-            'total_runway':  { id: 'total_runway',  label: '통합 런웨이(D-Day)',width: 112, minWidth: 78,  thClass: 'text-center font-semibold text-slate-800', tdClass: 'py-2 px-1.5 text-center' },
-            'action_cta':    { id: 'action_cta',    label: '추천 조치 (Action)',width: 150, minWidth: 96,  thClass: 'text-center font-semibold text-slate-700', tdClass: 'py-2 px-1.5 text-center' }
+            'total_runway':  { id: 'total_runway',  label: '통합 런웨이(D-Day)',width: 112, minWidth: 78,  thClass: 'text-center font-semibold text-slate-800', tdClass: 'py-2 px-1.5 text-center' }
         };
 
         const DEFAULT_COLUMN_ORDER = [
-            'no', 'status', 'type', 'code', 'name', 
-            'total_stock', 'gaemi_stock', 'gaemi_runway', 
-            'coupang_stock', 'coupang_runway', 
-            'total_sales', 'total_runway', 'action_cta'
+            'no', 'status', 'type', 'name',
+            'total_stock', 'gaemi_stock', 'gaemi_runway',
+            'coupang_stock', 'coupang_runway',
+            'total_sales', 'total_runway'
         ];
 
+        const COL_ORDER_STORAGE_KEY = 'iljeomodo_col_order_v7';
         const COL_WIDTHS_STORAGE_KEY = 'iljeomodo_col_widths_v1';
         let currentColumnOrder = [...DEFAULT_COLUMN_ORDER];
         let customColWidths = {};
         
-        // localStorage에서 저장된 열 순서 & 너비 불러오기 (v6 액션보드 전용)
+        // localStorage에서 저장된 열 순서 & 너비 불러오기 (v7 11열 보드 전용)
         try {
-            const savedOrder = localStorage.getItem('iljeomodo_col_order_v6');
+            const savedOrder = localStorage.getItem(COL_ORDER_STORAGE_KEY);
             if (savedOrder) {
                 const parsed = JSON.parse(savedOrder);
-                if (Array.isArray(parsed) && parsed.length === DEFAULT_COLUMN_ORDER.length && parsed.includes('gaemi_runway')) {
+                if (
+                    Array.isArray(parsed) &&
+                    parsed.length === DEFAULT_COLUMN_ORDER.length &&
+                    parsed.every(cid => Object.prototype.hasOwnProperty.call(COLUMN_DEFS, cid)) &&
+                    new Set(parsed).size === DEFAULT_COLUMN_ORDER.length
+                ) {
                     currentColumnOrder = parsed;
                 }
             }
@@ -5383,12 +5419,18 @@ HTML_TEMPLATE = """
                 </div>
             `;
 
+            const shelfLifeMonths = (m.shelf_life_months !== null && m.shelf_life_months !== undefined && Number(m.shelf_life_months) > 0)
+                ? parseInt(m.shelf_life_months, 10)
+                : null;
+
             const criteriaAndNoteHtml = `
                 <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1.5 text-[11px] text-slate-700">
                     <div class="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium">
                         <span><i class="fa-solid fa-gear text-slate-400 mr-1"></i>리드타임 <strong>${effLt}일</strong> (안전 +${effPrep - effLt}일)</span>
                         <span class="text-slate-300">·</span>
                         <span>기한경고 <strong>${m.effective_expiry_warn || 120}일</strong></span>
+                        <span class="text-slate-300">·</span>
+                        <span><i class="fa-regular fa-hourglass-half text-slate-400 mr-1"></i>기본 소비기한 ${shelfLifeMonths ? `<strong class="text-slate-900">제조일로부터 ${shelfLifeMonths}개월</strong>` : '<span class="text-slate-400">미등록</span>'}</span>
                         ${m.in_transit_qty > 0 ? `<span class="text-slate-300">·</span><span class="text-teal-700 font-semibold">입고예정 +${m.in_transit_qty.toLocaleString()}개 (${escapeHtml(m.expected_arrival_date || '미정')})</span>` : ''}
                     </div>
                     ${m.note ? `
@@ -5402,14 +5444,17 @@ HTML_TEMPLATE = """
 
             const gaemiSectionHtml = `
                 <div class="rounded-xl border border-slate-200 p-3.5 space-y-2.5 bg-white">
-                    <div class="flex items-center justify-between gap-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
                         <div class="flex items-center space-x-1.5 text-xs font-bold text-slate-800">
                             <i class="fa-solid fa-clock-rotate-left text-slate-500"></i>
                             <span>개미창고 소비기한 · FIFO</span>
                         </div>
-                        <span class="text-[10px] bg-slate-100 text-slate-700 font-semibold px-2 py-0.5 rounded shrink-0">
-                            ${activeGaemiLots.length}개 로트
-                        </span>
+                        <div class="flex items-center gap-1.5 shrink-0">
+                            ${shelfLifeMonths ? `<span class="text-[10px] bg-slate-100 text-slate-700 border border-slate-200 font-semibold px-2 py-0.5 rounded">제조일 기준 ${shelfLifeMonths}개월</span>` : ''}
+                            <span class="text-[10px] bg-slate-100 text-slate-700 font-semibold px-2 py-0.5 rounded">
+                                ${activeGaemiLots.length}개 로트
+                            </span>
+                        </div>
                     </div>
                     ${activeGaemiLots.length > 0 ? `
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -5696,6 +5741,7 @@ HTML_TEMPLATE = """
             currentColumnOrder = [...DEFAULT_COLUMN_ORDER];
             customColWidths = {};
             try {
+                localStorage.removeItem(COL_ORDER_STORAGE_KEY);
                 localStorage.removeItem('iljeomodo_col_order_v6');
                 localStorage.removeItem(COL_WIDTHS_STORAGE_KEY);
             } catch (e) {}
@@ -5824,7 +5870,7 @@ HTML_TEMPLATE = """
                         const toIdx = currentColumnOrder.indexOf(targetColId);
                         currentColumnOrder.splice(fromIdx, 1);
                         currentColumnOrder.splice(toIdx, 0, draggedColId);
-                        localStorage.setItem('iljeomodo_col_order_v6', JSON.stringify(currentColumnOrder));
+                        localStorage.setItem(COL_ORDER_STORAGE_KEY, JSON.stringify(currentColumnOrder));
                         renderTableHeader();
                         renderColWidthSliders();
                         renderMasterTable();
@@ -6244,11 +6290,28 @@ HTML_TEMPLATE = """
                     if (colId === 'no') {
                         html += `<td class="${col.tdClass} overflow-hidden"><i class="fa-solid fa-grip-vertical text-slate-300 mr-1 text-[9px]"></i>${idx + 1}</td>`;
                     } else if (colId === 'status') {
-                        html += `<td class="${col.tdClass} overflow-hidden"><span class="inline-block max-w-full truncate align-middle px-2 py-0.5 rounded-full text-[10px] border break-keep ${badgeClass}" title="${escapeHtml(m.status)}">${escapeHtml(m.status)}</span></td>`;
+                        const mapBtn = isAdminMode
+                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition whitespace-nowrap shrink-0" title="3채널 코드 매핑 수동 지정">🔗</button>`
+                            : '';
+                        const editBtn = isAdminMode
+                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition whitespace-nowrap shrink-0" title="관리자 수정">✏️</button>`
+                            : '';
+                        const adminBtns = isAdminMode
+                            ? `<span class="inline-flex items-center gap-0.5 shrink-0">${mapBtn}${editBtn}</span>`
+                            : '';
+                        const statusTooltip = (m.action_cta && m.action_cta !== m.status)
+                            ? `${m.status} · ${m.action_cta}`
+                            : m.status;
+                        html += `
+                            <td class="${col.tdClass} overflow-hidden">
+                                <div class="flex items-center justify-center flex-wrap gap-1 min-w-0 max-w-full">
+                                    <span class="inline-block min-w-0 max-w-full truncate align-middle px-2 py-0.5 rounded-full text-[10px] border break-keep ${badgeClass}" title="${escapeHtml(statusTooltip)}">${escapeHtml(m.status)}</span>
+                                    ${adminBtns}
+                                </div>
+                            </td>
+                        `;
                     } else if (colId === 'type') {
                         html += `<td class="${col.tdClass} overflow-hidden">${ptypeBadge}</td>`;
-                    } else if (colId === 'code') {
-                        html += `<td class="${col.tdClass} overflow-hidden"><div class="flex flex-wrap items-center justify-center gap-0.5 min-w-0"><span class="truncate">${escapeHtml(m.seller_code)}</span>${b2bBadge}</div></td>`;
                     } else if (colId === 'name') {
                         const customLtBadge = (m.lead_time_days !== null && m.lead_time_days !== undefined)
                             ? `<span class="text-[9px] bg-slate-100 text-slate-700 border border-slate-200 px-1 rounded font-mono shrink-0" title="품목 개별 리드타임">LT ${m.lead_time_days}일</span>`
@@ -6259,6 +6322,7 @@ HTML_TEMPLATE = """
                                     <i id="chev_${escapeHtml(m.id)}" class="fa-solid fa-angle-right text-[10px] shrink-0 transition-transform ${isSubExpanded ? 'rotate-90 text-slate-900' : 'text-slate-400'}"></i>
                                     <span class="truncate" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</span>
                                     ${customLtBadge}
+                                    ${b2bBadge}
                                 </div>
                                 <div class="text-[10px] text-slate-400 mt-0.5 truncate">
                                     ${escapeHtml(m.category)} | ${escapeHtml(m.gaemi_details)}
@@ -6319,24 +6383,6 @@ HTML_TEMPLATE = """
                                     <div class="${runwayBarColor} h-full rounded-full" style="width: ${barPercent}%"></div>
                                 </div>
                                 ${inboundRunwaySub}
-                            </td>
-                        `;
-                    } else if (colId === 'action_cta') {
-                        const mapBtn = isAdminMode
-                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition whitespace-nowrap" title="3채널 코드 매핑 수동 지정">🔗</button>`
-                            : '';
-                        const editBtn = isAdminMode
-                            ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openEditProductModal(this.dataset.prodId)" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition whitespace-nowrap" title="관리자 수정">✏️</button>`
-                            : '';
-                        html += `
-                            <td class="${col.tdClass} overflow-hidden">
-                                <div class="inline-flex items-center justify-center flex-wrap gap-1 max-w-full">
-                                    <span class="px-2 py-0.5 rounded-md border text-[10px] whitespace-nowrap break-keep ${theme.actionPill}">
-                                        ${escapeHtml(m.action_cta)}
-                                    </span>
-                                    ${mapBtn}
-                                    ${editBtn}
-                                </div>
                             </td>
                         `;
                     }
@@ -6582,8 +6628,6 @@ HTML_TEMPLATE = """
                 } else if (colId === 'total_runway') {
                     const avgDoc = sumDailySales > 0 ? (sumTotalStock / sumDailySales).toFixed(1) + '일' : (sumTotalStock > 0 ? '소진무' : '재고없음');
                     footHtml += `<td class="py-2.5 px-1.5 text-center font-bold text-slate-800 text-[11px] overflow-hidden truncate">평균 ${avgDoc}</td>`;
-                } else if (colId === 'action_cta') {
-                    footHtml += `<td class="py-2.5 px-1.5 text-center text-slate-400 font-medium text-[10px] overflow-hidden">결품 0 목표</td>`;
                 } else {
                     footHtml += `<td class="py-2.5 px-1.5 text-center text-slate-400 overflow-hidden">-</td>`;
                 }
@@ -6910,6 +6954,7 @@ HTML_TEMPLATE = """
             document.getElementById('ep_expiry_warn_days').value = '';
             document.getElementById('ep_in_transit_qty').value = 0;
             document.getElementById('ep_expected_arrival_date').value = '';
+            document.getElementById('ep_shelf_life_months').value = '';
             document.getElementById('ep_default_expiry_date').value = '';
 
             epSalesExplicitEmpty = false;
@@ -6994,6 +7039,7 @@ HTML_TEMPLATE = """
             document.getElementById('ep_expiry_warn_days').value = (item.expiry_warn_days !== null && item.expiry_warn_days !== undefined) ? item.expiry_warn_days : '';
             document.getElementById('ep_in_transit_qty').value = item.in_transit_qty || 0;
             document.getElementById('ep_expected_arrival_date').value = item.expected_arrival_date || '';
+            document.getElementById('ep_shelf_life_months').value = (item.shelf_life_months !== null && item.shelf_life_months !== undefined && Number(item.shelf_life_months) > 0) ? item.shelf_life_months : '';
             document.getElementById('ep_default_expiry_date').value = item.default_expiry_date || '';
 
             const epSalesEl = document.getElementById('ep_sales_codes');
@@ -7344,6 +7390,7 @@ HTML_TEMPLATE = """
                 expiry_warn_days: document.getElementById('ep_expiry_warn_days').value.trim(),
                 in_transit_qty: parseInt(document.getElementById('ep_in_transit_qty').value || '0', 10) || 0,
                 expected_arrival_date: document.getElementById('ep_expected_arrival_date').value.trim(),
+                shelf_life_months: document.getElementById('ep_shelf_life_months').value.trim(),
                 default_expiry_date: document.getElementById('ep_default_expiry_date').value.trim(),
                 gaemi_codes: document.getElementById('ep_gaemi_codes').value.trim(),
                 gaemi_filter: document.getElementById('ep_gaemi_filter').value.trim(),
@@ -7527,6 +7574,7 @@ HTML_TEMPLATE = """
 
             tbody.innerHTML = items.map(m => {
                 const isAct = m.is_active !== false;
+                const slVal = (m.shelf_life_months !== null && m.shelf_life_months !== undefined && Number(m.shelf_life_months) > 0) ? Number(m.shelf_life_months) : '';
                 return `
                     <tr class="ac-bulk-row ${isAct ? 'hover:bg-slate-50' : 'bg-slate-100/70 opacity-75'}" data-id="${escapeHtml(m.id || '')}" data-seller-code="${escapeHtml(m.seller_code)}">
                         <td class="p-1.5 font-mono font-bold text-slate-700">${escapeHtml(m.seller_code)}</td>
@@ -7541,7 +7589,12 @@ HTML_TEMPLATE = """
                         <td class="p-1.5"><input type="number" min="0" class="ac-b-lt w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-right" placeholder="기본" value="${(m.lead_time_days !== null && m.lead_time_days !== undefined) ? m.lead_time_days : ''}"></td>
                         <td class="p-1.5"><input type="number" min="0" class="ac-b-transit w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-right" value="${m.in_transit_qty || 0}"></td>
                         <td class="p-1.5"><input type="date" class="ac-b-arr w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-[11px]" value="${escapeHtml(m.expected_arrival_date || '')}"></td>
-                        <td class="p-1.5"><input type="date" class="ac-b-defexp w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-[11px]" value="${escapeHtml(m.default_expiry_date || '')}"></td>
+                        <td class="p-1.5">
+                            <div class="flex items-center gap-1">
+                                <input type="number" min="1" max="1200" step="1" class="ac-b-shelflife w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-right text-[11px]" placeholder="-" value="${slVal}">
+                                <span class="text-[11px] text-slate-500 shrink-0">개월</span>
+                            </div>
+                        </td>
                         <td class="p-1.5 text-center"><input type="checkbox" class="ac-b-active" ${isAct ? 'checked' : ''}></td>
                         <td class="p-1.5"><input type="text" class="ac-b-note w-full px-2 py-1 border border-slate-300 rounded" value="${escapeHtml(m.note || '')}"></td>
                     </tr>
@@ -7564,7 +7617,7 @@ HTML_TEMPLATE = """
                     lead_time_days: tr.querySelector('.ac-b-lt').value.trim(),
                     in_transit_qty: parseInt(tr.querySelector('.ac-b-transit').value || '0', 10) || 0,
                     expected_arrival_date: tr.querySelector('.ac-b-arr').value.trim(),
-                    default_expiry_date: tr.querySelector('.ac-b-defexp').value.trim(),
+                    shelf_life_months: tr.querySelector('.ac-b-shelflife').value.trim(),
                     is_active: tr.querySelector('.ac-b-active').checked,
                     note: tr.querySelector('.ac-b-note').value.trim()
                 });
@@ -7668,7 +7721,7 @@ HTML_TEMPLATE = """
                         </div>
                     `).join('');
                     if (m.default_expiry_date && activeCsvLots.some(l => !l.expiry_date)) {
-                        inputColHtml += `<div class="text-[10px] text-slate-400">기본 소비기한: <span class="font-mono">${escapeHtml(m.default_expiry_date)}</span> (미입력 시 적용)</div>`;
+                        inputColHtml += `<div class="text-[10px] text-slate-400">대체 소비기한: <span class="font-mono">${escapeHtml(m.default_expiry_date)}</span> (미입력 시 적용)</div>`;
                     }
                 } else if (hasManualLots) {
                     lotSummaryHtml = activeManLots.length > 0
@@ -7677,8 +7730,8 @@ HTML_TEMPLATE = """
                     inputColHtml = '<div class="text-[11px] text-slate-600 font-semibold py-1">우측 [상세 분할]에서 로트별 수정</div>';
                 } else {
                     lotSummaryHtml = rawCsvLots.length > 0
-                        ? '<span class="text-[11px] text-slate-400">개미 보유 재고 0개 (기본 소비기한 적용)</span>'
-                        : '<span class="text-[11px] text-slate-400">개미 CSV 로트 없음 (기본 소비기한 적용)</span>';
+                        ? '<span class="text-[11px] text-slate-400">개미 보유 재고 0개 (대체 소비기한 적용)</span>'
+                        : '<span class="text-[11px] text-slate-400">개미 CSV 로트 없음 (대체 소비기한 적용)</span>';
                     inputColHtml = `
                         <input type="date" class="ac-exp-default-input w-full px-2 py-1 border border-slate-300 rounded font-mono text-[11px]" data-id="${escapeHtml(m.id || '')}" data-seller-code="${escapeHtml(m.seller_code)}" data-orig="${escapeHtml(m.default_expiry_date || '')}" value="${escapeHtml(m.default_expiry_date || '')}">
                     `;

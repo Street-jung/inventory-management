@@ -2020,6 +2020,123 @@ class TestIljeomodoAdminMode(unittest.TestCase):
 
         print("OK: [Admin Test 21] 인앱 토스트·확인 모달·일괄저장 피드백 및 alert()/confirm() 제거 검증 완료")
 
+    def test_22_shelf_life_months_and_board_column_simplification(self):
+        """제조일 기준 소비기한 개월수(일괄편집·단품수정·상세모달) 및 단품발주보드 관리코드 삭제/발주권고·조치 열 통합 검증"""
+        headers = self._login("1500")
+
+        # 1. 단품 저장으로 shelf_life_months 와 default_expiry_date 독립 저장 확인
+        save_res = self.client.post("/api/admin/product/save", headers=headers, json={
+            "seller_code": "20TZ01",
+            "name": "테라찌노 라노첼라라 500ml",
+            "product_type": "수입",
+            "category": "오일/식용유",
+            "shelf_life_months": 18,
+            "default_expiry_date": "2027-07-31",
+        })
+        self.assertEqual(save_res.status_code, 200)
+        summary_1 = json.loads(self.client.get("/api/summary").data)
+        tz01_1 = next(m for m in summary_1["masters"] if m["seller_code"] == "20TZ01")
+        self.assertEqual(tz01_1["shelf_life_months"], 18)
+        self.assertEqual(tz01_1["default_expiry_date"], "2027-07-31")
+
+        # 2. 일괄편집(/api/admin/products/bulk-save)에서 개월수 저장 시 기존 default_expiry_date 보존 & '24개월' 파싱/빈값(0) 초기화 검증
+        bulk_res = self.client.post("/api/admin/products/bulk-save", headers=headers, json={
+            "products": [
+                {"seller_code": "20TZ01", "shelf_life_months": "24개월"},
+                {"seller_code": "20TZ03", "shelf_life_months": "0"},
+                {"seller_code": "10GL04", "shelf_life_months": ""},
+            ]
+        })
+        self.assertEqual(bulk_res.status_code, 200)
+        summary_2 = json.loads(self.client.get("/api/summary").data)
+        by_code = {m["seller_code"]: m for m in summary_2["masters"]}
+        self.assertEqual(by_code["20TZ01"]["shelf_life_months"], 24)
+        self.assertEqual(by_code["20TZ01"]["default_expiry_date"], "2027-07-31")
+        self.assertIsNone(by_code["20TZ03"]["shelf_life_months"])
+        self.assertIsNone(by_code["10GL04"]["shelf_life_months"])
+
+        cfg = json.loads(self.client.get("/api/admin/config", headers=headers).data)
+        cfg_tz01 = next(m for m in cfg["master_products"] if m["seller_code"] == "20TZ01")
+        self.assertEqual(cfg_tz01["shelf_life_months"], 24)
+
+        # 빈 문자열 전달 시 개월수 초기화 검증
+        clear_res = self.client.post("/api/admin/products/bulk-save", headers=headers, json={
+            "products": [{"seller_code": "20TZ01", "shelf_life_months": ""}]
+        })
+        self.assertEqual(clear_res.status_code, 200)
+        summary_3 = json.loads(self.client.get("/api/summary").data)
+        tz01_3 = next(m for m in summary_3["masters"] if m["seller_code"] == "20TZ01")
+        self.assertIsNone(tz01_3["shelf_life_months"])
+
+        # 3. HTML/JS 마커 및 열 정의 검증 (관리코드/'action_cta' 제거 + 발주권고·조치 단일열 통합 + 개월수 UI)
+        html = self.client.get("/").data.decode("utf-8")
+        self.assertNotIn("1500", html)
+        self.assertNotIn("비고", html)
+        self.assertNotIn("'biko'", html)
+
+        # 일괄편집 & 단품수정 & 상세정보 모달 내 개월수 UI 검증
+        self.assertIn("제조일 기준(개월)", html)
+        self.assertIn("ac-b-shelflife", html)
+        self.assertNotIn("ac-b-defexp", html)
+        self.assertIn('id="ep_shelf_life_months"', html)
+
+        bulk_fn_start = html.find("function renderAdminBulkTable(")
+        bulk_fn_end = html.find("function renderAdminExpiryTable(")
+        self.assertGreater(bulk_fn_start, 0)
+        self.assertGreater(bulk_fn_end, bulk_fn_start)
+        bulk_fn_sec = html[bulk_fn_start:bulk_fn_end]
+        self.assertIn("ac-b-shelflife", bulk_fn_sec)
+        self.assertIn("shelf_life_months:", bulk_fn_sec)
+        self.assertIn("개월", bulk_fn_sec)
+
+        detail_fn_start = html.find("function renderProductDetailModal(prodId)")
+        detail_fn_end = html.find("async function toggleCoupangOptionReturn(")
+        self.assertGreater(detail_fn_start, 0)
+        self.assertGreater(detail_fn_end, detail_fn_start)
+        detail_fn_sec = html[detail_fn_start:detail_fn_end]
+        self.assertIn("제조일로부터 ${shelfLifeMonths}개월", detail_fn_sec)
+        self.assertIn("제조일 기준 ${shelfLifeMonths}개월", detail_fn_sec)
+
+        # 보드 11열 정의 검증 (COLUMN_DEFS & DEFAULT_COLUMN_ORDER에서 'code'와 'action_cta' 제거)
+        col_defs_start = html.find("const COLUMN_DEFS = {")
+        col_order_start = html.find("const DEFAULT_COLUMN_ORDER = [")
+        col_key_start = html.find("const COL_ORDER_STORAGE_KEY")
+        self.assertGreater(col_defs_start, 0)
+        self.assertGreater(col_order_start, col_defs_start)
+        self.assertGreater(col_key_start, col_order_start)
+        col_defs_sec = html[col_defs_start:col_order_start]
+        col_order_sec = html[col_order_start:col_key_start]
+
+        self.assertNotIn("'code':", col_defs_sec)
+        self.assertNotIn("'action_cta':", col_defs_sec)
+        self.assertIn("'발주 권고 · 조치'", col_defs_sec)
+        self.assertNotIn("'code'", col_order_sec)
+        self.assertNotIn("'action_cta'", col_order_sec)
+        self.assertIn("iljeomodo_col_order_v7", html)
+        self.assertIn("getItem(COL_ORDER_STORAGE_KEY)", html)
+
+        # renderMasterTable 내 관리자 빠른 버튼(🔗/✏️)은 'status' 열에 통합 유지되고 B2B연동은 'name' 열에 표시
+        tbl_start = html.find("currentColumnOrder.forEach(colId => {")
+        subrow_start = html.find("const subrowCoupangBody =")
+        self.assertGreater(tbl_start, 0)
+        self.assertGreater(subrow_start, tbl_start)
+        tbl_sec = html[tbl_start:subrow_start]
+        self.assertNotIn("colId === 'code'", tbl_sec)
+        self.assertNotIn("colId === 'action_cta'", tbl_sec)
+        self.assertIn("openCodeMappingModal(this.dataset.prodId)", tbl_sec)
+        self.assertIn("openEditProductModal(this.dataset.prodId)", tbl_sec)
+        self.assertIn("${b2bBadge}", tbl_sec)
+
+        # CSV 내보내기 계약은 기존대로 유지
+        csv_res = self.client.get("/api/export-master-csv")
+        self.assertEqual(csv_res.status_code, 200)
+        csv_txt = csv_res.data.decode("utf-8-sig")
+        self.assertIn("판매자관리코드", csv_txt)
+        self.assertIn("추천 조치", csv_txt)
+        self.assertNotIn("비고", csv_txt)
+
+        print("OK: [Admin Test 22] 제조일 기준 소비기한 개월수 & 보드 관리코드 제거/발주권고·조치 열 통합 검증 완료")
+
 
 if __name__ == '__main__':
     unittest.main()

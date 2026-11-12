@@ -154,3 +154,24 @@
 5. **남은 문제 및 다음 작업 시 주의사항**:
    - 현재 변경사항은 로컬 워킹 트리(`app.py`, `test_admin_mode.py`, `DEVELOPMENT_LOG.md`)에만 반영되어 있으며, `origin/main` 원격 푸시 및 Render 재배포는 사용자 확인 후 진행해야 함.
    - 추후 신규 UI 기능을 추가할 때도 Google Sites iframe 호환성을 위해 `window.alert()` / `window.confirm()`을 직접 호출하지 말고 반드시 `notifyUser()` / `await showConfirmModal()`을 사용할 것 (`test_21`에서 회귀 방지).
+
+---
+
+## [2026-11-12] 일괄편집 제조일 기준 소비기한(개월수) 전환·상세정보 표시 및 단품발주보드 열 단순화
+1. **작업 날짜와 변경한 기능**: `2026-11-12` / 관리자 `전체 품목 일괄 편집` 기본 소비기한을 제조일 기준 개월수(`개월`)로 전환·상품 상세정보(`#productDetailModal`) 표시 및 `단품 발주 보드` 관리코드 열 삭제·발주 권고/추천 조치 열 통합
+2. **수정한 파일과 핵심 변경 사항**:
+   - `app.py`:
+     - 백엔드(`_parse_optional_shelf_life_months`, `get_summary`, `/api/admin/product/save`, `/api/admin/products/bulk-save`): 제조일 기준 소비기한 개월수 필드 `shelf_life_months` 추가(양의 정수 및 `"N개월"`/`"N월"` 파싱, `0`/빈값 입력 시 `None` 초기화). CSV 기한 미기재 로트 대체용 `default_expiry_date`와 분리해 기존 FIFO·대체기한 동작을 보존함.
+     - 관리자 UI(`#acTab_bulk`, `#editProductModal`, `#acTab_expiry`): 전체 품목 일괄 편집의 `기본소비기한` 열을 `제조일 기준(개월)` 숫자+`개월` 입력(`.ac-b-shelflife`)으로 교체하고, 단품 등록/수정 모달 3-C 영역에 `#ep_shelf_life_months`와 `#ep_default_expiry_date`(`대체 소비기한 날짜`)를 분리 배치했으며 `소비기한 일괄 입력` 힌트 문구를 `대체 소비기한`으로 명확화함.
+     - 상세정보 팝업(`renderProductDetailModal`): 기준 정보 바(`기본 소비기한 제조일로부터 N개월` 또는 `미등록`) 및 `개미창고 소비기한 · FIFO` 헤더(`제조일 기준 N개월` 배지)에 개월수 표시 추가.
+     - `단품 발주 보드` 테이블(`COLUMN_DEFS`, `DEFAULT_COLUMN_ORDER`, `renderMasterTable`, `tfoot`): 13열에서 `'code'`(관리코드)와 `'action_cta'`(추천 조치)를 제거해 11열로 정리하고, `'status'` 열을 `'발주 권고 · 조치'` 단일 열로 통합(상태 배지 + 툴팁 `action_cta` 병기 + 관리자 모드 빠른 버튼 `🔗`/`✏️` 유지, `B2B연동` 배지는 `'name'` 열로 이동). 열 순서 저장 키를 `iljeomodo_col_order_v7`로 전환.
+   - `test_admin_mode.py`: `test_22_shelf_life_months_and_board_column_simplification` 추가(`shelf_life_months` 저장/`"24개월"` 파싱/`0`·빈값 초기화 및 `default_expiry_date` 무손실 보존, HTML/JS 11열·개월수 UI 마커, CSV 내보내기 계약 및 PIN/금지 컬럼 미노출 검증).
+3. **변경 이유 및 중요한 설계 결정**: 일괄 편집의 `기본소비기한`을 제조일로부터의 소비기한 개월수 확인용으로 전환하되, 기존 개미창고 CSV 로트 기한 미입력 시 적용되던 `default_expiry_date`를 손상하지 않도록 별도 필드(`shelf_life_months`)로 분리 설계함. 단품 발주 보드에서는 매핑 전용인 관리코드 열과 내용이 중복되던 추천 조치 열을 정리해 11열로 시인성을 높이면서도 코드 매핑 모달·검색(`m.seller_code`)·CSV 내보내기·관리자 빠른 버튼 동선을 보존하고, 구 `v6` 열 순서 캐시 충돌을 피하기 위해 `iljeomodo_col_order_v7` 키로 마이그레이션함.
+4. **실행한 테스트와 그 결과**:
+   - `python -W error::SyntaxWarning -m py_compile app.py test_app.py test_business_logic.py test_admin_mode.py` — 통과 (exit code 0)
+   - 정적 HTML/JS 검증(`verify_html_js.py`, 스크래치) — 통과 (`JS delimiter & string/template balance OK`, 175개 정적 `document.getElementById()` 타겟 확인, 148개 인라인 이벤트 핸들러 확인, `GET /` 410,983 chars, `GET /api/summary` 38 masters)
+   - `python -m unittest discover -p "test_*.py" -v` — 37개 테스트 전부 통과 (`Ran 37 tests in 2.218s`, `OK`)
+   - `git diff --stat inventory_master_store.json` — 출력 없음 (운영 원본 데이터 무수정 확인)
+5. **남은 문제 및 다음 작업 시 주의사항**:
+   - 현재 변경사항은 로컬 워킹 트리(`app.py`, `test_admin_mode.py`, `DEVELOPMENT_LOG.md`)에만 반영되어 있으며, `origin/main` 원격 푸시 및 Render 재배포는 사용자 확인 후 진행해야 함.
+   - 제조일 기준 개월수(`shelf_life_months`)는 신규 필드이므로 품목별 값을 일괄 편집에서 입력·저장하면 상세정보 모달에 `제조일로부터 N개월`이 표시됨(기존 `default_expiry_date`는 그대로 유지됨). 또한 보드 11열 전환에 따라 브라우저의 기존 `v6` 열 순서 캐시는 `v7` 기본 11열 순서로 초기화됨.
