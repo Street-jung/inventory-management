@@ -196,3 +196,26 @@
 5. **남은 문제 및 다음 작업 시 주의사항**:
    - 쿠팡 옵션이 매핑되어 있으나 현재 재고가 0인 품목(예: `10GL06`)은 `has_coupang_link = True`로 유지되어 쿠팡 `0`·`재고없음` 및 행 클릭 번들 확인이 계속 가능함.
    - 추후 쿠팡외 출고가 0인 쿠팡 미연동 상품에 스마트스토어 주문이 새로 유입되면 `출고량` 열이 자동으로 보이기 시작함(`shouldMaskSalesCell`).
+
+---
+
+## [2026-11-12] 리포트 CSV 내보내기 매핑 코드 3종(개미창고 상품코드·개미창고 옵션명·쿠팡 옵션 ID) 추가
+1. **작업 날짜와 변경한 기능**: `2026-11-12` / 통합 리포트 CSV 다운로드(`/api/export-master-csv`)에 `판매자관리코드` 외 `개미창고 상품코드`, `개미창고 옵션명`, `쿠팡 옵션 ID` 매핑 컬럼 추가
+2. **수정한 파일과 핵심 변경 사항**:
+   - `app.py` (`export_master_csv`):
+     - CSV 헤더 `판매자관리코드` 바로 뒤에 `개미창고 상품코드`, `개미창고 옵션명`, `쿠팡 옵션 ID` 3개 컬럼을 추가해 총 19컬럼으로 확장.
+     - `개미창고 상품코드`: 관리자 명시 매핑(`gaemi_mappings`)이 있으면 해당 코드 목록, 없으면 구방식 `gaemi_codes`(또는 일치 `csv_gaemi_lots` 코드)를 중복 제거·순서 보존하여 `", "`로 결합.
+     - `개미창고 옵션명`: `gaemi_mappings`의 구체 옵션명은 그대로 표기하고 와일드카드(`""`/`"*"`)는 일치하는 `csv_gaemi_lots` 옵션명(CSV 미존재 시 `"전체(*)"`)을 사용. 구방식(`gaemi_codes` + `gaemi_filter`)에서는 실제 일치한 `csv_gaemi_lots` 옵션명을 우선 표기하고 CSV 미매칭 시 `gaemi_filter` 키워드로 폴백.
+     - `쿠팡 옵션 ID`: `m["options"]` 내 정상·반품 구분 없이 등록된 모든 유효 `id`를 중복 제거·순서 보존하여 `", "`로 결합(미연동 품목은 빈 문자열).
+   - `test_admin_mode.py`: `test_24_export_master_csv_mapped_codes` 추가(19개 헤더 및 기존 컬럼·보안 불변 조건(`비고`/`biko`/`1500` 미포함), CSV 로트 매칭 상품·미매칭 폴백(`10GL06`)·쿠팡 미연동(`80FC04`)·관리자 `gaemi_mappings` 구체/와일드카드/반품 옵션 ID 동적 반영 검증).
+3. **변경 이유 및 중요한 설계 결정**: 리포트 CSV만으로는 각 마스터 단품이 개미창고(3PL)의 어떤 상품코드·옵션명과 쿠팡 윙의 어떤 옵션 ID들에 매핑되어 있는지 역추적하기 어려웠음. `판매자관리코드` 바로 우측에 매핑 코드 3종을 배치하고, 동일 옵션명을 가진 다중 로트(예: 동일 옵션 다른 등록일/재고)는 중복 제거하며 구방식 매핑 품목 중 CSV 미매칭 항목도 `gaemi_filter` 키워드가 빈칸으로 누락되지 않도록 폴백 처리함.
+4. **실행한 테스트와 그 결과**:
+   - `python -W error::SyntaxWarning -m py_compile app.py test_app.py test_business_logic.py test_admin_mode.py` — 통과 (exit code 0)
+   - 정적 HTML/JS 검증(`verify_html_js.py`, 스크래치) — 통과 (`JS delimiter & string/template balance OK`, 175개 정적 `document.getElementById()` 타겟 확인, 148개 인라인 이벤트 핸들러 확인, `GET /` 414,417 chars, `GET /api/summary` 38 masters)
+   - `python -m unittest discover -p "test_*.py" -v` — 39개 테스트 전부 통과 (`Ran 39 tests in 2.373s`, `OK`)
+   - `/api/export-master-csv` 전수 38개 마스터 CSV 스팟체크 — 19컬럼·38행 정상 파싱 및 `비고`/`biko`/`1500` 미노출 확인
+   - `git diff --stat inventory_master_store.json` — 출력 없음 (운영 원본 데이터 무수정 확인)
+5. **남은 문제 및 다음 작업 시 주의사항**:
+   - 현재 변경사항은 로컬 워킹 트리(`app.py`, `test_admin_mode.py`, `DEVELOPMENT_LOG.md`)에만 반영되어 있으며, `origin/main` 원격 푸시 및 Render 재배포는 사용자 확인 후 진행해야 함.
+   - Excel에서 단일 `쿠팡 옵션 ID`(11자리 숫자 1개만 매핑된 신규 품목 등) 열을 바로 열 경우 Excel 자체 숫자 서식으로 표기될 수 있으므로 필요 시 향후 서식 접두 검토 가능(현재 쉼표 구분 다중 ID 및 표준 UTF-8-BOM CSV 호환 우선).
+

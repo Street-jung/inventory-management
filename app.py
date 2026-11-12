@@ -2411,10 +2411,21 @@ def export_master_csv():
     summary_resp = get_summary().json
     masters = summary_resp.get("masters", [])
 
+    def _join_unique(values):
+        seen = set()
+        out = []
+        for v in values:
+            s = _clean_cell_str(v)
+            if s and s not in seen:
+                seen.add(s)
+                out.append(s)
+        return ", ".join(out)
+
     si = io.StringIO()
     cw = csv.writer(si)
     cw.writerow([
-        "판매자관리코드", "구분", "마스터 상품명", "총 가용재고", "통합 런웨이(일)",
+        "판매자관리코드", "개미창고 상품코드", "개미창고 옵션명", "쿠팡 옵션 ID",
+        "구분", "마스터 상품명", "총 가용재고", "통합 런웨이(일)",
         "개미(3PL) 재고", "개미 런웨이(일)", "최단 소비기한",
         "쿠팡(실물) 재고", "쿠팡 반품(실물) 재고", "쿠팡 런웨이(일)", 
         "7일 출고량", "30일 출고량", "일평균 출고량", 
@@ -2422,8 +2433,55 @@ def export_master_csv():
     ])
 
     for m in masters:
+        csv_lots = m.get("csv_gaemi_lots") or []
+        gaemi_mappings = m.get("gaemi_mappings") or []
+
+        if isinstance(gaemi_mappings, list) and len(gaemi_mappings) > 0:
+            gaemi_codes_list = []
+            gaemi_opts_list = []
+            for rule in gaemi_mappings:
+                if not isinstance(rule, dict):
+                    continue
+                req_code = _clean_cell_str(rule.get("gaemi_code") or rule.get("code") or "")
+                req_opt = _clean_cell_str(rule.get("option_name", ""))
+                if not req_code:
+                    continue
+                gaemi_codes_list.append(req_code)
+                if req_opt in ("", "*"):
+                    matched_opts = [
+                        lot.get("option_name", "")
+                        for lot in csv_lots
+                        if _clean_cell_str(lot.get("gaemi_code", "")).upper() == req_code.upper()
+                        and _clean_cell_str(lot.get("option_name", ""))
+                    ]
+                    if matched_opts:
+                        gaemi_opts_list.extend(matched_opts)
+                    else:
+                        gaemi_opts_list.append("전체(*)")
+                else:
+                    gaemi_opts_list.append(req_opt)
+            gaemi_codes_str = _join_unique(gaemi_codes_list)
+            gaemi_options_str = _join_unique(gaemi_opts_list)
+        else:
+            gaemi_codes_src = m.get("gaemi_codes") or [lot.get("gaemi_code", "") for lot in csv_lots]
+            gaemi_codes_str = _join_unique(gaemi_codes_src)
+            lot_opt_names = [
+                lot.get("option_name", "")
+                for lot in csv_lots
+                if _clean_cell_str(lot.get("option_name", ""))
+            ]
+            if lot_opt_names:
+                gaemi_options_str = _join_unique(lot_opt_names)
+            else:
+                gaemi_options_str = _clean_cell_str(m.get("gaemi_filter", ""))
+
+        coupang_option_ids_str = _join_unique(
+            o.get("id", "") for o in (m.get("options") or []) if isinstance(o, dict)
+        )
+
         cw.writerow([
-            m["seller_code"], m.get("product_type", "사입"), m["name"],
+            m["seller_code"], gaemi_codes_str, gaemi_options_str, coupang_option_ids_str,
+            m.get("product_type", "사입"), m["name"],
             m["master_physical_total"], m["total_runway_str"],
             m["gaemi_total"], m["gaemi_runway_str"], m.get("nearest_expiry_date") or "-",
             m["coupang_physical_total"], m.get("coupang_return_physical_total", 0), m["coupang_runway_str"],

@@ -8,6 +8,7 @@ if sys.platform == 'win32':
         pass
 
 import unittest
+import io
 import json
 import csv
 import copy
@@ -2218,6 +2219,91 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         self.assertIn("if (hasCoupangLink) {", render_sec)
 
         print("OK: [Admin Test 23] 쿠팡 미연동 상품 클릭·번들창 차단 & 쿠팡재고/런웨이/0출고량 마스킹 검증 완료")
+
+    def test_24_export_master_csv_mapped_codes(self):
+        """리포트 CSV 내보내기 시 개미창고 상품코드·개미창고 옵션명·쿠팡 옵션 ID 매핑 컬럼 포함 검증"""
+        headers = self._login("1500")
+
+        # 1. 기본 상태 리포트 CSV 헤더 및 행 수·보안 불변 조건 검증
+        res = self.client.get("/api/export-master-csv")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.mimetype, "text/csv")
+        csv_txt = res.data.decode("utf-8-sig")
+        self.assertNotIn("비고", csv_txt)
+        self.assertNotIn("biko", csv_txt.lower())
+        self.assertNotIn("1500", csv_txt)
+
+        rows = list(csv.reader(io.StringIO(csv_txt)))
+        header = rows[0]
+        self.assertEqual(
+            header[:5],
+            ["판매자관리코드", "개미창고 상품코드", "개미창고 옵션명", "쿠팡 옵션 ID", "구분"],
+        )
+        self.assertIn("추천 조치", header)
+        self.assertEqual(len(rows) - 1, 38)
+
+        idx = {col: i for i, col in enumerate(header)}
+        by_code = {row[idx["판매자관리코드"]]: row for row in rows[1:]}
+
+        # 2. 쿠팡 연동 + CSV 로트 매칭 상품 (20TZ01: 중복 옵션명 제거 검증)
+        row_tz01 = by_code["20TZ01"]
+        self.assertEqual(row_tz01[idx["개미창고 상품코드"]], "PJ1489272")
+        tz01_opts = [s.strip() for s in row_tz01[idx["개미창고 옵션명"]].split(",") if s.strip()]
+        self.assertIn("라노 500ml", tz01_opts)
+        self.assertEqual(len(tz01_opts), len(set(tz01_opts)))
+        tz01_cids = [s.strip() for s in row_tz01[idx["쿠팡 옵션 ID"]].split(",") if s.strip()]
+        self.assertEqual(tz01_cids, ["95856248619", "95856248617", "95856248618"])
+
+        # 3. 쿠팡 연동 + 개미 CSV 미일치 상품 (10GL06: legacy gaemi_codes & gaemi_filter 폴백 검증)
+        row_gl06 = by_code["10GL06"]
+        self.assertEqual(row_gl06[idx["개미창고 상품코드"]], "PJ1489270_CLASSIC, PJ1489270")
+        self.assertEqual(row_gl06[idx["개미창고 옵션명"]], "클래식")
+        self.assertEqual(
+            row_gl06[idx["쿠팡 옵션 ID"]],
+            "95893435622, 95893649650, 95893649651",
+        )
+
+        # 4. 쿠팡 미연동 상품 (80FC04: 개미 코드/옵션명 표시 + 쿠팡 옵션 ID 빈값)
+        row_fc04 = by_code["80FC04"]
+        self.assertEqual(row_fc04[idx["개미창고 상품코드"]], "PJ1489578")
+        self.assertEqual(row_fc04[idx["개미창고 옵션명"]], "먹물 스파게티 500g")
+        self.assertEqual(row_fc04[idx["쿠팡 옵션 ID"]], "")
+
+        # 5. 관리자 명시 매핑(gaemi_mappings) — 구체 옵션 + 와일드카드('*') + 반품 포함 쿠팡 옵션 ID 검증
+        save_res = self.client.post(
+            "/api/admin/product/mappings/save",
+            headers=headers,
+            json={
+                "seller_code": "80FC04",
+                "gaemi_mappings": [
+                    {"gaemi_code": "PJ_CUSTOM_1", "option_name": "명시 옵션 A"},
+                    {"gaemi_code": "PJ1489272", "option_name": "*"},
+                    {"gaemi_code": "PJ_NO_CSV_WILDCARD", "option_name": "*"},
+                ],
+                "options": [
+                    {"id": "99900001111", "bundle": 1, "name": "1개", "is_return": False},
+                    {"id": "99900002222", "bundle": 1, "name": "반품 1개", "is_return": True},
+                ],
+            },
+        )
+        self.assertEqual(save_res.status_code, 200)
+
+        res_after = self.client.get("/api/export-master-csv")
+        self.assertEqual(res_after.status_code, 200)
+        rows_after = list(csv.reader(io.StringIO(res_after.data.decode("utf-8-sig"))))
+        by_code_after = {row[idx["판매자관리코드"]]: row for row in rows_after[1:]}
+        fc04_after = by_code_after["80FC04"]
+        self.assertEqual(
+            fc04_after[idx["개미창고 상품코드"]],
+            "PJ_CUSTOM_1, PJ1489272, PJ_NO_CSV_WILDCARD",
+        )
+        fc04_opts_after = [s.strip() for s in fc04_after[idx["개미창고 옵션명"]].split(",") if s.strip()]
+        self.assertIn("명시 옵션 A", fc04_opts_after)
+        self.assertIn("라노 500ml", fc04_opts_after)
+        self.assertIn("전체(*)", fc04_opts_after)
+        self.assertEqual(fc04_after[idx["쿠팡 옵션 ID"]], "99900001111, 99900002222")
+
+        print("OK: [Admin Test 24] 리포트 CSV 개미창고 상품코드/옵션명/쿠팡 옵션 ID 매핑 포함 검증 완료")
 
 
 if __name__ == '__main__':
