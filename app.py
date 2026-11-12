@@ -2135,6 +2135,7 @@ def get_summary():
             "status_color": status_color,
             "action_cta": action_cta,
             "risk_score": risk_score,
+            "has_coupang_link": any(str(o.get("id", "")).strip() for o in option_details),
             "options": option_details,
             "recent_orders": recent_orders
         })
@@ -3297,6 +3298,15 @@ HTML_TEMPLATE = """
             position: sticky;
             left: 0;
             box-sizing: border-box;
+        }
+        .masked-cell-value,
+        .masked-cell-value * {
+            color: transparent !important;
+            background-color: transparent !important;
+            border-color: transparent !important;
+            opacity: 0 !important;
+            user-select: none !important;
+            pointer-events: none !important;
         }
         :fullscreen body { background-color: #f8fafc; }
         :-webkit-full-screen body { background-color: #f8fafc; }
@@ -5280,6 +5290,21 @@ HTML_TEMPLATE = """
             }
         }
 
+        function isCoupangLinked(m) {
+            if (!m) return false;
+            if (typeof m.has_coupang_link === 'boolean') return m.has_coupang_link;
+            return Array.isArray(m.options) && m.options.some(o => o && String(o.id || '').trim());
+        }
+
+        function shouldMaskSalesCell(m) {
+            if (isCoupangLinked(m)) return false;
+            return (Number(m.other_sales_7d || 0) <= 0)
+                && (Number(m.other_sales_30d || 0) <= 0)
+                && (Number(m.total_sales_7d || 0) <= 0)
+                && (Number(m.total_sales_30d || 0) <= 0)
+                && (Number(m.daily_sales || 0) <= 0);
+        }
+
         function toggleAllOptionDetails() {
             expandAllOptions = !expandAllOptions;
             if (!expandAllOptions) expandedRowIds.clear();
@@ -5288,6 +5313,8 @@ HTML_TEMPLATE = """
         }
 
         function toggleSingleOption(prodId) {
+            const m = allMasterData.find(x => x.id === prodId || x.seller_code === prodId);
+            if (!m || !isCoupangLinked(m)) return;
             const row = document.getElementById(`subrow_${prodId}`);
             if (!row) return;
             const willOpen = row.classList.contains('hidden');
@@ -6279,10 +6306,16 @@ HTML_TEMPLATE = """
                     ? `<div class="text-[9px] font-semibold text-teal-700 mt-0.5 whitespace-nowrap" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 +${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
                     : '';
 
-                const isSubExpanded = expandAllOptions || expandedRowIds.has(m.id);
+                const hasCoupangLink = isCoupangLinked(m);
+                if (!hasCoupangLink && expandedRowIds.has(m.id)) expandedRowIds.delete(m.id);
+                const maskCoupangCell = !hasCoupangLink;
+                const maskSalesCell = shouldMaskSalesCell(m);
+                const isSubExpanded = hasCoupangLink && (expandAllOptions || expandedRowIds.has(m.id));
+                const rowClickAttr = hasCoupangLink ? ` onclick="toggleSingleOption('${escapeHtml(m.id)}')"` : '';
+                const rowCursorCls = hasCoupangLink ? 'cursor-pointer' : 'cursor-default';
 
                 html += `
-                    <tr draggable="true" data-row-idx="${allMasterData.indexOf(m)}" class="hover:bg-slate-50/80 transition cursor-pointer select-none" onclick="toggleSingleOption('${escapeHtml(m.id)}')">
+                    <tr draggable="true" data-row-idx="${allMasterData.indexOf(m)}" class="hover:bg-slate-50/80 transition ${rowCursorCls} select-none"${rowClickAttr}>
                 `;
 
                 currentColumnOrder.forEach(colId => {
@@ -6316,10 +6349,13 @@ HTML_TEMPLATE = """
                         const customLtBadge = (m.lead_time_days !== null && m.lead_time_days !== undefined)
                             ? `<span class="text-[9px] bg-slate-100 text-slate-700 border border-slate-200 px-1 rounded font-mono shrink-0" title="품목 개별 리드타임">LT ${m.lead_time_days}일</span>`
                             : '';
+                        const chevHtml = hasCoupangLink
+                            ? `<i id="chev_${escapeHtml(m.id)}" class="fa-solid fa-angle-right text-[10px] shrink-0 transition-transform ${isSubExpanded ? 'rotate-90 text-slate-900' : 'text-slate-400'}"></i>`
+                            : '';
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
                                 <div class="font-bold text-slate-900 flex items-center gap-1 min-w-0">
-                                    <i id="chev_${escapeHtml(m.id)}" class="fa-solid fa-angle-right text-[10px] shrink-0 transition-transform ${isSubExpanded ? 'rotate-90 text-slate-900' : 'text-slate-400'}"></i>
+                                    ${chevHtml}
                                     <span class="truncate" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</span>
                                     ${customLtBadge}
                                     ${b2bBadge}
@@ -6346,29 +6382,52 @@ HTML_TEMPLATE = """
                     } else if (colId === 'gaemi_runway') {
                         html += `<td class="${col.tdClass} overflow-hidden">${gaemiRunwayHtml}</td>`;
                     } else if (colId === 'coupang_stock') {
-                        const retPhys = m.coupang_return_physical_total || 0;
-                        const retPkg = m.coupang_return_package_total || 0;
-                        const retBadgeHtml = retPhys > 0
-                            ? `<div class="mt-0.5"><span class="inline-block text-[9px] px-1 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 font-medium whitespace-nowrap" title="쿠팡 반품 재고 (정상 가용재고 합산 제외 · ${retPkg}세트)">🔄 반품 ${retPhys.toLocaleString()}</span></div>`
-                            : '';
-                        html += `
-                            <td class="${col.tdClass} overflow-hidden">
-                                <div class="font-bold font-mono">${m.coupang_physical_total.toLocaleString()}</div>
-                                ${m.coupang_package_total > 0 ? `<div class="text-[9px] text-slate-400 font-normal">(${m.coupang_package_total}세트)</div>` : ''}
-                                ${retBadgeHtml}
-                            </td>
-                        `;
+                        if (maskCoupangCell) {
+                            html += `
+                                <td class="${col.tdClass} overflow-hidden">
+                                    <div class="masked-cell-value text-transparent select-none" aria-hidden="true">${m.coupang_physical_total.toLocaleString()}</div>
+                                </td>
+                            `;
+                        } else {
+                            const retPhys = m.coupang_return_physical_total || 0;
+                            const retPkg = m.coupang_return_package_total || 0;
+                            const retBadgeHtml = retPhys > 0
+                                ? `<div class="mt-0.5"><span class="inline-block text-[9px] px-1 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 font-medium whitespace-nowrap" title="쿠팡 반품 재고 (정상 가용재고 합산 제외 · ${retPkg}세트)">🔄 반품 ${retPhys.toLocaleString()}</span></div>`
+                                : '';
+                            html += `
+                                <td class="${col.tdClass} overflow-hidden">
+                                    <div class="font-bold font-mono">${m.coupang_physical_total.toLocaleString()}</div>
+                                    ${m.coupang_package_total > 0 ? `<div class="text-[9px] text-slate-400 font-normal">(${m.coupang_package_total}세트)</div>` : ''}
+                                    ${retBadgeHtml}
+                                </td>
+                            `;
+                        }
                     } else if (colId === 'coupang_runway') {
-                        html += `<td class="${col.tdClass} overflow-hidden">${coupangRunwayHtml}</td>`;
+                        if (maskCoupangCell) {
+                            html += `<td class="${col.tdClass} overflow-hidden"><div class="masked-cell-value text-transparent select-none" aria-hidden="true">${escapeHtml(m.coupang_runway_str)}</div></td>`;
+                        } else {
+                            html += `<td class="${col.tdClass} overflow-hidden">${coupangRunwayHtml}</td>`;
+                        }
                     } else if (colId === 'total_sales') {
                         const s7 = (m.total_sales_7d || 0).toLocaleString();
                         const s30 = (m.total_sales_30d || 0).toLocaleString();
-                        html += `
-                            <td class="${col.tdClass} overflow-hidden">
-                                <div class="font-bold font-mono text-slate-900 truncate">${s7}개 <span class="text-slate-400 font-normal text-[10px]">/ 30일 ${s30}개</span></div>
-                                <div class="text-[9px] text-slate-400 font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
-                            </td>
-                        `;
+                        if (maskSalesCell) {
+                            html += `
+                                <td class="${col.tdClass} overflow-hidden">
+                                    <div class="masked-cell-value text-transparent select-none" aria-hidden="true">
+                                        <div class="font-bold font-mono truncate">${s7}개 <span class="font-normal text-[10px]">/ 30일 ${s30}개</span></div>
+                                        <div class="text-[9px] font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
+                                    </div>
+                                </td>
+                            `;
+                        } else {
+                            html += `
+                                <td class="${col.tdClass} overflow-hidden">
+                                    <div class="font-bold font-mono text-slate-900 truncate">${s7}개 <span class="text-slate-400 font-normal text-[10px]">/ 30일 ${s30}개</span></div>
+                                    <div class="text-[9px] text-slate-400 font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
+                                </td>
+                            `;
+                        }
                     } else if (colId === 'total_runway') {
                         const totalRunwayBadge = isStagnantTotal
                             ? `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-50 text-orange-800 border border-orange-200 font-semibold font-mono text-[10px] whitespace-nowrap" title="재고 보유 중 최근 7/30일 출고량 0">🔕 소진무</span>`
@@ -6390,8 +6449,8 @@ HTML_TEMPLATE = """
 
                 html += `</tr>`;
 
-                // 세부 확장 행 (쿠팡 번들 재고 전용 · 심플 가독성 UI + 세부정보보기 팝업 버튼)
-                const subrowCoupangBody = (() => {
+                // 세부 확장 행 (쿠팡 번들 재고 전용 · 심플 가독성 UI + 세부정보보기 팝업 버튼 · 쿠팡 윙 연동 품목만 노출)
+                const subrowCoupangBody = hasCoupangLink ? (() => {
                     const opts = m.options || [];
                     const bundleGroups = Array.isArray(m.coupang_bundle_groups) ? m.coupang_bundle_groups : [];
                     const retPkgTot = m.coupang_return_package_total || 0;
@@ -6578,19 +6637,21 @@ HTML_TEMPLATE = """
                             ${gradeMissingHintHtml}
                         </div>
                     `;
-                })();
+                })() : '';
 
-                html += `
-                    <tr id="subrow_${escapeHtml(m.id)}" class="subrow-tr ${isSubExpanded ? '' : 'hidden'} bg-slate-50/90 border-b border-slate-200">
-                        <td colspan="${currentColumnOrder.length}" class="subrow-cell p-0 align-top">
-                            <div class="subrow-sticky-shell px-2 sm:px-3.5 py-2.5" style="width: min(var(--subrow-view-w, 100%), 680px); max-width: 100%;">
-                                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                                    ${subrowCoupangBody}
+                if (hasCoupangLink) {
+                    html += `
+                        <tr id="subrow_${escapeHtml(m.id)}" class="subrow-tr ${isSubExpanded ? '' : 'hidden'} bg-slate-50/90 border-b border-slate-200">
+                            <td colspan="${currentColumnOrder.length}" class="subrow-cell p-0 align-top">
+                                <div class="subrow-sticky-shell px-2 sm:px-3.5 py-2.5" style="width: min(var(--subrow-view-w, 100%), 680px); max-width: 100%;">
+                                    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                                        ${subrowCoupangBody}
+                                    </div>
                                 </div>
-                            </div>
-                        </td>
-                    </tr>
-                `;
+                            </td>
+                        </tr>
+                    `;
+                }
             });
 
             tbody.innerHTML = html;

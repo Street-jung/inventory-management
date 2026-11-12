@@ -175,3 +175,24 @@
 5. **남은 문제 및 다음 작업 시 주의사항**:
    - 현재 변경사항은 로컬 워킹 트리(`app.py`, `test_admin_mode.py`, `DEVELOPMENT_LOG.md`)에만 반영되어 있으며, `origin/main` 원격 푸시 및 Render 재배포는 사용자 확인 후 진행해야 함.
    - 제조일 기준 개월수(`shelf_life_months`)는 신규 필드이므로 품목별 값을 일괄 편집에서 입력·저장하면 상세정보 모달에 `제조일로부터 N개월`이 표시됨(기존 `default_expiry_date`는 그대로 유지됨). 또한 보드 11열 전환에 따라 브라우저의 기존 `v6` 열 순서 캐시는 `v7` 기본 11열 순서로 초기화됨.
+
+---
+
+## [2026-11-12] 쿠팡 윙 미연동 상품 클릭·번들창 비활성화 및 쿠팡창고·쿠팡런웨이·0출고량 마스킹
+1. **작업 날짜와 변경한 기능**: `2026-11-12` / 쿠팡 윙 미연동(`options` 미등록) 상품의 행 클릭·인라인 번들 재고 창 비활성화 및 보드 내 쿠팡창고·쿠팡 런웨이·출고량(쿠팡+쿠팡외 합산 0건 시) 배경색 동일 마스킹 적용
+2. **수정한 파일과 핵심 변경 사항**:
+   - `app.py`:
+     - `get_summary()` 각 마스터 항목에 `"has_coupang_link"`(유효한 쿠팡 옵션 ID 매핑 유무) 불리언 필드 추가 및 기존 `total_sales_7d = coupang_sales_7d + other_sales_7d`·`total_sales_30d = coupang_sales_30d + other_sales_30d`·`daily_sales = coupang_daily + other_daily` 합산 유지 재확인.
+     - CSS `.masked-cell-value` 추가(`color: transparent !important; background-color: transparent !important; border-color: transparent !important; opacity: 0 !important; user-select: none !important; pointer-events: none !important;`): 일반 흰 배경뿐 아니라 행 hover(`hover:bg-slate-50/80`) 시에도 값·하위 배지·서브텍스트가 노출되지 않고 `<td>` 테두리만 유지되도록 내부 래퍼에 적용.
+     - JS `isCoupangLinked(m)`, `shouldMaskSalesCell(m)` 추가 및 `toggleSingleOption(prodId)` 가드 추가.
+     - `renderMasterTable()`에서 `!hasCoupangLink` 행의 `onclick`·`cursor-pointer`·확장 화살표(`<i id="chev_...">`) 및 `#subrow_${m.id}` DOM 렌더링을 제거해 행 클릭 및 `[번들 재고 펼치기]` 시 어떤 창도 열리지 않도록 처리(`🔗`/`✏️` 관리자 빠른 버튼만 동작). 쿠팡 미연동 행의 `coupang_stock`·`coupang_runway`는 전체 마스킹하고, `total_sales`는 `other_sales` 포함 총 출고량이 0일 때만 마스킹(스마트스토어·카페24 등 쿠팡외 출고 존재 시 정상 표시).
+   - `test_admin_mode.py`: `test_23_unlinked_coupang_no_click_and_masked_cells` 추가(`has_coupang_link`·동적 매핑 해제/재연결·`total_sales == coupang_sales + other_sales` 합산 검증, CSS/JS 마스킹 및 클릭 비활성화 마커, PIN/금지 컬럼 미노출 검증).
+3. **변경 이유 및 중요한 설계 결정**: 쿠팡 윙과 매핑되지 않은 상품은 쿠팡에서 판매하지 않으므로 행 클릭 시 `연결된 쿠팡 윙 번들 옵션이 없습니다` 확장창이나 팝업이 열리지 않도록 차단해 혼선을 방지함(관리자는 `🔗`/`✏️` 버튼으로만 접근). 또한 `쿠팡창고(실물)`/`쿠팡 런웨이`는 미연동 전체에서 숨기되, `출고량 (7일/30일)`은 쿠팡+쿠팡외 통합 출고 합산 열이므로 스마트스토어·카페24 등 쿠팡외 출고가 있는 5개 품목(`80XP03`·`20XO02` 등)은 정상 표시하고 출고가 0인 품목만 마스킹하도록 사용자 확인을 반영함. 마스킹은 `<td>`가 아닌 내부 `div.masked-cell-value`에 적용해 표 구분선 유실 및 hover 대비 노출을 방지함.
+4. **실행한 테스트와 그 결과**:
+   - `python -W error::SyntaxWarning -m py_compile app.py test_app.py test_business_logic.py test_admin_mode.py` — 통과 (exit code 0)
+   - 정적 HTML/JS 검증(`verify_html_js.py`, 스크래치) — 통과 (`JS delimiter & string/template balance OK`, 175개 정적 `document.getElementById()` 타겟 확인, 148개 인라인 이벤트 핸들러 확인, `GET /` 414,417 chars, `GET /api/summary` 38 masters)
+   - `python -m unittest discover -p "test_*.py" -v` — 38개 테스트 전부 통과 (`Ran 38 tests in 2.223s`, `OK`)
+   - `git diff --stat inventory_master_store.json` — 출력 없음 (운영 원본 데이터 무수정 확인)
+5. **남은 문제 및 다음 작업 시 주의사항**:
+   - 쿠팡 옵션이 매핑되어 있으나 현재 재고가 0인 품목(예: `10GL06`)은 `has_coupang_link = True`로 유지되어 쿠팡 `0`·`재고없음` 및 행 클릭 번들 확인이 계속 가능함.
+   - 추후 쿠팡외 출고가 0인 쿠팡 미연동 상품에 스마트스토어 주문이 새로 유입되면 `출고량` 열이 자동으로 보이기 시작함(`shouldMaskSalesCell`).

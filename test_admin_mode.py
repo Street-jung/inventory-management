@@ -2137,6 +2137,88 @@ class TestIljeomodoAdminMode(unittest.TestCase):
 
         print("OK: [Admin Test 22] 제조일 기준 소비기한 개월수 & 보드 관리코드 제거/발주권고·조치 열 통합 검증 완료")
 
+    def test_23_unlinked_coupang_no_click_and_masked_cells(self):
+        """쿠팡 윙 미연동 상품 클릭/번들창 비활성화 및 쿠팡창고·쿠팡런웨이·0출고량(쿠팡+쿠팡외 합산 기준) 배경색 동일 마스킹 검증"""
+        headers = self._login("1500")
+
+        # 1. /api/summary has_coupang_link 및 출고량 = 쿠팡 출고 + 쿠팡외 출고 합산 검증
+        summary = json.loads(self.client.get("/api/summary").data)
+        by_code = {m["seller_code"]: m for m in summary["masters"]}
+        for m in summary["masters"]:
+            expected_link = any(str(o.get("id", "")).strip() for o in (m.get("options") or []))
+            self.assertEqual(m.get("has_coupang_link"), expected_link)
+            self.assertEqual(m["total_sales_7d"], m["coupang_sales_7d"] + m["other_sales_7d"])
+            self.assertEqual(m["total_sales_30d"], m["coupang_sales_30d"] + m["other_sales_30d"])
+
+        # 쿠팡 옵션은 매핑되었으나 현재 재고 0인 상품(10GL06)도 연동 상품(has_coupang_link=True) 유지
+        self.assertTrue(by_code["10GL06"]["has_coupang_link"])
+        # 쿠팡 미연동이면서 쿠팡외 출고 있는 상품(80XP03) & 출고 0인 상품(20PB01) 확인
+        self.assertFalse(by_code["80XP03"]["has_coupang_link"])
+        self.assertGreater(by_code["80XP03"]["other_sales_7d"], 0)
+        self.assertEqual(by_code["80XP03"]["total_sales_7d"], by_code["80XP03"]["other_sales_7d"])
+        self.assertFalse(by_code["20PB01"]["has_coupang_link"])
+        self.assertEqual(by_code["20PB01"]["total_sales_7d"], 0)
+
+        # 2. 코드 매핑으로 쿠팡 옵션 해제 -> has_coupang_link False 전환, 재연결 -> True 복귀
+        orig_tz01_opts = copy.deepcopy(by_code["20TZ01"]["options"])
+        self.assertEqual(
+            self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+                "seller_code": "20TZ01",
+                "options": [],
+            }).status_code,
+            200,
+        )
+        s_unlinked = json.loads(self.client.get("/api/summary").data)
+        tz01_unlinked = next(m for m in s_unlinked["masters"] if m["seller_code"] == "20TZ01")
+        self.assertFalse(tz01_unlinked["has_coupang_link"])
+
+        self.assertEqual(
+            self.client.post("/api/admin/product/mappings/save", headers=headers, json={
+                "seller_code": "20TZ01",
+                "options": [{"id": o["id"], "bundle": o["bundle"], "name": o["name"]} for o in orig_tz01_opts],
+            }).status_code,
+            200,
+        )
+        s_relinked = json.loads(self.client.get("/api/summary").data)
+        tz01_relinked = next(m for m in s_relinked["masters"] if m["seller_code"] == "20TZ01")
+        self.assertTrue(tz01_relinked["has_coupang_link"])
+
+        # 3. HTML/JS 마스킹 CSS, 행 클릭 비활성화, subrow 미생성 및 보안 검증
+        html = self.client.get("/").data.decode("utf-8")
+        self.assertNotIn("1500", html)
+        self.assertNotIn("비고", html)
+        self.assertNotIn("'biko'", html)
+
+        self.assertIn(".masked-cell-value", html)
+        self.assertIn("color: transparent !important", html)
+        self.assertIn("opacity: 0 !important", html)
+        self.assertIn("function isCoupangLinked(m)", html)
+        self.assertIn("function shouldMaskSalesCell(m)", html)
+
+        toggle_start = html.find("function toggleSingleOption(prodId)")
+        toggle_end = html.find("function openProductDetailModal(prodId)")
+        self.assertGreater(toggle_start, 0)
+        self.assertGreater(toggle_end, toggle_start)
+        toggle_sec = html[toggle_start:toggle_end]
+        self.assertIn("!isCoupangLinked(m)", toggle_sec)
+
+        render_start = html.find("function renderMasterTable()")
+        tfoot_start = html.find("// 5. 하단 합계란(tfoot) 렌더링")
+        self.assertGreater(render_start, 0)
+        self.assertGreater(tfoot_start, render_start)
+        render_sec = html[render_start:tfoot_start]
+        self.assertIn("const hasCoupangLink = isCoupangLinked(m);", render_sec)
+        self.assertIn("const maskCoupangCell = !hasCoupangLink;", render_sec)
+        self.assertIn("const maskSalesCell = shouldMaskSalesCell(m);", render_sec)
+        self.assertIn("const rowClickAttr = hasCoupangLink ?", render_sec)
+        self.assertIn("cursor-default", render_sec)
+        self.assertIn("if (maskCoupangCell)", render_sec)
+        self.assertIn("if (maskSalesCell)", render_sec)
+        self.assertIn("masked-cell-value text-transparent select-none", render_sec)
+        self.assertIn("if (hasCoupangLink) {", render_sec)
+
+        print("OK: [Admin Test 23] 쿠팡 미연동 상품 클릭·번들창 차단 & 쿠팡재고/런웨이/0출고량 마스킹 검증 완료")
+
 
 if __name__ == '__main__':
     unittest.main()
