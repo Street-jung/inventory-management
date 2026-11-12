@@ -114,3 +114,22 @@
 5. **남은 문제 및 다음 작업 시 주의사항**:
    - 현재 변경사항은 로컬 워킹 트리(`app.py`, `test_admin_mode.py`, `DEVELOPMENT_LOG.md`)에만 반영된 미커밋 상태이며, `origin/main` 푸시 및 Render 배포 전 사용자 확인이 필요함.
    - `test_13`, `test_16`, `test_17`, `test_20`은 인라인 확장행의 `.subrow-sticky-shell` / `쿠팡 윙 옵션별 번들 · 실물 재고` / `반품` 버튼 마커와 팝업 모달의 `판매 정체(소진무) 알람:` 마커를 검증하므로, 추후 UI 수정 시 해당 마커 유실에 유의할 것.
+
+---
+
+## [2026-11-12] 번들 0개 반품 옵션 숨김 및 상세 팝업 내 쿠팡 출고량 표시 추가
+1. **작업 날짜와 변경한 기능**: `2026-11-12` / 행 확장 시 재고 0개 반품 옵션 비노출 처리 및 `#productDetailModal` 내 쿠팡 출고량(통합·번들별) 표시 추가
+2. **수정한 파일과 핵심 변경 사항**:
+   - `app.py`:
+     - `renderMasterTable()` 내 `subrowCoupangBody`에서 반품 옵션(`return_options`)을 `physical_stock > 0 || coupang_stock > 0` 조건으로 필터링해 반품 실물 재고가 있을 때만 행 및 그룹/요약 반품 배지를 노출(`hasAnyReturn = retPhysTot > 0 || retPkgTot > 0`, `visibleOptCount` 기준으로 헤더 옵션 수 표시).
+     - `renderProductDetailModal()` 내 KPI `출고 속도 · 통합` 카드에 채널별 요약(`쿠팡 7일/30일 · 타 7일/30일`) 추가, `쿠팡 재고 · 출고 요약` 카드에 `쿠팡 출고: 7일 / 30일 · 일평균` 요약 바 및 번들 칩별 출고량(`출고 7일 / 30일`) 표시 추가.
+   - `test_admin_mode.py`: `test_20_compact_bundle_subrow_detail_modal_and_sales_date_norm`에 `subrowCoupangBody` 재고>0 반품 필터 마커 및 `renderProductDetailModal`의 `쿠팡 출고:` / `출고 7일` 마커 검증 추가.
+3. **변경 이유 및 중요한 설계 결정**: 재고 0인 반품 옵션까지 행 확장에 함께 노출되면 번들 재고 파악 시 시선이 분산된다는 사용자 피드백을 반영하되, 백엔드 API(`coupang_bundle_groups[*]["return_options"]`, `test_17` 계약)와 관리자 `[🔗 코드 매핑]` 목록은 유지하고 대시보드 인라인 표시만 0개 반품을 숨김. 상세 팝업에서는 `쿠팡외 출고`와 동일한 비중으로 `쿠팡 출고` 및 번들별 출고량을 함께 노출해 총 출고량 대비 쿠팡 기여도를 즉시 파악하도록 구성함.
+4. **실행한 테스트와 그 결과**:
+   - `python -W error::SyntaxWarning -m py_compile app.py test_app.py test_business_logic.py test_admin_mode.py` — 통과 (exit code 0)
+   - 정적 HTML/JS 검증(`verify_html_js.py`, 스크래치) — 통과 (`JS delimiter & string/template balance OK`, 158개 정적 `document.getElementById()` 타겟 확인, 143개 인라인 이벤트 핸들러 확인, `GET /` 383,967 chars, `GET /api/summary` 38 masters)
+   - `python -m unittest discover -p "test_*.py" -v` — 35개 테스트 전부 통과 (`Ran 35 tests in 2.055s`, `OK`)
+   - `git diff --stat inventory_master_store.json` — 출력 없음 (운영 원본 데이터 무수정 확인)
+5. **남은 문제 및 다음 작업 시 주의사항**:
+   - 현재 변경사항은 로컬 워킹 트리(`app.py`, `test_admin_mode.py`, `DEVELOPMENT_LOG.md`)에만 반영되어 있으며, `origin/main` 원격 푸시는 사용자 승인 후 진행해야 함.
+   - 관리자 모드에서 재고 0개 수동 반품 옵션 플래그를 해제/조정해야 할 때는 팝업 하단 또는 테이블 우측 `[🔗 코드 매핑]` 모달에서 전체 옵션 목록을 확인할 수 있음.

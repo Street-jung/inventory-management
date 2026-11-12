@@ -5071,6 +5071,7 @@ HTML_TEMPLATE = """
                         <div class="text-[10px] font-semibold ${m.is_no_sales ? 'text-orange-800' : 'text-slate-500'}">출고 속도 · 통합</div>
                         <div class="font-bold font-mono text-sm ${m.is_no_sales ? 'text-orange-950' : 'text-slate-900'} mt-0.5">일 ${m.daily_sales}개</div>
                         <div class="text-[10px] ${m.is_no_sales ? 'text-orange-700' : 'text-slate-500'} truncate">7일 ${m.total_sales_7d} · 30일 ${m.total_sales_30d || 0}</div>
+                        <div class="text-[9px] text-slate-400 truncate mt-0.5 font-mono">쿠팡 ${(m.coupang_sales_7d || 0).toLocaleString()}/${(m.coupang_sales_30d || 0).toLocaleString()} · 타 ${(m.other_sales_7d || 0).toLocaleString()}/${(m.other_sales_30d || 0).toLocaleString()}</div>
                     </div>
                 </div>
             `;
@@ -5163,29 +5164,44 @@ HTML_TEMPLATE = """
                 </div>
             `;
 
-            const coupangSummaryHtml = bundleGroups.length > 0 ? `
-                <div class="rounded-xl border border-slate-200 p-3.5 space-y-2 bg-white">
+            const hasCoupangSummary = bundleGroups.length > 0 || (m.coupang_sales_7d || 0) > 0 || (m.coupang_sales_30d || 0) > 0;
+            const coupangSummaryHtml = hasCoupangSummary ? `
+                <div class="rounded-xl border border-slate-200 p-3.5 space-y-2.5 bg-white">
                     <div class="flex flex-wrap items-center justify-between gap-2">
                         <div class="flex items-center space-x-1.5 text-xs font-bold text-slate-800">
                             <i class="fa-solid fa-cubes text-slate-500"></i>
-                            <span>쿠팡 번들별 재고 요약</span>
+                            <span>쿠팡 재고 · 출고 요약</span>
                         </div>
                         <span class="text-[10px] font-mono text-slate-600">
-                            정상 ${m.coupang_package_total.toLocaleString()}세트 (${m.coupang_physical_total.toLocaleString()}개)${retPhysTot > 0 ? ` · 🔄 반품 ${retPkgTot.toLocaleString()}세트 (${retPhysTot.toLocaleString()}개)` : ''}
+                            재고 ${m.coupang_package_total.toLocaleString()}세트 (${m.coupang_physical_total.toLocaleString()}개)${retPhysTot > 0 ? ` · 🔄 반품 ${retPkgTot.toLocaleString()}세트 (${retPhysTot.toLocaleString()}개)` : ''}
                         </span>
                     </div>
-                    <div class="flex flex-wrap gap-1.5">
-                        ${bundleGroups.map(grp => {
-                            const nPkg = grp.normal_package_stock || 0;
-                            const nPhys = grp.normal_physical_stock || 0;
-                            const rPhys = grp.return_physical_stock || 0;
-                            return `
-                                <span class="px-2.5 py-1 rounded-lg border text-[11px] font-mono ${nPhys > 0 ? 'bg-slate-50 border-slate-300 text-slate-800 font-semibold' : 'bg-white border-slate-200 text-slate-400'}">
-                                    ${grp.bundle}개입: ${nPkg.toLocaleString()}세트 (${nPhys.toLocaleString()}개)${rPhys > 0 ? ` · 🔄 반품 ${rPhys.toLocaleString()}개` : ''}
-                                </span>
-                            `;
-                        }).join('')}
+                    <div class="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-800">
+                        <span>
+                            <i class="fa-solid fa-truck-fast mr-1 text-slate-500"></i>
+                            <span class="font-bold text-slate-900">쿠팡 출고:</span>
+                            7일 <strong>${(m.coupang_sales_7d || 0).toLocaleString()}개</strong> / 30일 <strong>${(m.coupang_sales_30d || 0).toLocaleString()}개</strong>
+                        </span>
+                        <span class="text-[10px] font-mono text-slate-500">일평균 <strong class="text-slate-700">${m.coupang_daily || 0}개</strong>${(m.coupang_return_sales_7d || 0) > 0 ? ` · 🔄 반품출고 7일 ${(m.coupang_return_sales_7d || 0).toLocaleString()}개` : ''}</span>
                     </div>
+                    ${bundleGroups.length > 0 ? `
+                        <div class="flex flex-wrap gap-1.5">
+                            ${bundleGroups.map(grp => {
+                                const nPkg = grp.normal_package_stock || 0;
+                                const nPhys = grp.normal_physical_stock || 0;
+                                const rPhys = grp.return_physical_stock || 0;
+                                const gS7 = grp.normal_sales_7d_physical || 0;
+                                const gS30 = (grp.normal_options || []).reduce((acc, o) => acc + ((o.sales_30d || 0) * (o.bundle || grp.bundle || 1)), 0);
+                                const hasActivity = nPhys > 0 || gS7 > 0 || gS30 > 0;
+                                const salesSuffix = (gS7 > 0 || gS30 > 0) ? ` · 출고 7일 ${gS7.toLocaleString()} / 30일 ${gS30.toLocaleString()}` : '';
+                                return `
+                                    <span class="px-2.5 py-1 rounded-lg border text-[11px] font-mono ${hasActivity ? 'bg-slate-50 border-slate-300 text-slate-800 font-semibold' : 'bg-white border-slate-200 text-slate-400'}">
+                                        ${grp.bundle}개입: ${nPkg.toLocaleString()}세트 (${nPhys.toLocaleString()}개)${rPhys > 0 ? ` · 🔄 반품 ${rPhys.toLocaleString()}개` : ''}${salesSuffix}
+                                    </span>
+                                `;
+                            }).join('')}
+                        </div>
+                    ` : ''}
                 </div>
             ` : '';
 
@@ -6022,7 +6038,12 @@ HTML_TEMPLATE = """
                     const bundleGroups = Array.isArray(m.coupang_bundle_groups) ? m.coupang_bundle_groups : [];
                     const retPkgTot = m.coupang_return_package_total || 0;
                     const retPhysTot = m.coupang_return_physical_total || 0;
-                    const hasAnyReturn = retPhysTot > 0 || m.has_coupang_return || bundleGroups.some(g => (g.return_options || []).length > 0);
+                    const hasAnyReturn = retPhysTot > 0 || retPkgTot > 0;
+                    const visibleOptCount = bundleGroups.reduce((sum, g) => {
+                        const nCnt = (g.normal_options || []).length;
+                        const rCnt = (g.return_options || []).filter(o => (o.physical_stock || 0) > 0 || (o.coupang_stock || 0) > 0).length;
+                        return sum + nCnt + rCnt;
+                    }, 0);
                     const detailIdEsc = escapeHtml(m.id || m.seller_code);
 
                     const topHeaderHtml = `
@@ -6031,7 +6052,7 @@ HTML_TEMPLATE = """
                                 <div class="flex flex-wrap items-center gap-1.5">
                                     <i class="fa-solid fa-cubes text-slate-600 text-xs"></i>
                                     <span class="text-xs font-bold text-slate-900">쿠팡 윙 옵션별 번들 · 실물 재고</span>
-                                    ${opts.length > 0 ? `<span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-white border border-slate-200 text-slate-500">${opts.length}개 옵션</span>` : ''}
+                                    ${visibleOptCount > 0 ? `<span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-white border border-slate-200 text-slate-500">${visibleOptCount}개 옵션</span>` : ''}
                                 </div>
                                 <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
                                     <span class="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-600">${escapeHtml(m.seller_code)}</span>
@@ -6092,11 +6113,12 @@ HTML_TEMPLATE = """
 
                     const groupsHtml = bundleGroups.map(grp => {
                         const nOpts = grp.normal_options || [];
-                        const rOpts = grp.return_options || [];
+                        const rOpts = (grp.return_options || []).filter(opt => (opt.physical_stock || 0) > 0 || (opt.coupang_stock || 0) > 0);
                         const nPkg = grp.normal_package_stock || 0;
                         const nPhys = grp.normal_physical_stock || 0;
                         const rPkg = grp.return_package_stock || 0;
                         const rPhys = grp.return_physical_stock || 0;
+                        if (nOpts.length === 0 && rOpts.length === 0) return '';
 
                         const groupHeaderHtml = `
                             <div class="px-3 py-1.5 bg-slate-50/90 border-b border-slate-100 flex flex-wrap items-center justify-between gap-1.5">
@@ -6108,7 +6130,7 @@ HTML_TEMPLATE = """
                                     <span class="px-2 py-0.5 rounded-md border ${nPhys > 0 ? 'bg-white border-slate-300 text-slate-800 font-bold' : 'bg-slate-50 border-slate-200 text-slate-400 font-medium'}">
                                         정상 ${nPkg.toLocaleString()}세트 (${nPhys.toLocaleString()}개)
                                     </span>
-                                    ${(rOpts.length > 0 || rPhys > 0) ? `
+                                    ${(rPhys > 0 && rOpts.length > 0) ? `
                                         <span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200 font-medium">
                                             🔄 반품 ${rPkg.toLocaleString()}세트 (${rPhys.toLocaleString()}개)
                                         </span>
@@ -6194,7 +6216,7 @@ HTML_TEMPLATE = """
                         ${topHeaderHtml}
                         ${totalStripHtml}
                         <div class="p-2.5 sm:p-3 bg-slate-50/40 space-y-2">
-                            ${groupsHtml}
+                            ${groupsHtml || '<div class="bg-white border border-dashed border-slate-200 rounded-xl px-3.5 py-3 text-center text-xs text-slate-500">표시할 쿠팡 정상 또는 보유 반품 재고 옵션이 없습니다.</div>'}
                             ${gradeMissingHintHtml}
                         </div>
                     `;

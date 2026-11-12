@@ -1878,15 +1878,19 @@ class TestIljeomodoAdminMode(unittest.TestCase):
             self.assertIn(marker, html, f"Missing UI/JS marker: {marker}")
 
         # 인라인 subrow 렌더 블록에는 소비기한 FIFO/소진 시뮬레이션/쿠팡외 출고가 없어야 하고,
-        # 팝업 모달 렌더 함수(renderProductDetailModal)에는 모두 포함되어야 함
+        # 반품 옵션은 재고가 0보다 클 때만 노출되며, 팝업 모달(renderProductDetailModal)에는 쿠팡·쿠팡외 출고가 모두 포함되어야 함
+        subrow_body_start = html.find("const subrowCoupangBody =")
         subrow_start = html.find('<tr id="subrow_${escapeHtml(m.id)}"')
         tfoot_start = html.find("// 5. 하단 합계란(tfoot) 렌더링")
-        self.assertGreater(subrow_start, 0)
+        self.assertGreater(subrow_body_start, 0)
+        self.assertGreater(subrow_start, subrow_body_start)
         self.assertGreater(tfoot_start, subrow_start)
-        subrow_section = html[subrow_start:tfoot_start]
+        subrow_section = html[subrow_body_start:tfoot_start]
         self.assertNotIn("개미창고 소비기한 · FIFO", subrow_section)
         self.assertNotIn("소진 시뮬레이션:", subrow_section)
         self.assertNotIn("B2B/세트 연동:", subrow_section)
+        self.assertIn("(opt.physical_stock || 0) > 0 || (opt.coupang_stock || 0) > 0", subrow_section)
+        self.assertIn("(rPhys > 0 && rOpts.length > 0)", subrow_section)
 
         modal_fn_start = html.find("function renderProductDetailModal(prodId)")
         modal_fn_end = html.find("async function toggleCoupangOptionReturn(")
@@ -1896,6 +1900,9 @@ class TestIljeomodoAdminMode(unittest.TestCase):
         for detail_marker in (
             "개미창고 소비기한 · FIFO",
             "소진 시뮬레이션:",
+            "쿠팡 재고 · 출고 요약",
+            "쿠팡 출고:",
+            "출고 7일",
             "B2B/세트 연동:",
             "쿠팡외 출고:",
             "normalizeJsGaemiRegDate",
