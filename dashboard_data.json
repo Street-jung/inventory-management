@@ -1,0 +1,5107 @@
+{
+  "schema_version": "1.3",
+  "monthly_series": [
+    {
+      "month": "2026-09",
+      "row_count": 30,
+      "total_quantity": 1249,
+      "active_sku_count": 30,
+      "has_data": true,
+      "revenue": 21324660,
+      "cost": 8031224,
+      "fees": 12827484.4,
+      "contribution_profit": 465951.6,
+      "matched_revenue": 21324660,
+      "matched_cost": 8031224,
+      "matched_contribution_profit": 465951.6,
+      "missing_cost_rows": 0,
+      "missing_fee_rows": 0,
+      "profit": 465951.6,
+      "b2b_deposit_total": 5941800,
+      "food_sga_withdrawal_total": 14877710,
+      "settlement_audit": {
+        "source": "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026년 9월_오키드X플랜디에이 정산.xlsx",
+        "attribution_month": "2026-09",
+        "basis": "VAT 포함; 순매출=판매액-판매자쿠폰; 현재 마스터 원가×환산수량",
+        "cover_date_warning": "갑지 날짜는 2025년 표기; RAW 세금계산서 발행월로 2026년 귀속 검증",
+        "raw_blank_fee_total_policy": "RAW AC 공란은 정산서 SUMIF와 동일하게 합산 제외; AA의 할인 전 수수료로 대체하지 않음",
+        "excluded_3p_rows": 0,
+        "excluded_3p_gross": 0,
+        "raw_blank_fee_total_rows": 763
+      },
+      "fee_breakdown": {
+        "marketplace": 463528,
+        "fulfillment": 602426,
+        "shipping": 863087.5,
+        "storage": 0,
+        "barcode": 440,
+        "agency": 1083778,
+        "advertising": 9883542.9,
+        "inventory_compensation": -69318
+      },
+      "sources": [
+        "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026년 9월_오키드X플랜디에이 정산.xlsx"
+      ],
+      "unverified_store_totals": null,
+      "data_status": "settled",
+      "message": "정산서 우선·판매자쿠폰 차감·마스터 원가(묶음수량 반영)·실제 정산비용(광고비/보상 포함), VAT 포함",
+      "margin_pct": 2.19,
+      "issues": [],
+      "provisional": false,
+      "settlements": [
+        {
+          "issue_date": "2026-09-30",
+          "customer": "플랜디에이",
+          "sales_amount": 6103956,
+          "purchase_offset": 0,
+          "net_amount": 6103956,
+          "due_date": "2026-10-31",
+          "paid_amount": 6103956,
+          "status": "입금완료",
+          "note": "귀속월 2026-09; 매출 1건/매입 0건; 합계금액(VAT 포함) 기준",
+          "outstanding_amount": 0,
+          "is_overdue": false
+        },
+        {
+          "issue_date": "2026-09-03",
+          "customer": "훈자건강마을",
+          "sales_amount": 131000,
+          "purchase_offset": 0,
+          "net_amount": 131000,
+          "due_date": "2026-09-18",
+          "paid_amount": 0,
+          "status": "연체(대조상 미수)",
+          "note": "raw_data\\hometax\\2026-09-01_2026-11-15_hometax_sales.xlsx:세금계산서:41",
+          "outstanding_amount": 131000,
+          "is_overdue": true
+        }
+      ],
+      "estimated_real_profit": null,
+      "estimated_real_margin_pct": null,
+      "estimated_additional_fees": null,
+      "estimation_basis": null,
+      "mom_growth_pct": null
+    },
+    {
+      "month": "2026-10",
+      "row_count": 27,
+      "total_quantity": 1459,
+      "active_sku_count": 27,
+      "has_data": true,
+      "revenue": 24281610,
+      "cost": 9320619,
+      "fees": 16402812,
+      "contribution_profit": -1441821,
+      "matched_revenue": 24281610,
+      "matched_cost": 9320619,
+      "matched_contribution_profit": -1441821,
+      "missing_cost_rows": 0,
+      "missing_fee_rows": 0,
+      "profit": -1441821,
+      "b2b_deposit_total": 0,
+      "food_sga_withdrawal_total": 10015195,
+      "settlement_audit": {
+        "source": "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026년 10월_오키드X플랜디에이 정산.xlsx",
+        "attribution_month": "2026-10",
+        "basis": "VAT 포함; 순매출=판매액-판매자쿠폰; 현재 마스터 원가×환산수량",
+        "cover_date_warning": "갑지 날짜는 2025년 표기; RAW 세금계산서 발행월로 2026년 귀속 검증",
+        "raw_blank_fee_total_policy": "RAW AC 공란은 정산서 SUMIF와 동일하게 합산 제외; AA의 할인 전 수수료로 대체하지 않음",
+        "excluded_3p_rows": 17,
+        "excluded_3p_gross": 546900.0,
+        "raw_blank_fee_total_rows": 0
+      },
+      "fee_breakdown": {
+        "marketplace": 2831034,
+        "fulfillment": 1122126.5,
+        "shipping": 1603063,
+        "storage": 9812,
+        "barcode": 0,
+        "agency": 1233893.5,
+        "advertising": 9854944,
+        "inventory_compensation": -252061
+      },
+      "sources": [
+        "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026년 10월_오키드X플랜디에이 정산.xlsx"
+      ],
+      "unverified_store_totals": null,
+      "data_status": "settled",
+      "message": "정산서 우선·판매자쿠폰 차감·마스터 원가(묶음수량 반영)·실제 정산비용(광고비/보상 포함), VAT 포함",
+      "margin_pct": -5.94,
+      "issues": [],
+      "provisional": false,
+      "settlements": [
+        {
+          "issue_date": "2026-10-31",
+          "customer": "플랜디에이",
+          "sales_amount": 25224770,
+          "purchase_offset": 22817796,
+          "net_amount": 2406974,
+          "due_date": "2026-11-30",
+          "paid_amount": 0,
+          "status": "기한미도래",
+          "note": "귀속월 2026-10; 매출 1건/매입 2건; 합계금액(VAT 포함) 기준",
+          "outstanding_amount": 2406974,
+          "is_overdue": false
+        }
+      ],
+      "estimated_real_profit": null,
+      "estimated_real_margin_pct": null,
+      "estimated_additional_fees": null,
+      "estimation_basis": null,
+      "mom_growth_pct": 13.87
+    },
+    {
+      "month": "2026-11",
+      "row_count": 36,
+      "total_quantity": 875,
+      "active_sku_count": 36,
+      "has_data": true,
+      "revenue": 17890260,
+      "cost": 4638867,
+      "fees": 2086003,
+      "contribution_profit": 11165390,
+      "matched_revenue": 17890260,
+      "matched_cost": 4638867,
+      "matched_contribution_profit": 11165390,
+      "missing_cost_rows": 0,
+      "missing_fee_rows": 0,
+      "profit": 11165390,
+      "b2b_deposit_total": 0,
+      "food_sga_withdrawal_total": 4434952,
+      "settlement_audit": null,
+      "fee_breakdown": {},
+      "sources": [
+        "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026-11_coupang_sales.xlsx"
+      ],
+      "unverified_store_totals": null,
+      "data_status": "partial",
+      "message": "수집된 자사 품목 자료만 집계; 일별 점포 총매출은 손익 합산 제외",
+      "margin_pct": 62.41,
+      "issues": [],
+      "provisional": true,
+      "settlements": [],
+      "estimated_real_profit": 991415,
+      "estimated_real_margin_pct": 5.54,
+      "estimated_additional_fees": 10173975,
+      "estimation_basis": {
+        "months": [
+          "2026-09",
+          "2026-10"
+        ],
+        "additional_cost_rate_pct": 56.8688,
+        "method": "최근 확정 2개월 매출가중 비판매수수료 비용률; 물류·대행·광고·정산조정 포함",
+        "cash_expenses_included": false
+      },
+      "mom_growth_pct": -26.32
+    }
+  ],
+  "mom_growth_pct": -26.32,
+  "mom_basis": "당월 수집 누계 / 전월 수집 누계; 당월은 보고일까지, 동일 경과일 비교 아님",
+  "metadata": {
+    "generated_at": "2026-11-15T20:40:19.803460+09:00",
+    "report_date": "2026-11-15",
+    "as_of": "2026-11-16",
+    "month": "2026-11",
+    "currency": "KRW",
+    "bank_count": 298,
+    "bank_transaction_start": "2026-09-01",
+    "bank_transaction_end": "2026-11-13",
+    "coupang_filename_month": true,
+    "warnings": [
+      "부분 자료 기준. 부가세 조정·환불·배송손익·인건비·광고비·고정비 미반영",
+      "미정산 쿠팡은 최신 옵션 상세 1개만 임시반영(파일명 일자 또는 원본 생성시각 KST 기준). 실제 집계기간·묶음 수량 확인 필요",
+      "cafe24 미수집 일자: 2026-11-01, 2026-11-02, 2026-11-03, 2026-11-04, 2026-11-05, 2026-11-06, 2026-11-07, 2026-11-08, 2026-11-09, 2026-11-10, 2026-11-11, 2026-11-12, 2026-11-13, 2026-11-15",
+      "smartstore 미수집 일자: 2026-11-01, 2026-11-02, 2026-11-03, 2026-11-04, 2026-11-05, 2026-11-06, 2026-11-07, 2026-11-08, 2026-11-09, 2026-11-10, 2026-11-11, 2026-11-12, 2026-11-13, 2026-11-14, 2026-11-15"
+    ],
+    "sources": [
+      "raw_data\\bank\\2026-09-01_2026-11-15_hana_bank.xlsx",
+      "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026-11_coupang_sales.xlsx",
+      "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026년 10월_오키드X플랜디에이 정산.xlsx",
+      "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026년 9월_오키드X플랜디에이 정산.xlsx"
+    ]
+  },
+  "cash_flow": {
+    "daily": {
+      "date": "2026-11-15",
+      "transaction_count": 0,
+      "deposit_total": 0,
+      "withdrawal_total": 0,
+      "net_cash_flow": 0,
+      "categories": []
+    },
+    "monthly": {
+      "month": "2026-11",
+      "transaction_count": 22,
+      "deposit_total": 7622657,
+      "withdrawal_total": 87039409,
+      "net_cash_flow": -79416752,
+      "categories": [
+        {
+          "category": "수입원물(에코 카놀라유)",
+          "transaction_count": 1,
+          "deposit_total": 0,
+          "withdrawal_total": 11649173
+        },
+        {
+          "category": "수입원물(엘레올로지 올리브유)",
+          "transaction_count": 1,
+          "deposit_total": 0,
+          "withdrawal_total": 26703585
+        },
+        {
+          "category": "수입원물(테라찌노 올리브유)",
+          "transaction_count": 1,
+          "deposit_total": 0,
+          "withdrawal_total": 39282104
+        },
+        {
+          "category": "수입포워딩(국제물류)",
+          "transaction_count": 1,
+          "deposit_total": 0,
+          "withdrawal_total": 4434952
+        },
+        {
+          "category": "스마트스토어정산",
+          "transaction_count": 10,
+          "deposit_total": 1210329,
+          "withdrawal_total": 0
+        },
+        {
+          "category": "카페24(PG정산)",
+          "transaction_count": 1,
+          "deposit_total": 125956,
+          "withdrawal_total": 0
+        },
+        {
+          "category": "쿠팡(자체운영정산)",
+          "transaction_count": 2,
+          "deposit_total": 182416,
+          "withdrawal_total": 0
+        },
+        {
+          "category": "쿠팡윙(대행사정산)",
+          "transaction_count": 2,
+          "deposit_total": 6103956,
+          "withdrawal_total": 4945595
+        },
+        {
+          "category": "해외송금수수료",
+          "transaction_count": 3,
+          "deposit_total": 0,
+          "withdrawal_total": 24000
+        }
+      ]
+    },
+    "monthly_summary": [
+      {
+        "month": "2026-09",
+        "transaction_count": 46,
+        "deposit_total": 21769564,
+        "withdrawal_total": 18877710,
+        "net_cash_flow": 2891854,
+        "categories": [
+          {
+            "category": "3PL물류비(개미창고)",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 4000000
+          },
+          {
+            "category": "B2B 선물세트 매출(일회성)",
+            "transaction_count": 5,
+            "deposit_total": 5810800,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "B2B·카페24 매출(고정)",
+            "transaction_count": 1,
+            "deposit_total": 131000,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "디자인·마케팅비",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 576000
+          },
+          {
+            "category": "부자재·패키징비",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 10076000
+          },
+          {
+            "category": "수입통관(관세사)",
+            "transaction_count": 2,
+            "deposit_total": 541492,
+            "withdrawal_total": 2762710
+          },
+          {
+            "category": "수입통관·포워딩비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 33000
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 15,
+            "deposit_total": 3712780,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "인쇄·판촉물비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 946000
+          },
+          {
+            "category": "입고·운반 용차비",
+            "transaction_count": 5,
+            "deposit_total": 0,
+            "withdrawal_total": 484000
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 4,
+            "deposit_total": 1790312,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 5,
+            "deposit_total": 7075122,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡윙(대행사정산)",
+            "transaction_count": 1,
+            "deposit_total": 2708058,
+            "withdrawal_total": 0
+          }
+        ],
+        "b2b_deposit_total": 5941800,
+        "food_sga_withdrawal_total": 14877710
+      },
+      {
+        "month": "2026-10",
+        "transaction_count": 34,
+        "deposit_total": 6070718,
+        "withdrawal_total": 48048087,
+        "net_cash_flow": -41977369,
+        "categories": [
+          {
+            "category": "3PL물류비(개미창고)",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 2187000
+          },
+          {
+            "category": "상품 OEM 제조비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 34723020
+          },
+          {
+            "category": "수입원물(에코 카놀라유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 970482
+          },
+          {
+            "category": "수입통관(관세사)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 6750584
+          },
+          {
+            "category": "수입포워딩(국제물류)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 3264611
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 20,
+            "deposit_total": 2807710,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "위탁판매 대금정산",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 144390
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 2,
+            "deposit_total": 772084,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 4,
+            "deposit_total": 2490924,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "해외송금수수료",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 8000
+          }
+        ],
+        "b2b_deposit_total": 0,
+        "food_sga_withdrawal_total": 10015195
+      },
+      {
+        "month": "2026-11",
+        "transaction_count": 22,
+        "deposit_total": 7622657,
+        "withdrawal_total": 87039409,
+        "net_cash_flow": -79416752,
+        "categories": [
+          {
+            "category": "수입원물(에코 카놀라유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 11649173
+          },
+          {
+            "category": "수입원물(엘레올로지 올리브유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 26703585
+          },
+          {
+            "category": "수입원물(테라찌노 올리브유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 39282104
+          },
+          {
+            "category": "수입포워딩(국제물류)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 4434952
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 10,
+            "deposit_total": 1210329,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 1,
+            "deposit_total": 125956,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 2,
+            "deposit_total": 182416,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡윙(대행사정산)",
+            "transaction_count": 2,
+            "deposit_total": 6103956,
+            "withdrawal_total": 4945595
+          },
+          {
+            "category": "해외송금수수료",
+            "transaction_count": 3,
+            "deposit_total": 0,
+            "withdrawal_total": 24000
+          }
+        ],
+        "b2b_deposit_total": 0,
+        "food_sga_withdrawal_total": 4434952
+      }
+    ],
+    "daily_history": [
+      {
+        "date": "2026-09-01",
+        "transaction_count": 2,
+        "deposit_total": 3960657,
+        "withdrawal_total": 0,
+        "net_cash_flow": 3960657,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 91176,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 1,
+            "deposit_total": 3869481,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-02",
+        "transaction_count": 2,
+        "deposit_total": 363447,
+        "withdrawal_total": 132000,
+        "net_cash_flow": 231447,
+        "categories": [
+          {
+            "category": "입고·운반 용차비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 132000
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 1,
+            "deposit_total": 363447,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-03",
+        "transaction_count": 3,
+        "deposit_total": 407751,
+        "withdrawal_total": 5038000,
+        "net_cash_flow": -4630249,
+        "categories": [
+          {
+            "category": "B2B·카페24 매출(고정)",
+            "transaction_count": 1,
+            "deposit_total": 131000,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "부자재·패키징비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 5038000
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 276751,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-04",
+        "transaction_count": 1,
+        "deposit_total": 165670,
+        "withdrawal_total": 0,
+        "net_cash_flow": 165670,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 165670,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-07",
+        "transaction_count": 5,
+        "deposit_total": 1702125,
+        "withdrawal_total": 598000,
+        "net_cash_flow": 1104125,
+        "categories": [
+          {
+            "category": "디자인·마케팅비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 466000
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 506161,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "입고·운반 용차비",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 132000
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 1,
+            "deposit_total": 1195964,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-08",
+        "transaction_count": 2,
+        "deposit_total": 43239,
+        "withdrawal_total": 2762710,
+        "net_cash_flow": -2719471,
+        "categories": [
+          {
+            "category": "수입통관(관세사)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 2762710
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 43239,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-09",
+        "transaction_count": 3,
+        "deposit_total": 1056842,
+        "withdrawal_total": 0,
+        "net_cash_flow": 1056842,
+        "categories": [
+          {
+            "category": "수입통관(관세사)",
+            "transaction_count": 1,
+            "deposit_total": 541492,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 192286,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 1,
+            "deposit_total": 323064,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-10",
+        "transaction_count": 4,
+        "deposit_total": 1205930,
+        "withdrawal_total": 220000,
+        "net_cash_flow": 985930,
+        "categories": [
+          {
+            "category": "B2B 선물세트 매출(일회성)",
+            "transaction_count": 1,
+            "deposit_total": 1123000,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 82930,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "입고·운반 용차비",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 220000
+          }
+        ]
+      },
+      {
+        "date": "2026-09-11",
+        "transaction_count": 3,
+        "deposit_total": 289937,
+        "withdrawal_total": 110000,
+        "net_cash_flow": 179937,
+        "categories": [
+          {
+            "category": "디자인·마케팅비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 110000
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 142259,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 1,
+            "deposit_total": 147678,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-12",
+        "transaction_count": 1,
+        "deposit_total": 2086200,
+        "withdrawal_total": 0,
+        "net_cash_flow": 2086200,
+        "categories": [
+          {
+            "category": "B2B 선물세트 매출(일회성)",
+            "transaction_count": 1,
+            "deposit_total": 2086200,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-14",
+        "transaction_count": 2,
+        "deposit_total": 952887,
+        "withdrawal_total": 946000,
+        "net_cash_flow": 6887,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 952887,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "인쇄·판촉물비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 946000
+          }
+        ]
+      },
+      {
+        "date": "2026-09-15",
+        "transaction_count": 2,
+        "deposit_total": 778700,
+        "withdrawal_total": 2000000,
+        "net_cash_flow": -1221300,
+        "categories": [
+          {
+            "category": "3PL물류비(개미창고)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 2000000
+          },
+          {
+            "category": "B2B 선물세트 매출(일회성)",
+            "transaction_count": 1,
+            "deposit_total": 778700,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-16",
+        "transaction_count": 2,
+        "deposit_total": 56413,
+        "withdrawal_total": 5038000,
+        "net_cash_flow": -4981587,
+        "categories": [
+          {
+            "category": "부자재·패키징비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 5038000
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 56413,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-17",
+        "transaction_count": 1,
+        "deposit_total": 23598,
+        "withdrawal_total": 0,
+        "net_cash_flow": 23598,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 23598,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-18",
+        "transaction_count": 4,
+        "deposit_total": 3104831,
+        "withdrawal_total": 0,
+        "net_cash_flow": 3104831,
+        "categories": [
+          {
+            "category": "B2B 선물세트 매출(일회성)",
+            "transaction_count": 1,
+            "deposit_total": 724900,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 117656,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 1,
+            "deposit_total": 575938,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 1,
+            "deposit_total": 1686337,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-21",
+        "transaction_count": 2,
+        "deposit_total": 1404196,
+        "withdrawal_total": 0,
+        "net_cash_flow": 1404196,
+        "categories": [
+          {
+            "category": "B2B 선물세트 매출(일회성)",
+            "transaction_count": 1,
+            "deposit_total": 1098000,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 306196,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-22",
+        "transaction_count": 1,
+        "deposit_total": 17584,
+        "withdrawal_total": 0,
+        "net_cash_flow": 17584,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 17584,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-28",
+        "transaction_count": 2,
+        "deposit_total": 737974,
+        "withdrawal_total": 2000000,
+        "net_cash_flow": -1262026,
+        "categories": [
+          {
+            "category": "3PL물류비(개미창고)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 2000000
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 737974,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-29",
+        "transaction_count": 2,
+        "deposit_total": 175662,
+        "withdrawal_total": 33000,
+        "net_cash_flow": 142662,
+        "categories": [
+          {
+            "category": "수입통관·포워딩비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 33000
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 1,
+            "deposit_total": 175662,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-09-30",
+        "transaction_count": 2,
+        "deposit_total": 3235921,
+        "withdrawal_total": 0,
+        "net_cash_flow": 3235921,
+        "categories": [
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 1,
+            "deposit_total": 527863,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡윙(대행사정산)",
+            "transaction_count": 1,
+            "deposit_total": 2708058,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-01",
+        "transaction_count": 4,
+        "deposit_total": 2448625,
+        "withdrawal_total": 34867410,
+        "net_cash_flow": -32418785,
+        "categories": [
+          {
+            "category": "상품 OEM 제조비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 34723020
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 150056,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "위탁판매 대금정산",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 144390
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 1,
+            "deposit_total": 2298569,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-02",
+        "transaction_count": 1,
+        "deposit_total": 172152,
+        "withdrawal_total": 0,
+        "net_cash_flow": 172152,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 172152,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-06",
+        "transaction_count": 2,
+        "deposit_total": 293017,
+        "withdrawal_total": 3264611,
+        "net_cash_flow": -2971594,
+        "categories": [
+          {
+            "category": "수입포워딩(국제물류)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 3264611
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 293017,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-07",
+        "transaction_count": 3,
+        "deposit_total": 91606,
+        "withdrawal_total": 187000,
+        "net_cash_flow": -95394,
+        "categories": [
+          {
+            "category": "3PL물류비(개미창고)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 187000
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 25599,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 1,
+            "deposit_total": 66007,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-08",
+        "transaction_count": 1,
+        "deposit_total": 161484,
+        "withdrawal_total": 0,
+        "net_cash_flow": 161484,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 161484,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-12",
+        "transaction_count": 2,
+        "deposit_total": 622180,
+        "withdrawal_total": 0,
+        "net_cash_flow": 622180,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 299116,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 1,
+            "deposit_total": 323064,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-13",
+        "transaction_count": 1,
+        "deposit_total": 26077,
+        "withdrawal_total": 0,
+        "net_cash_flow": 26077,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 26077,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-14",
+        "transaction_count": 1,
+        "deposit_total": 89098,
+        "withdrawal_total": 0,
+        "net_cash_flow": 89098,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 89098,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-15",
+        "transaction_count": 2,
+        "deposit_total": 129114,
+        "withdrawal_total": 0,
+        "net_cash_flow": 129114,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 66032,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 1,
+            "deposit_total": 63082,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-16",
+        "transaction_count": 1,
+        "deposit_total": 269758,
+        "withdrawal_total": 0,
+        "net_cash_flow": 269758,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 269758,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-19",
+        "transaction_count": 2,
+        "deposit_total": 219247,
+        "withdrawal_total": 6750584,
+        "net_cash_flow": -6531337,
+        "categories": [
+          {
+            "category": "수입통관(관세사)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 6750584
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 219247,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-20",
+        "transaction_count": 1,
+        "deposit_total": 51577,
+        "withdrawal_total": 0,
+        "net_cash_flow": 51577,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 51577,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-21",
+        "transaction_count": 2,
+        "deposit_total": 475197,
+        "withdrawal_total": 0,
+        "net_cash_flow": 475197,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 26177,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 1,
+            "deposit_total": 449020,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-22",
+        "transaction_count": 1,
+        "deposit_total": 147512,
+        "withdrawal_total": 0,
+        "net_cash_flow": 147512,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 147512,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-23",
+        "transaction_count": 1,
+        "deposit_total": 25877,
+        "withdrawal_total": 0,
+        "net_cash_flow": 25877,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 25877,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-26",
+        "transaction_count": 1,
+        "deposit_total": 392963,
+        "withdrawal_total": 0,
+        "net_cash_flow": 392963,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 392963,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-27",
+        "transaction_count": 2,
+        "deposit_total": 88955,
+        "withdrawal_total": 0,
+        "net_cash_flow": 88955,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 25689,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 1,
+            "deposit_total": 63266,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-28",
+        "transaction_count": 1,
+        "deposit_total": 51876,
+        "withdrawal_total": 0,
+        "net_cash_flow": 51876,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 51876,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-29",
+        "transaction_count": 1,
+        "deposit_total": 170645,
+        "withdrawal_total": 0,
+        "net_cash_flow": 170645,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 170645,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-10-30",
+        "transaction_count": 4,
+        "deposit_total": 143758,
+        "withdrawal_total": 2978482,
+        "net_cash_flow": -2834724,
+        "categories": [
+          {
+            "category": "3PL물류비(개미창고)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 2000000
+          },
+          {
+            "category": "수입원물(에코 카놀라유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 970482
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 143758,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "해외송금수수료",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 8000
+          }
+        ]
+      },
+      {
+        "date": "2026-11-02",
+        "transaction_count": 2,
+        "deposit_total": 470233,
+        "withdrawal_total": 0,
+        "net_cash_flow": 470233,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 345756,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 1,
+            "deposit_total": 124477,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-11-03",
+        "transaction_count": 4,
+        "deposit_total": 151734,
+        "withdrawal_total": 39290104,
+        "net_cash_flow": -39138370,
+        "categories": [
+          {
+            "category": "수입원물(테라찌노 올리브유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 39282104
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 25778,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 1,
+            "deposit_total": 125956,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "해외송금수수료",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 8000
+          }
+        ]
+      },
+      {
+        "date": "2026-11-04",
+        "transaction_count": 2,
+        "deposit_total": 43035,
+        "withdrawal_total": 4945595,
+        "net_cash_flow": -4902560,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 43035,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡윙(대행사정산)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 4945595
+          }
+        ]
+      },
+      {
+        "date": "2026-11-05",
+        "transaction_count": 1,
+        "deposit_total": 119540,
+        "withdrawal_total": 0,
+        "net_cash_flow": 119540,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 119540,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-11-06",
+        "transaction_count": 5,
+        "deposit_total": 61056,
+        "withdrawal_total": 38368758,
+        "net_cash_flow": -38307702,
+        "categories": [
+          {
+            "category": "수입원물(에코 카놀라유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 11649173
+          },
+          {
+            "category": "수입원물(엘레올로지 올리브유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 26703585
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 61056,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "해외송금수수료",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 16000
+          }
+        ]
+      },
+      {
+        "date": "2026-11-09",
+        "transaction_count": 1,
+        "deposit_total": 100365,
+        "withdrawal_total": 0,
+        "net_cash_flow": 100365,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 100365,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-11-10",
+        "transaction_count": 1,
+        "deposit_total": 52755,
+        "withdrawal_total": 0,
+        "net_cash_flow": 52755,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 52755,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-11-11",
+        "transaction_count": 1,
+        "deposit_total": 89631,
+        "withdrawal_total": 0,
+        "net_cash_flow": 89631,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 89631,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-11-12",
+        "transaction_count": 1,
+        "deposit_total": 265047,
+        "withdrawal_total": 0,
+        "net_cash_flow": 265047,
+        "categories": [
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 265047,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-11-13",
+        "transaction_count": 4,
+        "deposit_total": 6269261,
+        "withdrawal_total": 4434952,
+        "net_cash_flow": 1834309,
+        "categories": [
+          {
+            "category": "수입포워딩(국제물류)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 4434952
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 1,
+            "deposit_total": 107366,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 1,
+            "deposit_total": 57939,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡윙(대행사정산)",
+            "transaction_count": 1,
+            "deposit_total": 6103956,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "date": "2026-11-15",
+        "transaction_count": 0,
+        "deposit_total": 0,
+        "withdrawal_total": 0,
+        "net_cash_flow": 0,
+        "categories": []
+      }
+    ],
+    "monthly_history": [
+      {
+        "month": "2026-09",
+        "transaction_count": 46,
+        "deposit_total": 21769564,
+        "withdrawal_total": 18877710,
+        "net_cash_flow": 2891854,
+        "categories": [
+          {
+            "category": "3PL물류비(개미창고)",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 4000000
+          },
+          {
+            "category": "B2B 선물세트 매출(일회성)",
+            "transaction_count": 5,
+            "deposit_total": 5810800,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "B2B·카페24 매출(고정)",
+            "transaction_count": 1,
+            "deposit_total": 131000,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "디자인·마케팅비",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 576000
+          },
+          {
+            "category": "부자재·패키징비",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 10076000
+          },
+          {
+            "category": "수입통관(관세사)",
+            "transaction_count": 2,
+            "deposit_total": 541492,
+            "withdrawal_total": 2762710
+          },
+          {
+            "category": "수입통관·포워딩비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 33000
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 15,
+            "deposit_total": 3712780,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "인쇄·판촉물비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 946000
+          },
+          {
+            "category": "입고·운반 용차비",
+            "transaction_count": 5,
+            "deposit_total": 0,
+            "withdrawal_total": 484000
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 4,
+            "deposit_total": 1790312,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 5,
+            "deposit_total": 7075122,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡윙(대행사정산)",
+            "transaction_count": 1,
+            "deposit_total": 2708058,
+            "withdrawal_total": 0
+          }
+        ]
+      },
+      {
+        "month": "2026-10",
+        "transaction_count": 34,
+        "deposit_total": 6070718,
+        "withdrawal_total": 48048087,
+        "net_cash_flow": -41977369,
+        "categories": [
+          {
+            "category": "3PL물류비(개미창고)",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 2187000
+          },
+          {
+            "category": "상품 OEM 제조비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 34723020
+          },
+          {
+            "category": "수입원물(에코 카놀라유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 970482
+          },
+          {
+            "category": "수입통관(관세사)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 6750584
+          },
+          {
+            "category": "수입포워딩(국제물류)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 3264611
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 20,
+            "deposit_total": 2807710,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "위탁판매 대금정산",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 144390
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 2,
+            "deposit_total": 772084,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 4,
+            "deposit_total": 2490924,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "해외송금수수료",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 8000
+          }
+        ]
+      },
+      {
+        "month": "2026-11",
+        "transaction_count": 22,
+        "deposit_total": 7622657,
+        "withdrawal_total": 87039409,
+        "net_cash_flow": -79416752,
+        "categories": [
+          {
+            "category": "수입원물(에코 카놀라유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 11649173
+          },
+          {
+            "category": "수입원물(엘레올로지 올리브유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 26703585
+          },
+          {
+            "category": "수입원물(테라찌노 올리브유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 39282104
+          },
+          {
+            "category": "수입포워딩(국제물류)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 4434952
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 10,
+            "deposit_total": 1210329,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 1,
+            "deposit_total": 125956,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 2,
+            "deposit_total": 182416,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡윙(대행사정산)",
+            "transaction_count": 2,
+            "deposit_total": 6103956,
+            "withdrawal_total": 4945595
+          },
+          {
+            "category": "해외송금수수료",
+            "transaction_count": 3,
+            "deposit_total": 0,
+            "withdrawal_total": 24000
+          }
+        ]
+      }
+    ],
+    "transactions": [
+      {
+        "transaction_id": "9fb81e53fe645da2b2299f60",
+        "date": "2026-11-13",
+        "datetime": "2026-11-13 15:55:13",
+        "customer": "제이더블유제이로지스틱스(주)",
+        "description": "제이더블유제이로지스틱스(주)",
+        "category": "수입포워딩(국제물류)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 4434952
+      },
+      {
+        "transaction_id": "71943b165e27b248fe1d49a7",
+        "date": "2026-11-13",
+        "datetime": "2026-11-13 14:57:50",
+        "customer": "주식회사 플랜디에이",
+        "description": "주식회사 플랜",
+        "category": "쿠팡윙(대행사정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 6103956,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "d486e12d8dc3dd6d20abe2a4",
+        "date": "2026-11-13",
+        "datetime": "2026-11-13 11:01:33",
+        "customer": "쿠팡페이(주)",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 57939,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "999f3ac47c5619d7e77b115a",
+        "date": "2026-11-13",
+        "datetime": "2026-11-13 04:53:05",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 107366,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "52fc8553f1b3de43f19c951f",
+        "date": "2026-11-12",
+        "datetime": "2026-11-12 03:49:49",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 265047,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "73eb2dfd36597a391086f9fb",
+        "date": "2026-11-11",
+        "datetime": "2026-11-11 04:25:41",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 89631,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "a0a6d052c2d2e39c589b28b3",
+        "date": "2026-11-10",
+        "datetime": "2026-11-10 03:39:55",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 52755,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "2f1e6ce88ce8dfe06235260e",
+        "date": "2026-11-09",
+        "datetime": "2026-11-09 06:26:53",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 100365,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "07865e752108e1d30aa49c31",
+        "date": "2026-11-06",
+        "datetime": "2026-11-06 11:34:06",
+        "customer": "당발송금수수료(Ref No: 0152OTT261100026)",
+        "description": "당발송금수수료(Ref No: 0152OTT261100026)",
+        "category": "해외송금수수료",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 8000
+      },
+      {
+        "transaction_id": "e9364971fb0fbe42086c0e4a",
+        "date": "2026-11-06",
+        "datetime": "2026-11-06 11:34:06",
+        "customer": "UAB EKKO LT",
+        "description": "OTT261100026",
+        "category": "수입원물(에코 카놀라유)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 11649173
+      },
+      {
+        "transaction_id": "8bc050359700b486d0eb3a24",
+        "date": "2026-11-06",
+        "datetime": "2026-11-06 11:30:20",
+        "customer": "당발송금수수료(Ref No: 0152OTT261100025)",
+        "description": "당발송금수수료(Ref No: 0152OTT261100025)",
+        "category": "해외송금수수료",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 8000
+      },
+      {
+        "transaction_id": "37a81885e574f4d56c9230ed",
+        "date": "2026-11-06",
+        "datetime": "2026-11-06 11:30:20",
+        "customer": "ELEOLOGY A.E.",
+        "description": "OTT261100025",
+        "category": "수입원물(엘레올로지 올리브유)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 26703585
+      },
+      {
+        "transaction_id": "d85bcd24ffbed86117db1f9e",
+        "date": "2026-11-06",
+        "datetime": "2026-11-06 04:50:29",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 61056,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "f7547905f705825722212d02",
+        "date": "2026-11-05",
+        "datetime": "2026-11-05 04:47:42",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 119540,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "7d54de2ca0b701a39741f1ce",
+        "date": "2026-11-04",
+        "datetime": "2026-11-04 15:27:09",
+        "customer": "주식회사 플랜디에이",
+        "description": "주식회사 플랜디에이",
+        "category": "쿠팡윙(대행사정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 4945595
+      },
+      {
+        "transaction_id": "412589d1c4c12963569f556b",
+        "date": "2026-11-04",
+        "datetime": "2026-11-04 04:28:18",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 43035,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "7ad6c82a77e603bedcf912dd",
+        "date": "2026-11-03",
+        "datetime": "2026-11-03 12:16:22",
+        "customer": "당발송금수수료(Ref No: 0152OTT261100007)",
+        "description": "당발송금수수료(Ref No: 0152OTT261100007)",
+        "category": "해외송금수수료",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 8000
+      },
+      {
+        "transaction_id": "09dcbbbb8cc1c7ada91be92a",
+        "date": "2026-11-03",
+        "datetime": "2026-11-03 12:16:22",
+        "customer": "TERRAZZINO MICHELANGELO ALFREDO",
+        "description": "OTT261100007",
+        "category": "수입원물(테라찌노 올리브유)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 39282104
+      },
+      {
+        "transaction_id": "c21cb8a8240105dafd454a73",
+        "date": "2026-11-03",
+        "datetime": "2026-11-03 10:54:30",
+        "customer": "(주)케이지이니시스",
+        "description": "KG이니시스",
+        "category": "카페24(PG정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 125956,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "72d9064f88506c76a5635d9f",
+        "date": "2026-11-03",
+        "datetime": "2026-11-03 04:32:51",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 25778,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "2c5efe09f19b190abc23b832",
+        "date": "2026-11-02",
+        "datetime": "2026-11-02 11:25:14",
+        "customer": "쿠팡페이 주식회사",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 124477,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "01effe21335b467b26733337",
+        "date": "2026-11-02",
+        "datetime": "2026-11-02 06:41:33",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 345756,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "def9283ce18f98142f8525db",
+        "date": "2026-10-30",
+        "datetime": "2026-10-30 16:16:53",
+        "customer": "당발송금수수료(Ref No: 0152OTT261000126)",
+        "description": "당발송금수수료(Ref No: 0152OTT261000126)",
+        "category": "해외송금수수료",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 8000
+      },
+      {
+        "transaction_id": "f16f53e2e77e6aeeb8363ae9",
+        "date": "2026-10-30",
+        "datetime": "2026-10-30 16:16:53",
+        "customer": "UAB EKKO LT",
+        "description": "OTT261000126",
+        "category": "수입원물(에코 카놀라유)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 970482
+      },
+      {
+        "transaction_id": "6fe7f3d658dc86cce246218c",
+        "date": "2026-10-30",
+        "datetime": "2026-10-30 14:32:10",
+        "customer": "주식회사 개미창고",
+        "description": "주식회사 개미창고",
+        "category": "3PL물류비(개미창고)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 2000000
+      },
+      {
+        "transaction_id": "159eaa11375965b409ab27df",
+        "date": "2026-10-30",
+        "datetime": "2026-10-30 04:46:05",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 143758,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "49faae896b5874b7d4d87fa3",
+        "date": "2026-10-29",
+        "datetime": "2026-10-29 05:15:43",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 170645,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "3fb32bec507fcd13ffab5025",
+        "date": "2026-10-28",
+        "datetime": "2026-10-28 04:45:49",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 51876,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "7478737ac77033ae9a80e1d8",
+        "date": "2026-10-27",
+        "datetime": "2026-10-27 11:17:54",
+        "customer": "쿠팡페이(주)",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 63266,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "f7abd7f886681713819e4f36",
+        "date": "2026-10-27",
+        "datetime": "2026-10-27 04:49:29",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 25689,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "dc7a9ed9e92c0acb64535597",
+        "date": "2026-10-26",
+        "datetime": "2026-10-26 06:49:56",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 392963,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "d9bc18aa5289dca46444e3d6",
+        "date": "2026-10-23",
+        "datetime": "2026-10-23 05:04:55",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 25877,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "eee2c03cda4d56d9be1e548c",
+        "date": "2026-10-22",
+        "datetime": "2026-10-22 05:09:23",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 147512,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "1f57453cf082a0bc919cc686",
+        "date": "2026-10-21",
+        "datetime": "2026-10-21 10:46:25",
+        "customer": "(주)케이지이니시스",
+        "description": "KG이니시스",
+        "category": "카페24(PG정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 449020,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "edb35a48b66987467e3de6e2",
+        "date": "2026-10-21",
+        "datetime": "2026-10-21 04:44:20",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 26177,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "0c9cb638bfe074ede60c4612",
+        "date": "2026-10-20",
+        "datetime": "2026-10-20 04:50:51",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 51577,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "5c05a6fc321393f8004cde7e",
+        "date": "2026-10-19",
+        "datetime": "2026-10-19 16:21:51",
+        "customer": "류지훈(지유관세사무",
+        "description": "류지훈(지유관세사무",
+        "category": "수입통관(관세사)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 6750584
+      },
+      {
+        "transaction_id": "7752a827f250dcbd8427960f",
+        "date": "2026-10-19",
+        "datetime": "2026-10-19 09:04:22",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 219247,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "b8209500c248cb1112044286",
+        "date": "2026-10-16",
+        "datetime": "2026-10-16 05:23:09",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 269758,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "c414165195333a8236e37c9a",
+        "date": "2026-10-15",
+        "datetime": "2026-10-15 11:11:32",
+        "customer": "쿠팡페이 주식회사",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 63082,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "8745cba2101fd0bdc5ad651b",
+        "date": "2026-10-15",
+        "datetime": "2026-10-15 04:57:40",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 66032,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "b12dfbfaedaa88a80e8efc54",
+        "date": "2026-10-14",
+        "datetime": "2026-10-14 04:43:05",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 89098,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "6feabc6288087dc2320357a0",
+        "date": "2026-10-13",
+        "datetime": "2026-10-13 03:57:42",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 26077,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "31aafcf937441c7f78861aa6",
+        "date": "2026-10-12",
+        "datetime": "2026-10-12 10:13:09",
+        "customer": "(주)케이지이니시스",
+        "description": "KG이니시스",
+        "category": "카페24(PG정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 323064,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "a1e5f209233d06ed2d7b568a",
+        "date": "2026-10-12",
+        "datetime": "2026-10-12 06:46:43",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 299116,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "febdc834109273b1aafa757a",
+        "date": "2026-10-08",
+        "datetime": "2026-10-08 05:15:15",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 161484,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "c3bfe54a7af54035d3a6eec5",
+        "date": "2026-10-07",
+        "datetime": "2026-10-07 16:25:22",
+        "customer": "김미정",
+        "description": "개미창고 용차비",
+        "category": "3PL물류비(개미창고)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 187000
+      },
+      {
+        "transaction_id": "0329375602489a303714da48",
+        "date": "2026-10-07",
+        "datetime": "2026-10-07 10:37:24",
+        "customer": "쿠팡페이(주)",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 66007,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "dcc769b604f64fe034d9d728",
+        "date": "2026-10-07",
+        "datetime": "2026-10-07 05:00:04",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 25599,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "a94508cd42c4109b5a1beaaf",
+        "date": "2026-10-06",
+        "datetime": "2026-10-06 14:51:57",
+        "customer": "제이더블유제이로지스틱스(주)",
+        "description": "에코운송",
+        "category": "수입포워딩(국제물류)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 3264611
+      },
+      {
+        "transaction_id": "4f18cac3d90aef8af94b7e8e",
+        "date": "2026-10-06",
+        "datetime": "2026-10-06 06:49:13",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 293017,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "69e52f154bca504c819418cb",
+        "date": "2026-10-02",
+        "datetime": "2026-10-02 05:11:58",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 172152,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "12e1001acdb3d27d0c17e452",
+        "date": "2026-10-01",
+        "datetime": "2026-10-01 19:43:55",
+        "customer": "동서바이오팜(주)",
+        "description": "동서바이오결재",
+        "category": "상품 OEM 제조비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 34723020
+      },
+      {
+        "transaction_id": "b5b3cb5ddac62d004aef4c41",
+        "date": "2026-10-01",
+        "datetime": "2026-10-01 19:43:54",
+        "customer": "(주)모모스튜디오",
+        "description": "청춘농장결재",
+        "category": "위탁판매 대금정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 144390
+      },
+      {
+        "transaction_id": "3d62926bd7114c1da45f4945",
+        "date": "2026-10-01",
+        "datetime": "2026-10-01 12:22:05",
+        "customer": "쿠팡페이(주)",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 2298569,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "21e0d864f1fef9fd9a4ea99b",
+        "date": "2026-10-01",
+        "datetime": "2026-10-01 05:29:23",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 150056,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "a40346c375ba84aaf88a24fd",
+        "date": "2026-09-30",
+        "datetime": "2026-09-30 14:12:40",
+        "customer": "주식회사 플랜디에이",
+        "description": "주식회사 플랜",
+        "category": "쿠팡윙(대행사정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 2708058,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "b75764f999c10eef77739f37",
+        "date": "2026-09-30",
+        "datetime": "2026-09-30 11:06:29",
+        "customer": "(주)케이지이니시스",
+        "description": "KG이니시스",
+        "category": "카페24(PG정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 527863,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "1d41d8c429debbef0d305dff",
+        "date": "2026-09-29",
+        "datetime": "2026-09-29 21:12:43",
+        "customer": "비스카이익스프레스(",
+        "description": "비스카이익스프레스(",
+        "category": "수입통관·포워딩비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 33000
+      },
+      {
+        "transaction_id": "54c3ee8903cfe6f409ff93ed",
+        "date": "2026-09-29",
+        "datetime": "2026-09-29 10:37:23",
+        "customer": "쿠팡페이(주)",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 175662,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "dd0007e2c2584d918efd3fb9",
+        "date": "2026-09-28",
+        "datetime": "2026-09-28 11:47:42",
+        "customer": "주식회사 개미창고",
+        "description": "주식회사 개미창고",
+        "category": "3PL물류비(개미창고)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 2000000
+      },
+      {
+        "transaction_id": "3d20dc517f1b5af7c84097e2",
+        "date": "2026-09-28",
+        "datetime": "2026-09-28 06:59:23",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 737974,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "ae8b67268a7b3e6ee3ff1aef",
+        "date": "2026-09-22",
+        "datetime": "2026-09-22 06:23:04",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 17584,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "d0b013d331d68142d074a4e8",
+        "date": "2026-09-21",
+        "datetime": "2026-09-21 10:29:02",
+        "customer": "주식회사디씨씨",
+        "description": "주식회사디씨씨",
+        "category": "B2B 선물세트 매출(일회성)",
+        "status": "식품부문 포함",
+        "deposit_amount": 1098000,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "b899b697f2e8a5c1c5905e1d",
+        "date": "2026-09-21",
+        "datetime": "2026-09-21 09:04:42",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 306196,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "c544b710d3f49f072f64f27a",
+        "date": "2026-09-18",
+        "datetime": "2026-09-18 15:56:52",
+        "customer": "(주)네오플러스",
+        "description": "(주)네오플러스",
+        "category": "B2B 선물세트 매출(일회성)",
+        "status": "식품부문 포함",
+        "deposit_amount": 724900,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "0ac4eeff2f9d9be4ec91ff85",
+        "date": "2026-09-18",
+        "datetime": "2026-09-18 10:40:33",
+        "customer": "(주)케이지이니시스",
+        "description": "KG이니시스",
+        "category": "카페24(PG정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 575938,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "e4b0c9e25cc01b1e882a047d",
+        "date": "2026-09-18",
+        "datetime": "2026-09-18 09:17:20",
+        "customer": "쿠팡페이 주식회사",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 1686337,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "5cfe3bab54baa3fc3304ec0b",
+        "date": "2026-09-18",
+        "datetime": "2026-09-18 05:08:15",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 117656,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "4162b379cb52cdce60a70b7d",
+        "date": "2026-09-17",
+        "datetime": "2026-09-17 05:14:01",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 23598,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "f1a71c818548003a327f3be1",
+        "date": "2026-09-16",
+        "datetime": "2026-09-16 17:05:21",
+        "customer": "(주)수월포장",
+        "description": "(주)수월포장",
+        "category": "부자재·패키징비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 5038000
+      },
+      {
+        "transaction_id": "26f31cee50321e8bfde92036",
+        "date": "2026-09-16",
+        "datetime": "2026-09-16 04:49:43",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 56413,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "43a6114d8e2c209f06c93a59",
+        "date": "2026-09-15",
+        "datetime": "2026-09-15 17:19:17",
+        "customer": "(주)선양인터내셔널",
+        "description": "(주)선양인터내",
+        "category": "B2B 선물세트 매출(일회성)",
+        "status": "식품부문 포함",
+        "deposit_amount": 778700,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "58930ca0c4ac1ebdf30e44e7",
+        "date": "2026-09-15",
+        "datetime": "2026-09-15 16:25:13",
+        "customer": "주식회사 개미창고",
+        "description": "주식회사 개미창고",
+        "category": "3PL물류비(개미창고)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 2000000
+      },
+      {
+        "transaction_id": "c926f5f26ac41e528c3ec3a0",
+        "date": "2026-09-14",
+        "datetime": "2026-09-14 16:32:10",
+        "customer": "김일섭",
+        "description": "한솔종합인쇄",
+        "category": "인쇄·판촉물비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 946000
+      },
+      {
+        "transaction_id": "6938302efefde3c27c47f284",
+        "date": "2026-09-14",
+        "datetime": "2026-09-14 06:50:05",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 952887,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "9453c9c2d689064561cdd86a",
+        "date": "2026-09-12",
+        "datetime": "2026-09-12 13:18:51",
+        "customer": "(주)프라미스에듀YS교육컨설팅",
+        "description": "(주)프라미스에듀YS교육컨설",
+        "category": "B2B 선물세트 매출(일회성)",
+        "status": "식품부문 포함",
+        "deposit_amount": 2086200,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "6a68ca1b33dda0c9956ac01f",
+        "date": "2026-09-11",
+        "datetime": "2026-09-11 11:30:14",
+        "customer": "한희진(드림진 디자",
+        "description": "드림진결재",
+        "category": "디자인·마케팅비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 110000
+      },
+      {
+        "transaction_id": "8c9564c8673d7f75f8a548ef",
+        "date": "2026-09-11",
+        "datetime": "2026-09-11 10:06:40",
+        "customer": "쿠팡페이(주)",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 147678,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "1f9de14bcd9cd7a8506c53db",
+        "date": "2026-09-11",
+        "datetime": "2026-09-11 05:06:04",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 142259,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "1236392368c459f54aeaf54f",
+        "date": "2026-09-10",
+        "datetime": "2026-09-10 14:51:37",
+        "customer": "김지숙",
+        "description": "김지숙",
+        "category": "입고·운반 용차비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 143000
+      },
+      {
+        "transaction_id": "c3fc5b64d09f38984abf7fa9",
+        "date": "2026-09-10",
+        "datetime": "2026-09-10 14:51:36",
+        "customer": "이병무",
+        "description": "이병무",
+        "category": "입고·운반 용차비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 77000
+      },
+      {
+        "transaction_id": "48b05bc3919554c0bfa831ee",
+        "date": "2026-09-10",
+        "datetime": "2026-09-10 09:46:43",
+        "customer": "김지훈",
+        "description": "KJ추석선물",
+        "category": "B2B 선물세트 매출(일회성)",
+        "status": "식품부문 포함",
+        "deposit_amount": 1123000,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "8b073c0f5e9a444495574857",
+        "date": "2026-09-10",
+        "datetime": "2026-09-10 05:10:33",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 82930,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "902b5efe52e333f8c17e7765",
+        "date": "2026-09-09",
+        "datetime": "2026-09-09 11:50:01",
+        "customer": "류지훈",
+        "description": "지유-잔액환불",
+        "category": "수입통관(관세사)",
+        "status": "식품부문 포함",
+        "deposit_amount": 541492,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "081107f3ae8452386760a193",
+        "date": "2026-09-09",
+        "datetime": "2026-09-09 11:01:26",
+        "customer": "(주)케이지이니시스",
+        "description": "KG이니시스",
+        "category": "카페24(PG정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 323064,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "5171c4d3b03b87c7d1f7ae32",
+        "date": "2026-09-09",
+        "datetime": "2026-09-09 04:42:30",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 192286,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "19ff7f5d4fef6dc1834f694b",
+        "date": "2026-09-08",
+        "datetime": "2026-09-08 13:26:58",
+        "customer": "류지훈(지유관세사무",
+        "description": "류지훈(지유관세사무",
+        "category": "수입통관(관세사)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 2762710
+      },
+      {
+        "transaction_id": "5b0ab55bd18c0dc480d37f2b",
+        "date": "2026-09-08",
+        "datetime": "2026-09-08 04:27:12",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 43239,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "1c4f588fab837bb79991afe3",
+        "date": "2026-09-07",
+        "datetime": "2026-09-07 12:26:56",
+        "customer": "현명철",
+        "description": "현명철",
+        "category": "입고·운반 용차비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 12000
+      },
+      {
+        "transaction_id": "07c24f6874e4d2432d90d740",
+        "date": "2026-09-07",
+        "datetime": "2026-09-07 11:46:11",
+        "customer": "현명철",
+        "description": "현명철",
+        "category": "입고·운반 용차비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 120000
+      },
+      {
+        "transaction_id": "2b0172ba9e8ae4f22fe39d4a",
+        "date": "2026-09-07",
+        "datetime": "2026-09-07 11:14:04",
+        "customer": "한희진(드림진 디자",
+        "description": "한희진(드림진 디자",
+        "category": "디자인·마케팅비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 466000
+      },
+      {
+        "transaction_id": "b685cab0a1ba7380519285a1",
+        "date": "2026-09-07",
+        "datetime": "2026-09-07 09:44:56",
+        "customer": "쿠팡페이 주식회사",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 1195964,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "0eaf33fd6d7ffeb6aeb0e8b3",
+        "date": "2026-09-07",
+        "datetime": "2026-09-07 06:27:30",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 506161,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "3fe2194030dc0a75bd6a3e9e",
+        "date": "2026-09-04",
+        "datetime": "2026-09-04 05:06:59",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 165670,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "2936286e7cb851540aff74e5",
+        "date": "2026-09-03",
+        "datetime": "2026-09-03 17:04:17",
+        "customer": "(주)수월포장",
+        "description": "(주)수월포장",
+        "category": "부자재·패키징비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 5038000
+      },
+      {
+        "transaction_id": "451dcd8e9eba2908a464122a",
+        "date": "2026-09-03",
+        "datetime": "2026-09-03 17:00:24",
+        "customer": "김창종",
+        "description": "훈자건강마을",
+        "category": "B2B·카페24 매출(고정)",
+        "status": "식품부문 포함",
+        "deposit_amount": 131000,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "2c5d3845c292cd5c2b0dd2a0",
+        "date": "2026-09-03",
+        "datetime": "2026-09-03 05:16:18",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 276751,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "6e3a8149bb5e01dba42d1c44",
+        "date": "2026-09-02",
+        "datetime": "2026-09-02 13:21:54",
+        "customer": "류대종(개인화물)",
+        "description": "용차비",
+        "category": "입고·운반 용차비",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 132000
+      },
+      {
+        "transaction_id": "9401fe650ce9d2dc0b952d6c",
+        "date": "2026-09-02",
+        "datetime": "2026-09-02 10:50:33",
+        "customer": "(주)케이지이니시스",
+        "description": "KG이니시스",
+        "category": "카페24(PG정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 363447,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "ea559035bf95c0dceb5659c9",
+        "date": "2026-09-01",
+        "datetime": "2026-09-01 09:48:33",
+        "customer": "쿠팡페이(주)",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 3869481,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "2a36b005580626d731346c20",
+        "date": "2026-09-01",
+        "datetime": "2026-09-01 04:59:22",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 91176,
+        "withdrawal_amount": 0
+      }
+    ],
+    "recent_transactions": [
+      {
+        "transaction_id": "9fb81e53fe645da2b2299f60",
+        "date": "2026-11-13",
+        "datetime": "2026-11-13 15:55:13",
+        "customer": "제이더블유제이로지스틱스(주)",
+        "description": "제이더블유제이로지스틱스(주)",
+        "category": "수입포워딩(국제물류)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 4434952
+      },
+      {
+        "transaction_id": "71943b165e27b248fe1d49a7",
+        "date": "2026-11-13",
+        "datetime": "2026-11-13 14:57:50",
+        "customer": "주식회사 플랜디에이",
+        "description": "주식회사 플랜",
+        "category": "쿠팡윙(대행사정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 6103956,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "d486e12d8dc3dd6d20abe2a4",
+        "date": "2026-11-13",
+        "datetime": "2026-11-13 11:01:33",
+        "customer": "쿠팡페이(주)",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 57939,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "999f3ac47c5619d7e77b115a",
+        "date": "2026-11-13",
+        "datetime": "2026-11-13 04:53:05",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 107366,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "52fc8553f1b3de43f19c951f",
+        "date": "2026-11-12",
+        "datetime": "2026-11-12 03:49:49",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 265047,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "73eb2dfd36597a391086f9fb",
+        "date": "2026-11-11",
+        "datetime": "2026-11-11 04:25:41",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 89631,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "a0a6d052c2d2e39c589b28b3",
+        "date": "2026-11-10",
+        "datetime": "2026-11-10 03:39:55",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 52755,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "2f1e6ce88ce8dfe06235260e",
+        "date": "2026-11-09",
+        "datetime": "2026-11-09 06:26:53",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 100365,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "07865e752108e1d30aa49c31",
+        "date": "2026-11-06",
+        "datetime": "2026-11-06 11:34:06",
+        "customer": "당발송금수수료(Ref No: 0152OTT261100026)",
+        "description": "당발송금수수료(Ref No: 0152OTT261100026)",
+        "category": "해외송금수수료",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 8000
+      },
+      {
+        "transaction_id": "e9364971fb0fbe42086c0e4a",
+        "date": "2026-11-06",
+        "datetime": "2026-11-06 11:34:06",
+        "customer": "UAB EKKO LT",
+        "description": "OTT261100026",
+        "category": "수입원물(에코 카놀라유)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 11649173
+      },
+      {
+        "transaction_id": "8bc050359700b486d0eb3a24",
+        "date": "2026-11-06",
+        "datetime": "2026-11-06 11:30:20",
+        "customer": "당발송금수수료(Ref No: 0152OTT261100025)",
+        "description": "당발송금수수료(Ref No: 0152OTT261100025)",
+        "category": "해외송금수수료",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 8000
+      },
+      {
+        "transaction_id": "37a81885e574f4d56c9230ed",
+        "date": "2026-11-06",
+        "datetime": "2026-11-06 11:30:20",
+        "customer": "ELEOLOGY A.E.",
+        "description": "OTT261100025",
+        "category": "수입원물(엘레올로지 올리브유)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 26703585
+      },
+      {
+        "transaction_id": "d85bcd24ffbed86117db1f9e",
+        "date": "2026-11-06",
+        "datetime": "2026-11-06 04:50:29",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 61056,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "f7547905f705825722212d02",
+        "date": "2026-11-05",
+        "datetime": "2026-11-05 04:47:42",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 119540,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "7d54de2ca0b701a39741f1ce",
+        "date": "2026-11-04",
+        "datetime": "2026-11-04 15:27:09",
+        "customer": "주식회사 플랜디에이",
+        "description": "주식회사 플랜디에이",
+        "category": "쿠팡윙(대행사정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 4945595
+      },
+      {
+        "transaction_id": "412589d1c4c12963569f556b",
+        "date": "2026-11-04",
+        "datetime": "2026-11-04 04:28:18",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 43035,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "7ad6c82a77e603bedcf912dd",
+        "date": "2026-11-03",
+        "datetime": "2026-11-03 12:16:22",
+        "customer": "당발송금수수료(Ref No: 0152OTT261100007)",
+        "description": "당발송금수수료(Ref No: 0152OTT261100007)",
+        "category": "해외송금수수료",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 8000
+      },
+      {
+        "transaction_id": "09dcbbbb8cc1c7ada91be92a",
+        "date": "2026-11-03",
+        "datetime": "2026-11-03 12:16:22",
+        "customer": "TERRAZZINO MICHELANGELO ALFREDO",
+        "description": "OTT261100007",
+        "category": "수입원물(테라찌노 올리브유)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 39282104
+      },
+      {
+        "transaction_id": "c21cb8a8240105dafd454a73",
+        "date": "2026-11-03",
+        "datetime": "2026-11-03 10:54:30",
+        "customer": "(주)케이지이니시스",
+        "description": "KG이니시스",
+        "category": "카페24(PG정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 125956,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "72d9064f88506c76a5635d9f",
+        "date": "2026-11-03",
+        "datetime": "2026-11-03 04:32:51",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 25778,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "2c5efe09f19b190abc23b832",
+        "date": "2026-11-02",
+        "datetime": "2026-11-02 11:25:14",
+        "customer": "쿠팡페이 주식회사",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 124477,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "01effe21335b467b26733337",
+        "date": "2026-11-02",
+        "datetime": "2026-11-02 06:41:33",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 345756,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "def9283ce18f98142f8525db",
+        "date": "2026-10-30",
+        "datetime": "2026-10-30 16:16:53",
+        "customer": "당발송금수수료(Ref No: 0152OTT261000126)",
+        "description": "당발송금수수료(Ref No: 0152OTT261000126)",
+        "category": "해외송금수수료",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 8000
+      },
+      {
+        "transaction_id": "f16f53e2e77e6aeeb8363ae9",
+        "date": "2026-10-30",
+        "datetime": "2026-10-30 16:16:53",
+        "customer": "UAB EKKO LT",
+        "description": "OTT261000126",
+        "category": "수입원물(에코 카놀라유)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 970482
+      },
+      {
+        "transaction_id": "6fe7f3d658dc86cce246218c",
+        "date": "2026-10-30",
+        "datetime": "2026-10-30 14:32:10",
+        "customer": "주식회사 개미창고",
+        "description": "주식회사 개미창고",
+        "category": "3PL물류비(개미창고)",
+        "status": "식품부문 포함",
+        "deposit_amount": 0,
+        "withdrawal_amount": 2000000
+      },
+      {
+        "transaction_id": "159eaa11375965b409ab27df",
+        "date": "2026-10-30",
+        "datetime": "2026-10-30 04:46:05",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 143758,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "49faae896b5874b7d4d87fa3",
+        "date": "2026-10-29",
+        "datetime": "2026-10-29 05:15:43",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 170645,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "3fb32bec507fcd13ffab5025",
+        "date": "2026-10-28",
+        "datetime": "2026-10-28 04:45:49",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 51876,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "7478737ac77033ae9a80e1d8",
+        "date": "2026-10-27",
+        "datetime": "2026-10-27 11:17:54",
+        "customer": "쿠팡페이(주)",
+        "description": "쿠팡페이001",
+        "category": "쿠팡(자체운영정산)",
+        "status": "식품부문 포함",
+        "deposit_amount": 63266,
+        "withdrawal_amount": 0
+      },
+      {
+        "transaction_id": "f7abd7f886681713819e4f36",
+        "date": "2026-10-27",
+        "datetime": "2026-10-27 04:49:29",
+        "customer": "네이버파이낸셜주식회",
+        "description": "스마트스토어정산",
+        "category": "스마트스토어정산",
+        "status": "식품부문 포함",
+        "deposit_amount": 25689,
+        "withdrawal_amount": 0
+      }
+    ],
+    "classification": [
+      {
+        "status": "식품부문 포함",
+        "transaction_count": 102,
+        "deposit_total": 35462939,
+        "withdrawal_total": 153965206,
+        "net_cash_flow": -118502267,
+        "categories": [
+          {
+            "category": "3PL물류비(개미창고)",
+            "transaction_count": 4,
+            "deposit_total": 0,
+            "withdrawal_total": 6187000
+          },
+          {
+            "category": "B2B 선물세트 매출(일회성)",
+            "transaction_count": 5,
+            "deposit_total": 5810800,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "B2B·카페24 매출(고정)",
+            "transaction_count": 1,
+            "deposit_total": 131000,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "디자인·마케팅비",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 576000
+          },
+          {
+            "category": "부자재·패키징비",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 10076000
+          },
+          {
+            "category": "상품 OEM 제조비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 34723020
+          },
+          {
+            "category": "수입원물(에코 카놀라유)",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 12619655
+          },
+          {
+            "category": "수입원물(엘레올로지 올리브유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 26703585
+          },
+          {
+            "category": "수입원물(테라찌노 올리브유)",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 39282104
+          },
+          {
+            "category": "수입통관(관세사)",
+            "transaction_count": 3,
+            "deposit_total": 541492,
+            "withdrawal_total": 9513294
+          },
+          {
+            "category": "수입통관·포워딩비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 33000
+          },
+          {
+            "category": "수입포워딩(국제물류)",
+            "transaction_count": 2,
+            "deposit_total": 0,
+            "withdrawal_total": 7699563
+          },
+          {
+            "category": "스마트스토어정산",
+            "transaction_count": 45,
+            "deposit_total": 7730819,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "위탁판매 대금정산",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 144390
+          },
+          {
+            "category": "인쇄·판촉물비",
+            "transaction_count": 1,
+            "deposit_total": 0,
+            "withdrawal_total": 946000
+          },
+          {
+            "category": "입고·운반 용차비",
+            "transaction_count": 5,
+            "deposit_total": 0,
+            "withdrawal_total": 484000
+          },
+          {
+            "category": "카페24(PG정산)",
+            "transaction_count": 7,
+            "deposit_total": 2688352,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡(자체운영정산)",
+            "transaction_count": 11,
+            "deposit_total": 9748462,
+            "withdrawal_total": 0
+          },
+          {
+            "category": "쿠팡윙(대행사정산)",
+            "transaction_count": 3,
+            "deposit_total": 8812014,
+            "withdrawal_total": 4945595
+          },
+          {
+            "category": "해외송금수수료",
+            "transaction_count": 4,
+            "deposit_total": 0,
+            "withdrawal_total": 32000
+          }
+        ]
+      },
+      {
+        "status": "식품부문 제외",
+        "transaction_count": 196,
+        "deposit_total": 3719438267,
+        "withdrawal_total": 3809519069,
+        "net_cash_flow": -90080802,
+        "categories": [
+          {
+            "category": "",
+            "transaction_count": 196,
+            "deposit_total": 3719438267,
+            "withdrawal_total": 3809519069
+          }
+        ]
+      },
+      {
+        "status": "미분류(확인필요)",
+        "transaction_count": 0,
+        "deposit_total": 0,
+        "withdrawal_total": 0,
+        "net_cash_flow": 0,
+        "categories": []
+      }
+    ]
+  },
+  "settlements": {
+    "items": [
+      {
+        "issue_date": "2026-09-30",
+        "customer": "플랜디에이",
+        "sales_amount": 6103956,
+        "purchase_offset": 0,
+        "net_amount": 6103956,
+        "due_date": "2026-10-31",
+        "paid_amount": 6103956,
+        "status": "입금완료",
+        "note": "귀속월 2026-09; 매출 1건/매입 0건; 합계금액(VAT 포함) 기준",
+        "outstanding_amount": 0,
+        "is_overdue": false
+      },
+      {
+        "issue_date": "2026-10-31",
+        "customer": "플랜디에이",
+        "sales_amount": 25224770,
+        "purchase_offset": 22817796,
+        "net_amount": 2406974,
+        "due_date": "2026-11-30",
+        "paid_amount": 0,
+        "status": "기한미도래",
+        "note": "귀속월 2026-10; 매출 1건/매입 2건; 합계금액(VAT 포함) 기준",
+        "outstanding_amount": 2406974,
+        "is_overdue": false
+      },
+      {
+        "issue_date": "2026-09-03",
+        "customer": "훈자건강마을",
+        "sales_amount": 131000,
+        "purchase_offset": 0,
+        "net_amount": 131000,
+        "due_date": "2026-09-18",
+        "paid_amount": 0,
+        "status": "연체(대조상 미수)",
+        "note": "raw_data\\hometax\\2026-09-01_2026-11-15_hometax_sales.xlsx:세금계산서:41",
+        "outstanding_amount": 131000,
+        "is_overdue": true
+      }
+    ],
+    "source_sales_invoice_count": 35,
+    "source_purchase_invoice_count": 93,
+    "outstanding_total": 2537974,
+    "overdue_total": 131000,
+    "prior_period_receipts": []
+  },
+  "sales_profit": {
+    "daily": {
+      "date": "2026-11-15",
+      "row_count": 36,
+      "total_quantity": 875,
+      "active_sku_count": 36,
+      "has_data": true,
+      "revenue": 17890260,
+      "cost": 4638867,
+      "fees": 2086003,
+      "contribution_profit": 11165390,
+      "matched_revenue": 17890260,
+      "matched_cost": 4638867,
+      "matched_contribution_profit": 11165390,
+      "missing_cost_rows": 0,
+      "missing_fee_rows": 0,
+      "channels": [
+        {
+          "channel": "coupang_growth",
+          "row_count": 36,
+          "total_quantity": 875,
+          "active_sku_count": 36,
+          "has_data": true,
+          "revenue": 17890260,
+          "cost": 4638867,
+          "fees": 2086003,
+          "contribution_profit": 11165390,
+          "matched_revenue": 17890260,
+          "matched_cost": 4638867,
+          "matched_contribution_profit": 11165390,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0
+        }
+      ]
+    },
+    "monthly_series": [
+      {
+        "month": "2026-09",
+        "row_count": 30,
+        "total_quantity": 1249,
+        "active_sku_count": 30,
+        "has_data": true,
+        "revenue": 21324660,
+        "cost": 8031224,
+        "fees": 12827484.4,
+        "contribution_profit": 465951.6,
+        "matched_revenue": 21324660,
+        "matched_cost": 8031224,
+        "matched_contribution_profit": 465951.6,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "profit": 465951.6,
+        "b2b_deposit_total": 5941800,
+        "food_sga_withdrawal_total": 14877710,
+        "settlement_audit": {
+          "source": "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026년 9월_오키드X플랜디에이 정산.xlsx",
+          "attribution_month": "2026-09",
+          "basis": "VAT 포함; 순매출=판매액-판매자쿠폰; 현재 마스터 원가×환산수량",
+          "cover_date_warning": "갑지 날짜는 2025년 표기; RAW 세금계산서 발행월로 2026년 귀속 검증",
+          "raw_blank_fee_total_policy": "RAW AC 공란은 정산서 SUMIF와 동일하게 합산 제외; AA의 할인 전 수수료로 대체하지 않음",
+          "excluded_3p_rows": 0,
+          "excluded_3p_gross": 0,
+          "raw_blank_fee_total_rows": 763
+        },
+        "fee_breakdown": {
+          "marketplace": 463528,
+          "fulfillment": 602426,
+          "shipping": 863087.5,
+          "storage": 0,
+          "barcode": 440,
+          "agency": 1083778,
+          "advertising": 9883542.9,
+          "inventory_compensation": -69318
+        },
+        "sources": [
+          "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026년 9월_오키드X플랜디에이 정산.xlsx"
+        ],
+        "unverified_store_totals": null,
+        "data_status": "settled",
+        "message": "정산서 우선·판매자쿠폰 차감·마스터 원가(묶음수량 반영)·실제 정산비용(광고비/보상 포함), VAT 포함",
+        "margin_pct": 2.19,
+        "issues": [],
+        "provisional": false,
+        "settlements": [
+          {
+            "issue_date": "2026-09-30",
+            "customer": "플랜디에이",
+            "sales_amount": 6103956,
+            "purchase_offset": 0,
+            "net_amount": 6103956,
+            "due_date": "2026-10-31",
+            "paid_amount": 6103956,
+            "status": "입금완료",
+            "note": "귀속월 2026-09; 매출 1건/매입 0건; 합계금액(VAT 포함) 기준",
+            "outstanding_amount": 0,
+            "is_overdue": false
+          },
+          {
+            "issue_date": "2026-09-03",
+            "customer": "훈자건강마을",
+            "sales_amount": 131000,
+            "purchase_offset": 0,
+            "net_amount": 131000,
+            "due_date": "2026-09-18",
+            "paid_amount": 0,
+            "status": "연체(대조상 미수)",
+            "note": "raw_data\\hometax\\2026-09-01_2026-11-15_hometax_sales.xlsx:세금계산서:41",
+            "outstanding_amount": 131000,
+            "is_overdue": true
+          }
+        ],
+        "estimated_real_profit": null,
+        "estimated_real_margin_pct": null,
+        "estimated_additional_fees": null,
+        "estimation_basis": null,
+        "mom_growth_pct": null
+      },
+      {
+        "month": "2026-10",
+        "row_count": 27,
+        "total_quantity": 1459,
+        "active_sku_count": 27,
+        "has_data": true,
+        "revenue": 24281610,
+        "cost": 9320619,
+        "fees": 16402812,
+        "contribution_profit": -1441821,
+        "matched_revenue": 24281610,
+        "matched_cost": 9320619,
+        "matched_contribution_profit": -1441821,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "profit": -1441821,
+        "b2b_deposit_total": 0,
+        "food_sga_withdrawal_total": 10015195,
+        "settlement_audit": {
+          "source": "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026년 10월_오키드X플랜디에이 정산.xlsx",
+          "attribution_month": "2026-10",
+          "basis": "VAT 포함; 순매출=판매액-판매자쿠폰; 현재 마스터 원가×환산수량",
+          "cover_date_warning": "갑지 날짜는 2025년 표기; RAW 세금계산서 발행월로 2026년 귀속 검증",
+          "raw_blank_fee_total_policy": "RAW AC 공란은 정산서 SUMIF와 동일하게 합산 제외; AA의 할인 전 수수료로 대체하지 않음",
+          "excluded_3p_rows": 17,
+          "excluded_3p_gross": 546900.0,
+          "raw_blank_fee_total_rows": 0
+        },
+        "fee_breakdown": {
+          "marketplace": 2831034,
+          "fulfillment": 1122126.5,
+          "shipping": 1603063,
+          "storage": 9812,
+          "barcode": 0,
+          "agency": 1233893.5,
+          "advertising": 9854944,
+          "inventory_compensation": -252061
+        },
+        "sources": [
+          "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026년 10월_오키드X플랜디에이 정산.xlsx"
+        ],
+        "unverified_store_totals": null,
+        "data_status": "settled",
+        "message": "정산서 우선·판매자쿠폰 차감·마스터 원가(묶음수량 반영)·실제 정산비용(광고비/보상 포함), VAT 포함",
+        "margin_pct": -5.94,
+        "issues": [],
+        "provisional": false,
+        "settlements": [
+          {
+            "issue_date": "2026-10-31",
+            "customer": "플랜디에이",
+            "sales_amount": 25224770,
+            "purchase_offset": 22817796,
+            "net_amount": 2406974,
+            "due_date": "2026-11-30",
+            "paid_amount": 0,
+            "status": "기한미도래",
+            "note": "귀속월 2026-10; 매출 1건/매입 2건; 합계금액(VAT 포함) 기준",
+            "outstanding_amount": 2406974,
+            "is_overdue": false
+          }
+        ],
+        "estimated_real_profit": null,
+        "estimated_real_margin_pct": null,
+        "estimated_additional_fees": null,
+        "estimation_basis": null,
+        "mom_growth_pct": 13.87
+      },
+      {
+        "month": "2026-11",
+        "row_count": 36,
+        "total_quantity": 875,
+        "active_sku_count": 36,
+        "has_data": true,
+        "revenue": 17890260,
+        "cost": 4638867,
+        "fees": 2086003,
+        "contribution_profit": 11165390,
+        "matched_revenue": 17890260,
+        "matched_cost": 4638867,
+        "matched_contribution_profit": 11165390,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "profit": 11165390,
+        "b2b_deposit_total": 0,
+        "food_sga_withdrawal_total": 4434952,
+        "settlement_audit": null,
+        "fee_breakdown": {},
+        "sources": [
+          "C:\\AI\\경영관리\\raw_data\\sales\\coupang\\2026-11_coupang_sales.xlsx"
+        ],
+        "unverified_store_totals": null,
+        "data_status": "partial",
+        "message": "수집된 자사 품목 자료만 집계; 일별 점포 총매출은 손익 합산 제외",
+        "margin_pct": 62.41,
+        "issues": [],
+        "provisional": true,
+        "settlements": [],
+        "estimated_real_profit": 991415,
+        "estimated_real_margin_pct": 5.54,
+        "estimated_additional_fees": 10173975,
+        "estimation_basis": {
+          "months": [
+            "2026-09",
+            "2026-10"
+          ],
+          "additional_cost_rate_pct": 56.8688,
+          "method": "최근 확정 2개월 매출가중 비판매수수료 비용률; 물류·대행·광고·정산조정 포함",
+          "cash_expenses_included": false
+        },
+        "mom_growth_pct": -26.32
+      }
+    ],
+    "mom_growth_pct": -26.32,
+    "monthly": {
+      "month": "2026-11",
+      "row_count": 36,
+      "total_quantity": 875,
+      "active_sku_count": 36,
+      "has_data": true,
+      "revenue": 17890260,
+      "cost": 4638867,
+      "fees": 2086003,
+      "contribution_profit": 11165390,
+      "matched_revenue": 17890260,
+      "matched_cost": 4638867,
+      "matched_contribution_profit": 11165390,
+      "missing_cost_rows": 0,
+      "missing_fee_rows": 0,
+      "channels": [
+        {
+          "channel": "coupang_growth",
+          "row_count": 36,
+          "total_quantity": 875,
+          "active_sku_count": 36,
+          "has_data": true,
+          "revenue": 17890260,
+          "cost": 4638867,
+          "fees": 2086003,
+          "contribution_profit": 11165390,
+          "matched_revenue": 17890260,
+          "matched_cost": 4638867,
+          "matched_contribution_profit": 11165390,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0
+        }
+      ]
+    },
+    "daily_history": [
+      {
+        "date": "2026-11-15",
+        "row_count": 36,
+        "total_quantity": 875,
+        "active_sku_count": 36,
+        "has_data": true,
+        "revenue": 17890260,
+        "cost": 4638867,
+        "fees": 2086003,
+        "contribution_profit": 11165390,
+        "matched_revenue": 17890260,
+        "matched_cost": 4638867,
+        "matched_contribution_profit": 11165390,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "channels": [
+          {
+            "channel": "coupang_growth",
+            "row_count": 36,
+            "total_quantity": 875,
+            "active_sku_count": 36,
+            "has_data": true,
+            "revenue": 17890260,
+            "cost": 4638867,
+            "fees": 2086003,
+            "contribution_profit": 11165390,
+            "matched_revenue": 17890260,
+            "matched_cost": 4638867,
+            "matched_contribution_profit": 11165390,
+            "missing_cost_rows": 0,
+            "missing_fee_rows": 0
+          }
+        ]
+      }
+    ],
+    "daily_trend": [
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "basis": "cumulative_snapshot",
+        "row_count": 36,
+        "total_quantity": 875,
+        "active_sku_count": 36,
+        "has_data": true,
+        "revenue": 17890260,
+        "cost": 4638867,
+        "fees": 2086003,
+        "contribution_profit": 11165390,
+        "matched_revenue": 17890260,
+        "matched_cost": 4638867,
+        "matched_contribution_profit": 11165390,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0
+      }
+    ],
+    "growth_metrics": {
+      "dod": {
+        "current_date": "2026-11-15",
+        "comparison_date": "2026-11-14",
+        "message": "누적 스냅샷이 포함되어 일별 비교 불가",
+        "revenue_pct": null,
+        "contribution_profit_pct": null
+      },
+      "wow": {
+        "current_date": "2026-11-15",
+        "comparison_date": "2026-11-08",
+        "message": "누적 스냅샷이 포함되어 일별 비교 불가",
+        "revenue_pct": null,
+        "contribution_profit_pct": null
+      },
+      "mom": {
+        "revenue_pct": null,
+        "contribution_profit_pct": null,
+        "message": "전월 동일 경과기간 데이터 및 수집 완전성 확인 필요"
+      }
+    },
+    "monthly_forecast": {
+      "month": "2026-11",
+      "as_of": "2026-11-15",
+      "elapsed_days": 15,
+      "total_days": 30,
+      "provisional": true,
+      "message": "수집된 당월 누적액 기준 단순 추정. 미수집 매출 및 비용 미반영.",
+      "daily_average_revenue": 1192684,
+      "projected_revenue": 35780520,
+      "daily_average_contribution_profit": 744359.3333333334,
+      "projected_contribution_profit": 22330780
+    },
+    "top_products": {
+      "by_revenue": [
+        {
+          "product_code": "20TZ01",
+          "product_name": "[햇올리브] 이탈리아 유기농 엑스트라버진 만능 올리브오일 테라찌노 TERRAZZINO 라노첼라라 냉압착 지중해. 1개 500ml, 2개",
+          "quantity": 108,
+          "row_count": 4,
+          "total_quantity": 108,
+          "active_sku_count": 4,
+          "has_data": true,
+          "revenue": 4061630,
+          "cost": 1578174,
+          "fees": 473585,
+          "contribution_profit": 2009871,
+          "matched_revenue": 4061630,
+          "matched_cost": 1578174,
+          "matched_contribution_profit": 2009871,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 49.48
+        },
+        {
+          "product_code": "20PB01",
+          "product_name": "냉압착 엑스트라버진 올리브오일캡슐 그리스 지중해 냉압착 엑스트라버진 식물성캡슐 유기농 코로네이키 품종 올리오도, 1박스, 30회분",
+          "quantity": 118,
+          "row_count": 4,
+          "total_quantity": 118,
+          "active_sku_count": 4,
+          "has_data": true,
+          "revenue": 3528200,
+          "cost": 927126,
+          "fees": 411388,
+          "contribution_profit": 2189686,
+          "matched_revenue": 3528200,
+          "matched_cost": 927126,
+          "matched_contribution_profit": 2189686,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 62.06
+        },
+        {
+          "product_code": "10GL02",
+          "product_name": "스페인 구욘 다이제스티브 오렌지맛 쿠키 비스킷 담백한 통밀크래커 비스킷 오트밀쿠키 귀리 오렌지 SINCE 1892, 265g, 1개",
+          "quantity": 184,
+          "row_count": 3,
+          "total_quantity": 184,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 2277760,
+          "cost": 451536,
+          "fees": 265587,
+          "contribution_profit": 1560637,
+          "matched_revenue": 2277760,
+          "matched_cost": 451536,
+          "matched_contribution_profit": 1560637,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 68.52
+        },
+        {
+          "product_code": "10GL04",
+          "product_name": "구욘 다이제스티브 귀리 초코칩 쿠키, 265g, 1개",
+          "quantity": 175,
+          "row_count": 4,
+          "total_quantity": 175,
+          "active_sku_count": 4,
+          "has_data": true,
+          "revenue": 2199200,
+          "cost": 429450,
+          "fees": 256426,
+          "contribution_profit": 1513324,
+          "matched_revenue": 2199200,
+          "matched_cost": 429450,
+          "matched_contribution_profit": 1513324,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 68.81
+        },
+        {
+          "product_code": "20EK03",
+          "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 정제 카놀라유 발트해 청정농장 1개 500ml, 2개",
+          "quantity": 107,
+          "row_count": 3,
+          "total_quantity": 107,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 2106080,
+          "cost": 489311,
+          "fees": 245570,
+          "contribution_profit": 1371199,
+          "matched_revenue": 2106080,
+          "matched_cost": 489311,
+          "matched_contribution_profit": 1371199,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 65.11
+        },
+        {
+          "product_code": "10GL05",
+          "product_name": "스페인 구욘 다이제스티브 살구맛 쿠키 묶음 비스킷 담백한 통밀크래커 비스킷 오트밀쿠키 귀리 뮤즐리 SINCE 1892, 230g, 1개",
+          "quantity": 113,
+          "row_count": 3,
+          "total_quantity": 113,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 1527350,
+          "cost": 249956,
+          "fees": 178089,
+          "contribution_profit": 1099305,
+          "matched_revenue": 1527350,
+          "matched_cost": 249956,
+          "matched_contribution_profit": 1099305,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 71.97
+        },
+        {
+          "product_code": "20EK02",
+          "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 정제 카놀라유 발트해 청정농장 1개 500ml, 1L",
+          "quantity": 37,
+          "row_count": 3,
+          "total_quantity": 37,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 1197400,
+          "cost": 266215,
+          "fees": 139617,
+          "contribution_profit": 791568,
+          "matched_revenue": 1197400,
+          "matched_cost": 266215,
+          "matched_contribution_profit": 791568,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 66.11
+        },
+        {
+          "product_code": "20TZ03",
+          "product_name": "[햇올리브] 이탈리아 유기농 엑스트라버진 만능 올리브오일 테라찌노 TERRAZZINO 라비앙콜릴라 냉압착 지중해 1개 250ml, 3개",
+          "quantity": 13,
+          "row_count": 3,
+          "total_quantity": 13,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 421630,
+          "cost": 108979,
+          "fees": 49162,
+          "contribution_profit": 263489,
+          "matched_revenue": 421630,
+          "matched_cost": 108979,
+          "matched_contribution_profit": 263489,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 62.49
+        },
+        {
+          "product_code": "20EK01",
+          "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 비정제 카놀라유 발트해 청정농장 1개 500ml, 2개",
+          "quantity": 15,
+          "row_count": 3,
+          "total_quantity": 15,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 335600,
+          "cost": 64980,
+          "fees": 39131,
+          "contribution_profit": 231489,
+          "matched_revenue": 335600,
+          "matched_cost": 64980,
+          "matched_contribution_profit": 231489,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 68.98
+        },
+        {
+          "product_code": "20EO02",
+          "product_name": "[고항산화] 그리스 유기농 엑스트라버진 공복 올리브오일 엘레올로지 ELEOLOGY 싱글버라이어티 냉압착 지중해, 1개, 500ml",
+          "quantity": 5,
+          "row_count": 3,
+          "total_quantity": 5,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 235410,
+          "cost": 73140,
+          "fees": 27448,
+          "contribution_profit": 134822,
+          "matched_revenue": 235410,
+          "matched_cost": 73140,
+          "matched_contribution_profit": 134822,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 57.27
+        }
+      ],
+      "by_quantity": [
+        {
+          "product_code": "10GL02",
+          "product_name": "스페인 구욘 다이제스티브 오렌지맛 쿠키 비스킷 담백한 통밀크래커 비스킷 오트밀쿠키 귀리 오렌지 SINCE 1892, 265g, 1개",
+          "quantity": 184,
+          "row_count": 3,
+          "total_quantity": 184,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 2277760,
+          "cost": 451536,
+          "fees": 265587,
+          "contribution_profit": 1560637,
+          "matched_revenue": 2277760,
+          "matched_cost": 451536,
+          "matched_contribution_profit": 1560637,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 68.52
+        },
+        {
+          "product_code": "10GL04",
+          "product_name": "구욘 다이제스티브 귀리 초코칩 쿠키, 265g, 1개",
+          "quantity": 175,
+          "row_count": 4,
+          "total_quantity": 175,
+          "active_sku_count": 4,
+          "has_data": true,
+          "revenue": 2199200,
+          "cost": 429450,
+          "fees": 256426,
+          "contribution_profit": 1513324,
+          "matched_revenue": 2199200,
+          "matched_cost": 429450,
+          "matched_contribution_profit": 1513324,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 68.81
+        },
+        {
+          "product_code": "20PB01",
+          "product_name": "냉압착 엑스트라버진 올리브오일캡슐 그리스 지중해 냉압착 엑스트라버진 식물성캡슐 유기농 코로네이키 품종 올리오도, 1박스, 30회분",
+          "quantity": 118,
+          "row_count": 4,
+          "total_quantity": 118,
+          "active_sku_count": 4,
+          "has_data": true,
+          "revenue": 3528200,
+          "cost": 927126,
+          "fees": 411388,
+          "contribution_profit": 2189686,
+          "matched_revenue": 3528200,
+          "matched_cost": 927126,
+          "matched_contribution_profit": 2189686,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 62.06
+        },
+        {
+          "product_code": "10GL05",
+          "product_name": "스페인 구욘 다이제스티브 살구맛 쿠키 묶음 비스킷 담백한 통밀크래커 비스킷 오트밀쿠키 귀리 뮤즐리 SINCE 1892, 230g, 1개",
+          "quantity": 113,
+          "row_count": 3,
+          "total_quantity": 113,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 1527350,
+          "cost": 249956,
+          "fees": 178089,
+          "contribution_profit": 1099305,
+          "matched_revenue": 1527350,
+          "matched_cost": 249956,
+          "matched_contribution_profit": 1099305,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 71.97
+        },
+        {
+          "product_code": "20TZ01",
+          "product_name": "[햇올리브] 이탈리아 유기농 엑스트라버진 만능 올리브오일 테라찌노 TERRAZZINO 라노첼라라 냉압착 지중해. 1개 500ml, 2개",
+          "quantity": 108,
+          "row_count": 4,
+          "total_quantity": 108,
+          "active_sku_count": 4,
+          "has_data": true,
+          "revenue": 4061630,
+          "cost": 1578174,
+          "fees": 473585,
+          "contribution_profit": 2009871,
+          "matched_revenue": 4061630,
+          "matched_cost": 1578174,
+          "matched_contribution_profit": 2009871,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 49.48
+        },
+        {
+          "product_code": "20EK03",
+          "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 정제 카놀라유 발트해 청정농장 1개 500ml, 2개",
+          "quantity": 107,
+          "row_count": 3,
+          "total_quantity": 107,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 2106080,
+          "cost": 489311,
+          "fees": 245570,
+          "contribution_profit": 1371199,
+          "matched_revenue": 2106080,
+          "matched_cost": 489311,
+          "matched_contribution_profit": 1371199,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 65.11
+        },
+        {
+          "product_code": "20EK02",
+          "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 정제 카놀라유 발트해 청정농장 1개 500ml, 1L",
+          "quantity": 37,
+          "row_count": 3,
+          "total_quantity": 37,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 1197400,
+          "cost": 266215,
+          "fees": 139617,
+          "contribution_profit": 791568,
+          "matched_revenue": 1197400,
+          "matched_cost": 266215,
+          "matched_contribution_profit": 791568,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 66.11
+        },
+        {
+          "product_code": "20EK01",
+          "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 비정제 카놀라유 발트해 청정농장 1개 500ml, 2개",
+          "quantity": 15,
+          "row_count": 3,
+          "total_quantity": 15,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 335600,
+          "cost": 64980,
+          "fees": 39131,
+          "contribution_profit": 231489,
+          "matched_revenue": 335600,
+          "matched_cost": 64980,
+          "matched_contribution_profit": 231489,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 68.98
+        },
+        {
+          "product_code": "20TZ03",
+          "product_name": "[햇올리브] 이탈리아 유기농 엑스트라버진 만능 올리브오일 테라찌노 TERRAZZINO 라비앙콜릴라 냉압착 지중해 1개 250ml, 3개",
+          "quantity": 13,
+          "row_count": 3,
+          "total_quantity": 13,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 421630,
+          "cost": 108979,
+          "fees": 49162,
+          "contribution_profit": 263489,
+          "matched_revenue": 421630,
+          "matched_cost": 108979,
+          "matched_contribution_profit": 263489,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 62.49
+        },
+        {
+          "product_code": "20EO02",
+          "product_name": "[고항산화] 그리스 유기농 엑스트라버진 공복 올리브오일 엘레올로지 ELEOLOGY 싱글버라이어티 냉압착 지중해, 1개, 500ml",
+          "quantity": 5,
+          "row_count": 3,
+          "total_quantity": 5,
+          "active_sku_count": 3,
+          "has_data": true,
+          "revenue": 235410,
+          "cost": 73140,
+          "fees": 27448,
+          "contribution_profit": 134822,
+          "matched_revenue": 235410,
+          "matched_cost": 73140,
+          "matched_contribution_profit": 134822,
+          "missing_cost_rows": 0,
+          "missing_fee_rows": 0,
+          "margin_pct": 57.27
+        }
+      ]
+    },
+    "transactions": [
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95844803290",
+        "product_code": "20EO02",
+        "product_name": "[고항산화] 그리스 유기농 엑스트라버진 공복 올리브오일 엘레올로지 ELEOLOGY 싱글버라이어티 냉압착 지중해, 1개, 500ml",
+        "quantity": 4,
+        "row_count": 1,
+        "total_quantity": 4,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 159600,
+        "cost": 58512,
+        "fees": 18609,
+        "contribution_profit": 82479,
+        "matched_revenue": 159600,
+        "matched_cost": 58512,
+        "matched_contribution_profit": 82479,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 39900.0,
+        "profit": 82479,
+        "margin_pct": 51.68
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95849997061",
+        "product_code": "20EO02",
+        "product_name": "[고항산화] 그리스 유기농 엑스트라버진 공복 올리브오일 엘레올로지 ELEOLOGY 싱글버라이어티 냉압착 지중해, 2개, 500ml",
+        "quantity": 1,
+        "row_count": 1,
+        "total_quantity": 1,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 75810,
+        "cost": 14628,
+        "fees": 8839,
+        "contribution_profit": 52343,
+        "matched_revenue": 75810,
+        "matched_cost": 14628,
+        "matched_contribution_profit": 52343,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 75810.0,
+        "profit": 52343,
+        "margin_pct": 69.04
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95849997062",
+        "product_code": "20EO02",
+        "product_name": "[고항산화] 그리스 유기농 엑스트라버진 공복 올리브오일 엘레올로지 ELEOLOGY 싱글버라이어티 냉압착 지중해, 3개, 500ml",
+        "quantity": 0,
+        "row_count": 1,
+        "total_quantity": 0,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 0,
+        "cost": 0,
+        "fees": 0,
+        "contribution_profit": 0,
+        "matched_revenue": 0,
+        "matched_cost": 0,
+        "matched_contribution_profit": 0,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": null,
+        "profit": 0,
+        "margin_pct": null
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856228899",
+        "product_code": "20TZ03",
+        "product_name": "[햇올리브] 이탈리아 유기농 엑스트라버진 만능 올리브오일 테라찌노 TERRAZZINO 라비앙콜릴라 냉압착 지중해 1개 250ml, 3개",
+        "quantity": 2,
+        "row_count": 1,
+        "total_quantity": 2,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 107120,
+        "cost": 16766,
+        "fees": 12490,
+        "contribution_profit": 77864,
+        "matched_revenue": 107120,
+        "matched_cost": 16766,
+        "matched_contribution_profit": 77864,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 53560.0,
+        "profit": 77864,
+        "margin_pct": 72.69
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856228900",
+        "product_code": "20TZ03",
+        "product_name": "[햇올리브] 이탈리아 유기농 엑스트라버진 만능 올리브오일 테라찌노 TERRAZZINO 라비앙콜릴라 냉압착 지중해 1개 250ml, 2개",
+        "quantity": 5,
+        "row_count": 1,
+        "total_quantity": 5,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 178550,
+        "cost": 41915,
+        "fees": 20819,
+        "contribution_profit": 115816,
+        "matched_revenue": 178550,
+        "matched_cost": 41915,
+        "matched_contribution_profit": 115816,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 35710.0,
+        "profit": 115816,
+        "margin_pct": 64.86
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856228901",
+        "product_code": "20TZ03",
+        "product_name": "[햇올리브] 이탈리아 유기농 엑스트라버진 만능 올리브오일 테라찌노 TERRAZZINO 라비앙콜릴라 냉압착 지중해 1개 250ml",
+        "quantity": 6,
+        "row_count": 1,
+        "total_quantity": 6,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 135960,
+        "cost": 50298,
+        "fees": 15853,
+        "contribution_profit": 69809,
+        "matched_revenue": 135960,
+        "matched_cost": 50298,
+        "matched_contribution_profit": 69809,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 22660.0,
+        "profit": 69809,
+        "margin_pct": 51.35
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856248617",
+        "product_code": "20TZ01",
+        "product_name": "[햇올리브] 이탈리아 유기농 엑스트라버진 만능 올리브오일 테라찌노 TERRAZZINO 라노첼라라 냉압착 지중해. 1개 500ml, 2개",
+        "quantity": 15,
+        "row_count": 1,
+        "total_quantity": 15,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 934650,
+        "cost": 219191,
+        "fees": 108980,
+        "contribution_profit": 606479,
+        "matched_revenue": 934650,
+        "matched_cost": 219191,
+        "matched_contribution_profit": 606479,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 62310.0,
+        "profit": 606479,
+        "margin_pct": 64.89
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856248618",
+        "product_code": "20TZ01",
+        "product_name": "[햇올리브] 이탈리아 유기농 엑스트라버진 만능 올리브오일 테라찌노 TERRAZZINO 라노첼라라 냉압착 지중해. 1개 500ml, 3개",
+        "quantity": 1,
+        "row_count": 1,
+        "total_quantity": 1,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 88220,
+        "cost": 14613,
+        "fees": 10286,
+        "contribution_profit": 63321,
+        "matched_revenue": 88220,
+        "matched_cost": 14613,
+        "matched_contribution_profit": 63321,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 88220.0,
+        "profit": 63321,
+        "margin_pct": 71.78
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856248619",
+        "product_code": "20TZ01",
+        "product_name": "[햇올리브] 이탈리아 유기농 엑스트라버진 만능 올리브오일 테라찌노 TERRAZZINO 라노첼라라 냉압착 지중해. 1개 500ml",
+        "quantity": 92,
+        "row_count": 1,
+        "total_quantity": 92,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 3038760,
+        "cost": 1344370,
+        "fees": 354319,
+        "contribution_profit": 1340071,
+        "matched_revenue": 3038760,
+        "matched_cost": 1344370,
+        "matched_contribution_profit": 1340071,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 33030.0,
+        "profit": 1340071,
+        "margin_pct": 44.1
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856264109",
+        "product_code": "20EK01",
+        "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 비정제 카놀라유 발트해 청정농장 1개 500ml, 2개",
+        "quantity": 4,
+        "row_count": 1,
+        "total_quantity": 4,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 133200,
+        "cost": 17328,
+        "fees": 15531,
+        "contribution_profit": 100341,
+        "matched_revenue": 133200,
+        "matched_cost": 17328,
+        "matched_contribution_profit": 100341,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 33300.0,
+        "profit": 100341,
+        "margin_pct": 75.33
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856264110",
+        "product_code": "20EK01",
+        "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 비정제 카놀라유 발트해 청정농장 1개 500ml, 3개",
+        "quantity": 0,
+        "row_count": 1,
+        "total_quantity": 0,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 0,
+        "cost": 0,
+        "fees": 0,
+        "contribution_profit": 0,
+        "matched_revenue": 0,
+        "matched_cost": 0,
+        "matched_contribution_profit": 0,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": null,
+        "profit": 0,
+        "margin_pct": null
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856264111",
+        "product_code": "20EK01",
+        "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 비정제 카놀라유 발트해 청정농장 1개 500ml",
+        "quantity": 11,
+        "row_count": 1,
+        "total_quantity": 11,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 202400,
+        "cost": 47652,
+        "fees": 23600,
+        "contribution_profit": 131148,
+        "matched_revenue": 202400,
+        "matched_cost": 47652,
+        "matched_contribution_profit": 131148,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 18400.0,
+        "profit": 131148,
+        "margin_pct": 64.8
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856286078",
+        "product_code": "20EK02",
+        "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 정제 카놀라유 발트해 청정농장 1개 500ml, 1L",
+        "quantity": 28,
+        "row_count": 1,
+        "total_quantity": 28,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 767200,
+        "cost": 201460,
+        "fees": 89456,
+        "contribution_profit": 476284,
+        "matched_revenue": 767200,
+        "matched_cost": 201460,
+        "matched_contribution_profit": 476284,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 27400.0,
+        "profit": 476284,
+        "margin_pct": 62.08
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856286079",
+        "product_code": "20EK03",
+        "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 정제 카놀라유 발트해 청정농장 1개 500ml, 2개",
+        "quantity": 6,
+        "row_count": 1,
+        "total_quantity": 6,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 197260,
+        "cost": 27438,
+        "fees": 23001,
+        "contribution_profit": 146821,
+        "matched_revenue": 197260,
+        "matched_cost": 27438,
+        "matched_contribution_profit": 146821,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 32876.67,
+        "profit": 146821,
+        "margin_pct": 74.43
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856286080",
+        "product_code": "20EK02",
+        "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 정제 카놀라유 발트해 청정농장 1개 500ml, 2개, 1L",
+        "quantity": 9,
+        "row_count": 1,
+        "total_quantity": 9,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 430200,
+        "cost": 64755,
+        "fees": 50161,
+        "contribution_profit": 315284,
+        "matched_revenue": 430200,
+        "matched_cost": 64755,
+        "matched_contribution_profit": 315284,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 47800.0,
+        "profit": 315284,
+        "margin_pct": 73.29
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856286081",
+        "product_code": "20EK03",
+        "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 정제 카놀라유 발트해 청정농장 1개 500ml",
+        "quantity": 99,
+        "row_count": 1,
+        "total_quantity": 99,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 1821600,
+        "cost": 452727,
+        "fees": 212399,
+        "contribution_profit": 1156474,
+        "matched_revenue": 1821600,
+        "matched_cost": 452727,
+        "matched_contribution_profit": 1156474,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 18400.0,
+        "profit": 1156474,
+        "margin_pct": 63.49
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95856286082",
+        "product_code": "20EK03",
+        "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 정제 카놀라유 발트해 청정농장 1개 500ml, 3개",
+        "quantity": 2,
+        "row_count": 1,
+        "total_quantity": 2,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 87220,
+        "cost": 9146,
+        "fees": 10170,
+        "contribution_profit": 67904,
+        "matched_revenue": 87220,
+        "matched_cost": 9146,
+        "matched_contribution_profit": 67904,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 43610.0,
+        "profit": 67904,
+        "margin_pct": 77.85
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893427561",
+        "product_code": "10GL02",
+        "product_name": "스페인 구욘 다이제스티브 오렌지맛 쿠키 비스킷 담백한 통밀크래커 비스킷 오트밀쿠키 귀리 오렌지 SINCE 1892, 265g, 1개",
+        "quantity": 112,
+        "row_count": 1,
+        "total_quantity": 112,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 995680,
+        "cost": 274848,
+        "fees": 116096,
+        "contribution_profit": 604736,
+        "matched_revenue": 995680,
+        "matched_cost": 274848,
+        "matched_contribution_profit": 604736,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 8890.0,
+        "profit": 604736,
+        "margin_pct": 60.74
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893433438",
+        "product_code": "10GL05",
+        "product_name": "스페인 구욘 다이제스티브 살구맛 쿠키 묶음 비스킷 담백한 통밀크래커 비스킷 오트밀쿠키 귀리 뮤즐리 SINCE 1892, 230g, 1개",
+        "quantity": 56,
+        "row_count": 1,
+        "total_quantity": 56,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 478800,
+        "cost": 123872,
+        "fees": 55828,
+        "contribution_profit": 299100,
+        "matched_revenue": 478800,
+        "matched_cost": 123872,
+        "matched_contribution_profit": 299100,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 8550.0,
+        "profit": 299100,
+        "margin_pct": 62.47
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893435622",
+        "product_code": "10GL06",
+        "product_name": "구욘 다이제스티브 클래식 쿠키 담백한 통밀크래커 비스킷 오트밀쿠키 귀리, 250g, 1개",
+        "quantity": 0,
+        "row_count": 1,
+        "total_quantity": 0,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 0,
+        "cost": 0,
+        "fees": 0,
+        "contribution_profit": 0,
+        "matched_revenue": 0,
+        "matched_cost": 0,
+        "matched_contribution_profit": 0,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": null,
+        "profit": 0,
+        "margin_pct": null
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893436821",
+        "product_code": "10GL04",
+        "product_name": "구욘 다이제스티브 귀리 초코칩 쿠키, 265g, 1개",
+        "quantity": 98,
+        "row_count": 1,
+        "total_quantity": 98,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 871220,
+        "cost": 240492,
+        "fees": 101584,
+        "contribution_profit": 529144,
+        "matched_revenue": 871220,
+        "matched_cost": 240492,
+        "matched_contribution_profit": 529144,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 8890.0,
+        "profit": 529144,
+        "margin_pct": 60.74
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893640100",
+        "product_code": "10GL02",
+        "product_name": "스페인 구욘 다이제스티브 오렌지맛 쿠키 비스킷 담백한 통밀크래커 비스킷 오트밀쿠키 귀리 오렌지 SINCE 1892, 265g, 2개",
+        "quantity": 28,
+        "row_count": 1,
+        "total_quantity": 28,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 402080,
+        "cost": 68712,
+        "fees": 46883,
+        "contribution_profit": 286485,
+        "matched_revenue": 402080,
+        "matched_cost": 68712,
+        "matched_contribution_profit": 286485,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 14360.0,
+        "profit": 286485,
+        "margin_pct": 71.25
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893640102",
+        "product_code": "10GL02",
+        "product_name": "스페인 구욘 다이제스티브 오렌지맛 쿠키 비스킷 담백한 통밀크래커 비스킷 오트밀쿠키 귀리 오렌지 SINCE 1892, 265g, 3개",
+        "quantity": 44,
+        "row_count": 1,
+        "total_quantity": 44,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 880000,
+        "cost": 107976,
+        "fees": 102608,
+        "contribution_profit": 669416,
+        "matched_revenue": 880000,
+        "matched_cost": 107976,
+        "matched_contribution_profit": 669416,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 20000.0,
+        "profit": 669416,
+        "margin_pct": 76.07
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893642826",
+        "product_code": "10GL05",
+        "product_name": "스페인 구욘 다이제스티브 살구맛 쿠키 묶음 비스킷 담백한 통밀크래커 비스킷 오트밀쿠키 귀리 뮤즐리 SINCE 1892, 230g, 3개",
+        "quantity": 41,
+        "row_count": 1,
+        "total_quantity": 41,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 819590,
+        "cost": 90692,
+        "fees": 95564,
+        "contribution_profit": 633334,
+        "matched_revenue": 819590,
+        "matched_cost": 90692,
+        "matched_contribution_profit": 633334,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 19990.0,
+        "profit": 633334,
+        "margin_pct": 77.27
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893642827",
+        "product_code": "10GL05",
+        "product_name": "스페인 구욘 다이제스티브 살구맛 쿠키 묶음 비스킷 담백한 통밀크래커 비스킷 오트밀쿠키 귀리 뮤즐리 SINCE 1892, 230g, 2개",
+        "quantity": 16,
+        "row_count": 1,
+        "total_quantity": 16,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 228960,
+        "cost": 35392,
+        "fees": 26697,
+        "contribution_profit": 166871,
+        "matched_revenue": 228960,
+        "matched_cost": 35392,
+        "matched_contribution_profit": 166871,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 14310.0,
+        "profit": 166871,
+        "margin_pct": 72.88
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893649650",
+        "product_code": "10GL06",
+        "product_name": "구욘 다이제스티브 클래식 쿠키 담백한 통밀크래커 비스킷 오트밀쿠키 귀리, 250g, 2개",
+        "quantity": 0,
+        "row_count": 1,
+        "total_quantity": 0,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 0,
+        "cost": 0,
+        "fees": 0,
+        "contribution_profit": 0,
+        "matched_revenue": 0,
+        "matched_cost": 0,
+        "matched_contribution_profit": 0,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": null,
+        "profit": 0,
+        "margin_pct": null
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893649651",
+        "product_code": "10GL06",
+        "product_name": "구욘 다이제스티브 클래식 쿠키 담백한 통밀크래커 비스킷 오트밀쿠키 귀리, 250g, 3개",
+        "quantity": 0,
+        "row_count": 1,
+        "total_quantity": 0,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 0,
+        "cost": 0,
+        "fees": 0,
+        "contribution_profit": 0,
+        "matched_revenue": 0,
+        "matched_cost": 0,
+        "matched_contribution_profit": 0,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": null,
+        "profit": 0,
+        "margin_pct": null
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893661910",
+        "product_code": "10GL04",
+        "product_name": "구욘 다이제스티브 귀리 초코칩 쿠키, 265g, 2개",
+        "quantity": 35,
+        "row_count": 1,
+        "total_quantity": 35,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 500850,
+        "cost": 85890,
+        "fees": 58399,
+        "contribution_profit": 356561,
+        "matched_revenue": 500850,
+        "matched_cost": 85890,
+        "matched_contribution_profit": 356561,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 14310.0,
+        "profit": 356561,
+        "margin_pct": 71.19
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "95893661912",
+        "product_code": "10GL04",
+        "product_name": "구욘 다이제스티브 귀리 초코칩 쿠키, 265g, 3개",
+        "quantity": 41,
+        "row_count": 1,
+        "total_quantity": 41,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 819590,
+        "cost": 100614,
+        "fees": 95564,
+        "contribution_profit": 623412,
+        "matched_revenue": 819590,
+        "matched_cost": 100614,
+        "matched_contribution_profit": 623412,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 19990.0,
+        "profit": 623412,
+        "margin_pct": 76.06
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "96108460738",
+        "product_code": "20EK02",
+        "product_name": "[우리아이 첫 오일] 리투아니아 유기농 NON GMO냉압착 에코ekko 정제 카놀라유 발트해 청정농장 1개 500ml, 2개, 1L",
+        "quantity": 0,
+        "row_count": 1,
+        "total_quantity": 0,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 0,
+        "cost": 0,
+        "fees": 0,
+        "contribution_profit": 0,
+        "matched_revenue": 0,
+        "matched_cost": 0,
+        "matched_contribution_profit": 0,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": null,
+        "profit": 0,
+        "margin_pct": null
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "96171370248",
+        "product_code": "20TZ01",
+        "product_name": "[햇올리브] 이탈리아 유기농 엑스트라버진 만능 올리브오일 테라찌노 TERRAZZINO 라노첼라라 냉압착 지중해. 1개 500ml",
+        "quantity": 0,
+        "row_count": 1,
+        "total_quantity": 0,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 0,
+        "cost": 0,
+        "fees": 0,
+        "contribution_profit": 0,
+        "matched_revenue": 0,
+        "matched_cost": 0,
+        "matched_contribution_profit": 0,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": null,
+        "profit": 0,
+        "margin_pct": null
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "96213511106",
+        "product_code": "20PB01",
+        "product_name": "냉압착 엑스트라버진 올리브오일캡슐 그리스 지중해 냉압착 엑스트라버진 식물성캡슐 유기농 코로네이키 품종 올리오도, 1박스, 30회분",
+        "quantity": 118,
+        "row_count": 1,
+        "total_quantity": 118,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 3528200,
+        "cost": 927126,
+        "fees": 411388,
+        "contribution_profit": 2189686,
+        "matched_revenue": 3528200,
+        "matched_cost": 927126,
+        "matched_contribution_profit": 2189686,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 29900.0,
+        "profit": 2189686,
+        "margin_pct": 62.06
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "96213511107",
+        "product_code": "20PB01",
+        "product_name": "냉압착 엑스트라버진 올리브오일캡슐 그리스 지중해 냉압착 엑스트라버진 식물성캡슐 유기농 코로네이키 품종 올리오도, 3박스, 30회분",
+        "quantity": 0,
+        "row_count": 1,
+        "total_quantity": 0,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 0,
+        "cost": 0,
+        "fees": 0,
+        "contribution_profit": 0,
+        "matched_revenue": 0,
+        "matched_cost": 0,
+        "matched_contribution_profit": 0,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": null,
+        "profit": 0,
+        "margin_pct": null
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "96213511108",
+        "product_code": "20PB01",
+        "product_name": "냉압착 엑스트라버진 올리브오일캡슐 그리스 지중해 냉압착 엑스트라버진 식물성캡슐 유기농 코로네이키 품종 올리오도, 4박스, 30회분",
+        "quantity": 0,
+        "row_count": 1,
+        "total_quantity": 0,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 0,
+        "cost": 0,
+        "fees": 0,
+        "contribution_profit": 0,
+        "matched_revenue": 0,
+        "matched_cost": 0,
+        "matched_contribution_profit": 0,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": null,
+        "profit": 0,
+        "margin_pct": null
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "96213511109",
+        "product_code": "20PB01",
+        "product_name": "냉압착 엑스트라버진 올리브오일캡슐 그리스 지중해 냉압착 엑스트라버진 식물성캡슐 유기농 코로네이키 품종 올리오도, 2박스, 30회분",
+        "quantity": 0,
+        "row_count": 1,
+        "total_quantity": 0,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 0,
+        "cost": 0,
+        "fees": 0,
+        "contribution_profit": 0,
+        "matched_revenue": 0,
+        "matched_cost": 0,
+        "matched_contribution_profit": 0,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": null,
+        "profit": 0,
+        "margin_pct": null
+      },
+      {
+        "date": "2026-11-15",
+        "channel": "coupang_growth",
+        "order_id": "임시집계:2026-11-15",
+        "item_id": "96254147518",
+        "product_code": "10GL04",
+        "product_name": "구욘 다이제스티브 귀리 초코칩 쿠키, 265g, 1개",
+        "quantity": 1,
+        "row_count": 1,
+        "total_quantity": 1,
+        "active_sku_count": 1,
+        "has_data": true,
+        "revenue": 7540,
+        "cost": 2454,
+        "fees": 879,
+        "contribution_profit": 4207,
+        "matched_revenue": 7540,
+        "matched_cost": 2454,
+        "matched_contribution_profit": 4207,
+        "missing_cost_rows": 0,
+        "missing_fee_rows": 0,
+        "asp": 7540.0,
+        "profit": 4207,
+        "margin_pct": 55.8
+      }
+    ],
+    "provisional": true,
+    "issues": [],
+    "unmatched_products": []
+  },
+  "unclassified": {
+    "count": 0,
+    "customers": [],
+    "transactions": []
+  }
+}

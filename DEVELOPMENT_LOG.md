@@ -219,3 +219,66 @@
    - 현재 변경사항은 로컬 워킹 트리(`app.py`, `test_admin_mode.py`, `DEVELOPMENT_LOG.md`)에만 반영되어 있으며, `origin/main` 원격 푸시 및 Render 재배포는 사용자 확인 후 진행해야 함.
    - Excel에서 단일 `쿠팡 옵션 ID`(11자리 숫자 1개만 매핑된 신규 품목 등) 열을 바로 열 경우 Excel 자체 숫자 서식으로 표기될 수 있으므로 필요 시 향후 서식 접두 검토 가능(현재 쉼표 구분 다중 ID 및 표준 UTF-8-BOM CSV 호환 우선).
 
+
+## [2026-11-15] 경영관리 통합 JSON 및 조회 API 연결
+1. 작업 날짜와 변경 기능: 2026-11-15. 일일 파이프라인 마지막 단계에서 dashboard_data.json 생성, 웹 조회 경로 추가.
+2. 수정 파일: app.py에 /dashboard_data.json 및 /api/dashboard-data 추가. test_dashboard_data.py에 임시 파일 기반 404/JSON/캐시 검증 추가. 상위 scripts/export_dashboard_json.py 및 run_daily_pipeline.py에서 현금흐름·정산·손익·미분류를 통합 생성.
+3. 설계 결정: UTF-8 JSON에 금액은 숫자, 원가 누락은 null로 기록. 플랜디에이 9월 수금과 10월 상계채권 분리. 쿠팡 파일명 기준 임시반영 여부와 기준일·누락자료 경고 포함. 기존 재고 UI와 inventory_master_store.json은 수정하지 않음. 현재 설정에서 쿠팡 임시반영을 기본 사용하며 --no-coupang-filename-month로 해제 가능.
+4. 실제 검증: 웹 필수 py_compile 명령 및 unittest discover 전체 통과(exit 0). 새 JSON 라우트 응답/404/no-store 검증 통과. 백엔드 테스트 16개 통과. --date 2026-11-14 --skip-fetch로 파이프라인 전체 로컬 처리 성공, 기준일 2026-11-15 JSON 생성 확인. 최종 exporter 수정 후 관련 2개 테스트와 파일 재생성 통과.
+5. 남은 주의사항: 기존 화면에 경영관리 카드 렌더링은 추가하지 않았으며 fetch('/dashboard_data.json')로 읽을 수 있는 데이터/API 준비 완료. Render 원격 배포나 데이터 동기화는 수행하지 않음. 로컬 생성 파일은 배포 서버에 자동 전송되지 않음. 원가 미매칭 및 채널별 수집 누락은 JSON metadata.warnings 및 sales_profit에 표시됨.
+## [2026-11-15] MD 지표·최신 재고·인증 CSV 다운로드
+1. 작업 날짜와 기능: 2026-11-15. JSON 스키마 1.1, 추이/성장률/월말 예상/상품 순위 및 CSV API 추가.
+2. 수정 파일: scripts/export_dashboard_json.py, scripts/test_dashboard_export.py, web_dashboard/app.py, test_dashboard_data.py, requirements.txt, dashboard_data.json. 재고는 원본 파일명 날짜로 채널별 최신 선택, CSV/XLS/XLSX 형식 판별, 스냅샷 전체 교체. 운영 inventory_master_store.json은 쓰지 않음.
+3. 설계 결정: 쿠팡 누적 스냅샷 중복 합산 방지 및 basis 표시. 비교자료 부족/원가 누락은 null. CSV는 전체 transactions 사용, UTF-8 BOM과 수식 주입 방어. JSON 별칭·CSV·손익 엑셀·수기거래 API에 기존 X-Admin-Token 검증 연결. 다운로드는 인증 헤더가 붙은 fetch/blob 사용. 토큰 서명에 프로세스 난수 키 추가(서버 재시작 시 재인증, 현재 gunicorn 1 worker 기준).
+4. 실제 검증: 대체 Python 3.11.9 + 로컬 site-packages로 exporter unittest 3개 통과. 필수 py_compile 및 추가 파일 문법 검사 통과. 실제 JSON 재생성 성공(매출 960190). 함수 AST 추출 기반 재고 검증 통과(실파일 3PL 54코드, 쿠팡 145옵션, 채널별 최신일 선택 및 이전 옵션 제거). Python HTML 문자열 평가 후 Node vm으로 인라인 JS 문법 검사 통과. 웹 전체 unittest discover는 Flask 미설치로 4개 모듈 import 실패. pipeline 테스트는 requests 미설치로 import 실패. 패키지 설치 시도는 네트워크 제한으로 실패. 새 Flask 통합 테스트는 추가했으나 실행 검증 미완료.
+5. 남은 주의사항: Flask/requests가 있는 정상 개발 환경에서 웹 전체 테스트와 pipeline 회귀 테스트 재실행 필요. Render 배포/원격 푸시 미수행. 최신 파일 파싱 실패 시 이전 재고 유지 및 서버 경고 로그, 다음 요청에서 재시도. 정상 월말 예상 기여이익은 원가/수수료 완전 매칭 시에만 숫자 제공. 재고 파일명은 YYYY-MM-DD_3pl_inventory 또는 YYYY-MM-DD_coupang_inventory 규칙 사용.
+## [2026-11-15] 채널코드맵핑 단일 화이트리스트로 타사 데이터 제외
+1. 작업 날짜와 기능: 2026-11-15. 오키드상품정보.xlsx의 채널코드맵핑 시트를 자사 상품 유일 기준으로 적용.
+2. 수정 파일: scripts/channel_whitelist.py(공통 엄격 허용 목록), generate_monthly_pnl.py(쿠팡 옵션ID 필터, 이름 대체 매칭 제거, 공란 원가 null, 최신 누적파일 선택), export_dashboard_json.py(보고일 이전 최신 스냅샷), web_dashboard/app.py(최신 재고 필터 및 Drive/업로드 재고 조회 필터, 기준표 변경 시 캐시 갱신), 관련 테스트 4개 파일. JSON 및 2026-11 손익 엑셀 재생성.
+3. 설계 결정: 단일 지정 파일만 소유권 판정에 사용. 컬럼은 판매자관리코드/개미창고 상품코드/개미창고 옵션명/쿠팡 옵션 ID의 4개. 38상품, 쿠팡39옵션, 3PL28코드. 쿠팡은 등록 옵션ID 정확일치, 3PL은 등록 창고 상품코드 정확일치. 타사는 미매칭 목록에서도 제외. 허용 목록 로드 실패 시 재고는 비워서 노출 방지. 허용 목록 변경 시 원본 재고가 같아도 다시 필터. 전후 비교를 위해 기존 11월14일 보고 기준/11월15일 은행 기준 유지(15일 매출 스냅샷은 기존 보고일 이후이므로 미반영).
+4. 실제 검증: 화이트리스트/Exporter unittest 9개 통과. 백엔드 및 웹 필수 py_compile 통과. 함수 AST 추출로 실제 refresh_raw_inventory 실행 검증. 매출 원본90행→자사28행(기존 식품33행), 매출960190/원가247561/수수료111959/기여이익600670, 원가누락5→0. 쿠팡 재고145→39옵션, 3PL54→28코드(51행). 저장된 Excel 상세의 ID·금액·원가/수수료/기여이익 수식과 JSON의 금액 전부 일치. Excel 원가미매칭 시트는 헤더만 존재. 네이티브 Excel 계산 엔진은 미실행, 파일은 열 때 자동 재계산 설정 유지. 웹 전체 unittest는 Flask 미설치로 4개 모듈 import 실패(실행 검증 미완료).
+5. 남은 주의사항: 11월15일 최신 매출 파일을 사용하면 별도 스냅샷 수치(26행/매출827850/원가217259/기여이익514063)로 바뀜. 원격 배포/푸시 미수행. 정상 의존성 환경에서 웹 전체 테스트와 requests 의존 파이프라인 테스트 재실행 필요. 운영 inventory_master_store.json 및 기준 엑셀은 수정하지 않음. 콘솔 검증 결과는 scratch/whitelist_verification.json 및 재대조 스크립트에 보관.
+
+## [2026-11-15] URL별 조회 권한 분리 및 9월 이후 월별 집계
+1. 기능: 내부 조회 JSON/CSV/손익 Excel 및 조회 탭 PIN 해제. 기존 관리자 변경/삭제/초기화 인증 유지. /share/inventory는 is_share_mode=True와 재고 필드 allowlist만 전달하는 독립 읽기 전용 템플릿(버튼/관리자/탭/경영자료 스크립트 없음). Excel은 ?month=YYYY-MM 선택 지원.
+2. 파일: app.py, test_dashboard_data.py, scripts/generate_monthly_pnl.py, export_dashboard_json.py, run_daily_pipeline.py, fetch_api_sales.py, filter_bank_and_hometax.py, test_dashboard_export.py 및 생성 JSON/월별 Excel. 월별 루프, monthly_series/mom_growth_pct, 귀속월별 정산 연결. requests는 실제 수집 시, dotenv는 실제 알림 시 로드하여 오프라인 파이프라인 지원.
+3. 설계: 9/10월 쿠팡 파일은 옵션ID 없는 일별 점포 총매출이므로 자사 소유권/원가 확인 불가. unverified_store_totals에 참고 매출 54,648,110 / 54,946,590 저장하고 확정 손익은 null 유지. 11/15 최신 자사 스냅샷 26행: 매출827850/원가217259/수수료96528/기여이익514063/이익률62.1%. 9월 플랜디에이 확인입금6103956 연결, 계산서 미조회로 매출/순액 추정 금지. MoM은 당월 보고일까지 누계 대 전월 누계, 이전 월 자사 손익 자료 부족으로 현 데이터 null.
+4. 검증: --date 2026-11-15 --skip-fetch로 실제 파이프라인 성공 및 9/10/11월 Excel/JSON 생성. scripts unittest 24개 통과(월별 계산/MoM 합성자료 검증 포함). 웹 필수 py_compile 및 변경 스크립트 문법검사 통과. 웹 전체 unittest는 Flask 미설치로 4모듈 import 실패; pip 설치는 네트워크 WinError10013으로 실패. 웹 통합 테스트 실행 완료로 간주하지 않음.
+5. 주의: 실행 중 9~11월 범위 은행 원본이 추가되어 최종 재실행은 은행298건/미분류40건 반영(원래 114건 fixture 회귀 테스트는 파일을 명시해 격리). 9/10월 자사 옵션별 매출/수량과 9월 세금계산서 원본 필요. 운영 inventory_master_store.json 직접 쓰기 및 원격 배포/푸시 미수행. Antigravity는 별도 공유 템플릿을 디자인할 때 재고 allowlist 및 경영 API 미호출을 유지해야 함.
+
+## [2026-11-15] 플랜디에이 9·10월 정산서 우선 손익 집계
+1. 기능: 새 대행 정산서 2개의 2P 옵션집계/매출RAW/견적(을지)/10월3P 분석. RAW 귀속월 기준 확정 정산 우선 로더 적용. 월별 Excel/JSON 및 콘솔 요약표 재생성.
+2. 파일: scripts/generate_monthly_pnl.py(정산서 검증/화이트리스트/묶음수량/실비/비용근거 시트), export_dashboard_json.py(실비 합산·monthly_series 감사근거·MoM·콘솔표), test_agency_settlement.py(5개 새 테스트), test_dashboard_export.py(정산서 기준 회귀). web_dashboard/app.py와 운영 inventory_master_store.json 변경 없음.
+3. 계산: 순매출=정산서 판매액-판매자쿠폰. 매출원가=현재 마스터 단가×옵션 묶음수량×정산 판매수량, 행별 원단위 반올림. 실제 비용은 판매수수료(VAT 포함), CFS 물류비(VAT별도→포함), 대행료5%, 광고비 포함, 재고손실보상은 비용 차감. 광고비는 2P 소유매출 비율 배분하고 소수점2자리/마지막행 잔액으로 총액 보존(9월9883542.9). Excel 저장 반복소수 정밀도로 생기는 1원 차이는 곱셈결과 소수6자리 안정화 후 원단위 반올림으로 JSON/Excel 통일. 점포 총매출/RAW/중복 쿠팡CSV/임시스냅샷은 정산서와 합산하지 않음.
+4. 실제 검증: --date 2026-11-15 --skip-fetch 최종 파이프라인 성공. 백엔드 unittest29개 통과, 변경 스크립트 py_compile 통과. scratch/verify_agency_outputs.py로 저장 Excel 매출상세 및 비용근거 전행을 독립 재합산하여 세 월 JSON과 일치 확인. 최종 9월:21324660/8031224/12827484.4/465951.6/2.19%; 10월:24281610/9320619/16402812/-1441821/-5.94%/MoM13.87%; 11월15일:827850/217259/96528/514063/62.10%/MoM-96.59%. 네이티브 Excel 계산/시각적 렌더 검증은 미실행(수식 보존 및 열 때 재계산 설정).
+5. 주의: 9월 RAW AC 판매수수료합계763행 공란은 원본 SUMIF처럼 합산 제외하며 AA 할인전 수수료로 추정 대체하지 않음(2P 수수료463528와 RAW AC합계 일치). 갑지2025년 오기는 RAW2026 귀속월로 검증. 10월3P 17행/매출546900은 현재 옵션ID 화이트리스트 미등록으로 제외. 월별 settlement_audit에 명시. 11월은 정산서 없는 임시 자사스냅샷이며 실제 광고/물류/대행비 및 묶음수량 검증 미완료, 확정 손익으로 해석하지 말 것. MoM은 10월 전체와 11월15일까지 부분 집계 비교. 누락 채널 수집 및 9월 세금계산서 원본 부재는 계속 별도 표시. 원격 배포/푸시 미수행.
+
+## [2026-11-15] 누적 파일 백업 및 Render 최신 데이터 조회
+1. 기능: 일일 파이프라인 마지막 5단계에 GAS/로컬 Drive 백업 연결. 아침 배치는 --require-cloud, UTF-8, 경로 자동결정, 종료코드/로그 지원. Render 부팅·조회 시 기본30초 주기로 dashboard/기준표/최신 원본재고/손익 Excel·대조 CSV 복원. Git 없이 Drive 직접 읽기 선택(현재 및 상위 경로 .git 없음).
+2. 파일: scripts/sync_to_cloud.py, run_daily_pipeline.py, web_dashboard/cloud_storage.py, app.py(데이터 로더), google_apps_script_bridge.gs(기존 save/load 유지 + backup_*), .gitignore, 아침자동실행.bat, config/cloud.env.example, CLOUD_SYNC_SETUP.md, scripts/test_cloud_sync.py, web_dashboard/test_cloud_refresh.py. 기존 프론트엔드 디자인 보존.
+3. 설계: raw_data 전체, output_excel 누적, master_data, dashboard 및 기존 로컬 재고/수기거래 JSON을 SHA-256 객체로 누적 보관. 이전 파일/manifest 자동 삭제 없음. 전송 완료 후 최신 manifest 게시. 원본경로 복구 --restore-to/--revision 지원(빈 폴더만). .env 제외, 토큰 서버측 POST/로그 미출력. 해시/길이/경로/보고일·생성시각 롤백/동시게시 검증. Render 캐시는 관리자 live DB와 분리. web_dashboard 단독 배포용 재고파싱 fallback. GAS 개별32MiB 초과는 오류, 큰 파일은 로컬 Drive 모드 안내.
+4. 검증: 신규 동기화 unittest 최종9개 통과. Node에서 실제 GAS 핸들러+mock Drive 업로드/게시/재시도/권한/롤백/기존 save-load 분리 검증 통과(실제 Google 호출 아님). 실제 데이터 임시 로컬 미러 E2E: --date 2026-11-15 --skip-fetch --require-cloud 성공,39파일/약24.8MB,2차 추가업로드0,Render 캐시15파일 복원,운영 inventory_master_store.json SHA불변(scratch/cloud_pipeline_verification.json). 웹 필수 py_compile 및 변경 Python 문법검사 통과. 웹 unittest는 Flask 미설치로5모듈 import 실패. 백엔드 전체 discover 당시37개 중6개 실패: 추가 국세청/쿠팡 원본으로 기존 고정 기대 행수/금액/9월 계산서 미조회 기대값 불일치. 전체 테스트 통과로 기록하지 않음.
+5. 미완료/설정: 현재 config/.env에 GOOGLE_APPS_SCRIPT_URL/TOKEN 없음. 실제 Google 업로드·Apps Script 재배포·Render 코드/환경변수 배포·모바일 실서비스 검증 미실행. --required 단독은 미설정으로 오류종료 확인. 최초 GS/Render 코드 배포 및 PC/Render 동일 URL·토큰 필요. Windows 예약 작업 신규 등록 안 함, 기존 작업 배치 연결/시간 설정 필요. GS Script Properties API_TOKEN 권장. 모의 백업 성공을 실제 Drive 연결 성공으로 표현하지 않음.
+
+## [2026-11-15] 쿠팡 입력 일관화·미분류 출력·배치 경로 고정 및 전체38개 테스트 복구
+1. 기능: 해당 월 *정산*.xlsx 최우선(기준일과 무관한 확정 귀속월 결산). 미정산 쿠팡은 월별/일자별 옵션ID 상세 중 기준일+원본 생성시각으로 최신1개 선택. 기본 cutoff=today(KST), 명시15일과 기본현재15일 동일 입력. 원본 생성시각UTC→KST, 월말 상한, 생성정보 없을 때만 mtime fallback. 11월 선택=2026-11_coupang_sales.xlsx/기준일2026-11-15/36행/매출17890260.
+2. 수정: scripts/generate_monthly_pnl.py, export_dashboard_json.py(구형 파일명 날짜 재필터 제거 및 상세 파일을 점포총액 참고로 오인하지 않음), filter_bank_and_hometax.py(거래처별 미분류 집계/--unclassified-only), 기존4개 테스트 파일, 아침자동실행.bat, CLOUD_SYNC_SETUP.md, config/cloud.env.example. app.py/HTML/JS/CSS 등 프론트엔드 소스 수정 없음. JSON 및 월별 Excel은 백엔드 산출물로 재생성.
+3. 설계: 구형 고정16건/미조회 상태/정산순서 가정 대신 승인번호 유일성·현재 원본 개수·입금배분 보존·9월 계산서 매칭·동일cutoff입력선택·임시폴더 통제자료로 검증. 테스트 삭제/skip/개수 조정 없이 기존38개 유지. API패키지없는 현재실행환경을 위해 배치는 실제 실행가능한 LM Studio Python3.11 절대경로 및 기존 pure-Python 패키지경로 고정, 최초온라인실행 requests/python-dotenv 프로젝트 내부 자동설치 지원.
+4. 실제 결과: unittest discover -s scripts -t . -p test_*.py -v 38개 전부OK(35.560초). 수정 Python py_compile 통과. --date2026-11-15 --skip-fetch --skip-cloud 파이프라인 성공. 세 월 저장Excel 상세/비용근거와 JSON 독립재합산 오차0. 11월 매출17890260/원가4638867/수수료2086003/기여11165390/이익률62.41%/MoM-26.32%. PYTHONPATH/PYTHON_EXE를 비운 임시복사본 배치 검증: 도움말0,로컬파이프라인0,잘못된인자2. 운영재고원본에 직접 쓰기 없음.
+5. 검토 대기: 미분류40건/35거래처, 입금987226422/출금506831932. 콘솔에 거래처별건수·입출금 출력하고 scratch/unclassified_counterparties_2026-11-15.txt 보관. 포함/제외 키워드는 사용자 판단 전 유지. 11월은 실제 정산서 없는 임시 손익이며 원본 생성시각 기반 기준일의 정확한 집계기간은 별도 확인 대상. API패키지 최초온라인설치/실제API수집/실제Drive백업은 이번 테스트에서 미실행(네트워크·기존인증설정 필요). LM Studio가 이동하면 배치 고정경로도 변경 필요.
+
+## [2026-11-15] 20년 차 식품 MD 기준 4개 탭 UI/UX 고도화 및 Render 모바일 웹 배포
+1. 기능:
+   - 탭 1 (일일 상품 매출): 총 판매수량 합계(875개) 및 판매 품목(36종) 정상 분리 표기. 11개 MD 실무 컬럼(ASP, 원가, 수수료, 기여이익률, 현재 가용재고 및 런웨이, 품절임박 배지, 미판매 품목 토글, 요약 footer) 구현.
+   - 탭 2 (일일 재고현황): 총 재고자산 금액(약 1.43억 원) 및 판매 정체(21종) 묶인 원가(약 6,705만 원) 가치 평가 배지 반영.
+   - 탭 3 (일일 현금흐름): 정산 월 선택 스트립(9월/10월/11월/전체), 6대 자금 용도 칩(건수+금액 동시 표시), 30건 제한 해제 및 102건 전체 내역 토글 구현.
+   - 탭 4 (월 손익결산): 11월 흑자 착시 방지 경고 배너 및 현실 예상 기여이익(99만 원, 5.5%), B2B 현금매출(+594만 원) 및 식품 외주·판관비 상세 반영.
+   - 외부 협력사 전용 보안 모드 (/share/inventory): 매출/마진/스크립트/버튼을 완전 차단한 순수 읽기 전용 실물 재고 테이블(6열) 서빙.
+2. 파일: app.py, dashboard_data.json, cloud_storage.py, requirements.txt, test_dashboard_data.py, .gitignore
+3. 검증:
+   - test_dashboard_data.py 6개 통과 (100%)
+   - test_app.py 6개 통과 (100%)
+   - test_business_logic.py 9개 통과 (100%)
+   - Playwright 브라우저 콘솔 에러 0건 확인
+   - .gitignore로 raw_data/ 및 config/.env 파일 완전 제외 확인
+

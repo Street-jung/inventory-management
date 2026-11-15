@@ -16,6 +16,19 @@ cloudflared.exe
 # User / Local Secrets & Sessions
 auth.json
 .env
+config/
+config/.env
+.cloud_cache/
+
+# Raw data & sensitive spreadsheets
+raw_data/
+output_excel/
+*.xlsx
+*.xls
+
+# Temporary / Scratch
+*.bak
+scratch/
 
 # Editor & OS files
 .vscode/
@@ -25,4 +38,3 @@ auth.json
 Thumbs.db
 Desktop.ini
 .DS_Store
-
