@@ -40,11 +40,15 @@ function doPost(e) {
     var rawBody = (e && e.postData && e.postData.contents) ? e.postData.contents : "{}";
     var body = JSON.parse(rawBody);
 
-    if (!body.token || body.token !== API_TOKEN) {
+    var configuredToken = PropertiesService.getScriptProperties().getProperty('API_TOKEN') || API_TOKEN;
+    if (!body.token || body.token !== configuredToken) {
       return jsonResponse({ success: false, error: "Unauthorized: Invalid token" });
     }
 
     var action = body.action || "ping";
+    if (action.indexOf('backup_') === 0) {
+      return jsonResponse(handleFileBackup(action, body.payload || {}));
+    }
     if (action === "ping") {
       return jsonResponse({
         success: true,
@@ -177,5 +181,79 @@ function jsonResponse(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// Immutable content-addressed file backups. Never writes the live inventory DB.
+// Each successful publish keeps a permanent manifest version, then updates latest.
+function backupFolder(name) {
+  var root = findOrCreateFolder();
+  var found = root.getFoldersByName(name);
+  return found.hasNext() ? found.next() : root.createFolder(name);
+}
+
+function backupFile(folder, name) {
+  var files = folder.getFilesByName(name);
+  return files.hasNext() ? files.next() : null;
+}
+
+function backupHash(bytes) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)
+    .map(function(b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+}
+
+function handleFileBackup(action, payload) {
+  var objects = backupFolder('pipeline_objects');
+  var manifests = backupFolder('pipeline_manifests');
+  var latest = backupFile(manifests, 'latest.json');
+  if (action === 'backup_manifest') {
+    if (payload.revision) {
+      if (!/^[a-f0-9]{64}$/.test(payload.revision)) throw new Error('Invalid revision');
+      latest = backupFile(manifests, payload.revision + '.json');
+    }
+    return {success: true, data: latest ? JSON.parse(latest.getBlob().getDataAsString('UTF-8')) : null};
+  }
+  if (action === 'backup_put' || action === 'backup_get') {
+    if (!/^[a-f0-9]{64}$/.test(payload.sha256 || '')) throw new Error('Invalid object hash');
+    var object = backupFile(objects, payload.sha256);
+    if (action === 'backup_put') {
+      var bytes = Utilities.base64Decode(payload.content_base64 || '');
+      if (bytes.length > 32 * 1024 * 1024) throw new Error('Object exceeds 32 MiB; use local Drive sync for larger files');
+      if (backupHash(bytes) !== payload.sha256) throw new Error('Object checksum mismatch');
+      if (object && backupHash(object.getBlob().getBytes()) !== payload.sha256) throw new Error('Existing object checksum mismatch');
+      if (!object) object = objects.createFile(Utilities.newBlob(bytes, 'application/octet-stream', payload.sha256));
+      return {success: true, sha256: payload.sha256, fileId: object.getId()};
+    }
+    if (!object) throw new Error('Object not found');
+    return {success: true, content_base64: Utilities.base64Encode(object.getBlob().getBytes())};
+  }
+  if (action === 'backup_publish') {
+    var data = payload.manifest;
+    if (!data || !data.files || !data.files['web_dashboard/dashboard_data.json'] ||
+        !/^[a-f0-9]{64}$/.test(data.revision || '') || !/^\d{4}-\d{2}-\d{2}$/.test(data.report_date || '')) {
+      throw new Error('Invalid manifest');
+    }
+    var old = latest ? JSON.parse(latest.getBlob().getDataAsString('UTF-8')) : null;
+    if (old && old.revision === data.revision) return {success: true, revision: data.revision};
+    if ((old ? old.revision : null) !== (payload.previous_revision || null)) throw new Error('Concurrent publish; retry');
+    if (old && old.report_date > data.report_date) throw new Error('Refusing older dashboard');
+    if (old && old.dashboard_generated_at && data.dashboard_generated_at &&
+        Date.parse(old.dashboard_generated_at) > Date.parse(data.dashboard_generated_at)) {
+      throw new Error('Refusing older dashboard generation');
+    }
+    Object.keys(data.files).forEach(function(path) {
+      var entry = data.files[path];
+      if (!/^[a-f0-9]{64}$/.test(entry.sha256 || '') || !backupFile(objects, entry.sha256)) {
+        throw new Error('Missing backup object');
+      }
+    });
+    var encoded = JSON.stringify(data);
+    if (!backupFile(manifests, data.revision + '.json')) {
+      manifests.createFile(Utilities.newBlob(encoded, 'application/json', data.revision + '.json'));
+    }
+    if (latest) latest.setContent(encoded);
+    else manifests.createFile(Utilities.newBlob(encoded, 'application/json', 'latest.json'));
+    return {success: true, revision: data.revision};
+  }
+  throw new Error('Unknown backup action');
 }
 
