@@ -1,4 +1,4 @@
-# Python
+# Python & Virtual environments
 __pycache__/
 *.py[cod]
 *$py.class
@@ -8,16 +8,29 @@ env/
 venv/
 ENV/
 .venv/
+.runtime_deps/
+.wing_deps/
+*/.wing_deps/
 
 # Binaries & Downloads
 cloudflared.exe
 *.exe
 
-# User / Local Secrets & Sessions
+# User / Local Secrets, Tokens & Sessions
 auth.json
 .env
+*.env
 config/
 config/.env
+config/coupang_chrome_profile/
+coupang_chrome_profile/
+wing_*profile*/
+*/wing_*profile*/
+wing_diagnostics/
+*/wing_diagnostics/
+.cafe24_tokens.json*
+*.cafe24_tokens.json*
+scripts/.cafe24_tokens.json*
 .cloud_cache/
 
 # Raw data & sensitive spreadsheets
@@ -25,10 +38,13 @@ raw_data/
 output_excel/
 *.xlsx
 *.xls
+*.csv.bak
 
-# Temporary / Scratch
+# Temporary / Scratch & Logs
 *.bak
 scratch/
+logs/
+*.log
 
 # Editor & OS files
 .vscode/
