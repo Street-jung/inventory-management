@@ -123,10 +123,10 @@
     {
       "id": "P_20DC02",
       "seller_code": "20DC02",
-      "name": "[관리자확정] 데체코 EV 올리브오일 500ml",
-      "product_type": "수입",
-      "note": "이탈리아 4분기 선적 완료",
-      "category": "프리미엄오일",
+      "name": "데체코 엑스트라버진 올리브오일 500ml",
+      "product_type": "사입",
+      "note": "",
+      "category": "오일/식용유",
       "gaemi_codes": [
         "PJ1489516"
       ],
@@ -137,11 +137,7 @@
           "bundle": 1,
           "name": "1개"
         }
-      ],
-      "lead_time_days": 95,
-      "safety_buffer_days": 15,
-      "in_transit_qty": 480,
-      "expected_arrival_date": "2026-12-20"
+      ]
     },
     {
       "id": "P_20DC03",
