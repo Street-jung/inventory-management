@@ -1494,9 +1494,7 @@ def save_state(sync_drive=True, wait_drive=False, is_admin_mutation=False):
 @app.after_request
 def allow_iframe_embedding(response):
     response.headers.pop("X-Frame-Options", None)
-    response.headers["Content-Security-Policy"] = (
-        "frame-ancestors 'self' https://sites.google.com https://*.google.com https://*.google.co.kr https://*.googleusercontent.com https://*.usercontent.google.com"
-    )
+    response.headers.pop("Content-Security-Policy", None)
     response.headers["Access-Control-Allow-Origin"] = "*"
     return response
 
@@ -1891,7 +1889,7 @@ def share_inventory():
             resp = make_response(render_template_string(SHARE_INVENTORY_TEMPLATE, is_share_mode=True,
                                                         inventory=inventory, updated=summary.get('stats', {}).get('last_updated')))
             resp.headers.pop('X-Frame-Options', None)
-            resp.headers['Content-Security-Policy'] = "frame-ancestors 'self' https://sites.google.com https://*.google.com https://*.google.co.kr https://*.googleusercontent.com https://*.usercontent.google.com"
+            resp.headers.pop('Content-Security-Policy', None)
             resp.headers['Access-Control-Allow-Origin'] = '*'
             return resp
     except Exception:
@@ -1899,7 +1897,7 @@ def share_inventory():
 
     resp = make_response(render_template_string(HTML_TEMPLATE, is_share_mode=True))
     resp.headers.pop('X-Frame-Options', None)
-    resp.headers['Content-Security-Policy'] = "frame-ancestors 'self' https://sites.google.com https://*.google.com https://*.google.co.kr https://*.googleusercontent.com https://*.usercontent.google.com"
+    resp.headers.pop('Content-Security-Policy', None)
     resp.headers['Access-Control-Allow-Origin'] = "*"
     return resp
 
