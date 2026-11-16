@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import shutil
 import unittest
 import copy
 import csv
@@ -13,6 +14,16 @@ import app as app_module
 
 
 class DashboardDataTests(unittest.TestCase):
+    def setUp(self):
+        original = app_module.DATA_FILE
+        store = tempfile.TemporaryDirectory(prefix='dashboard_test_store_')
+        self.addCleanup(store.cleanup)
+        self.addCleanup(setattr, app_module, 'DATA_FILE', original)
+        copied = Path(store.name) / 'inventory_master_store.json'
+        if Path(original).is_file():
+            shutil.copy2(original, copied)
+        app_module.DATA_FILE = str(copied)
+
     def test_management_auth_and_csv(self):
         client = app.test_client()
         urls = ['/dashboard_data.json', '/api/dashboard-data', '/api/download-pnl-excel']

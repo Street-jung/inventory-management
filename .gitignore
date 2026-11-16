@@ -45,6 +45,10 @@ output_excel/
 *.csv.bak
 
 # Temporary / Scratch & Logs
+.pytest_cache/
+*.tmp
+ui_preview/
+web_dashboard/.cloud_cache/
 *.bak
 scratch/
 logs/

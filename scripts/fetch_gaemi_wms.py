@@ -9,7 +9,6 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from urllib.parse import urlsplit, urljoin
 
 try:
