@@ -344,6 +344,18 @@ def run(report_date=None, as_of=None, coupang_filename_month=None, bank_file=Non
     report_date = report_date or yesterday()
     as_of = as_of or report_date
     data = build_data(report_date, as_of, coupang_filename_month, bank_file)
+    try:
+        try:
+            from .fetch_gaemi_wms import snapshot_summary
+        except ImportError:
+            from fetch_gaemi_wms import snapshot_summary
+        gaemi = snapshot_summary(report_date, ROOT)
+        if gaemi:
+            data['inventory_snapshots'] = {'gaemi': gaemi}
+            if gaemi['source'] not in data['metadata']['sources']:
+                data['metadata']['sources'].append(gaemi['source'])
+    except Exception:
+        data['metadata']['warnings'].append('개미창고 재고 스냅샷 검증 실패: 원본 파일과 화이트리스트 확인 필요')
     output = output or ROOT / 'web_dashboard/dashboard_data.json'
     write_json(output, data)
     print('월 | 매출액 | 매출원가 | 수수료/정산비용 | 기여이익 | 이익률(%) | MoM(%) | 상태')

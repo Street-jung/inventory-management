@@ -36,11 +36,17 @@ def main():
     try:
         if not args.skip_fetch:
             try:
-                from . import fetch_api_sales, fetch_coupang_wing
+                from . import fetch_api_sales, fetch_coupang_wing, fetch_gaemi_wms
             except ImportError:
                 import fetch_api_sales
                 import fetch_coupang_wing
+                import fetch_gaemi_wms
             print('[1/5] 쿠팡 윙 수집:', fetch_coupang_wing.run(args.date))
+            try:
+                print('[1/5] 개미창고 재고 수집:', fetch_gaemi_wms.run())
+            except Exception as exc:
+                logging.warning('개미창고 수집 실패 [%s]: %s. 기존 파일로 결산 계속',
+                                type(exc).__name__, fetch_gaemi_wms.safe_reason(exc))
             if not args.skip_api_fetch:
                 try:
                     print('[1/5] 매출 수집:', fetch_api_sales.run(args.date))

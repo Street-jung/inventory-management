@@ -92,6 +92,7 @@ class CollectorTests(unittest.TestCase):
     def test_pipeline_continues_after_coupang_fallback(self):
         from scripts import run_daily_pipeline as pipeline, fetch_api_sales
         with patch('sys.argv', ['pipeline', '--skip-cloud']), \
+                patch('scripts.fetch_gaemi_wms.run', return_value={'status': 'fallback'}), \
                 patch.object(wing, 'run', return_value={'sales': {'status': 'fallback'}}), \
                 patch.object(fetch_api_sales, 'run', return_value={}), \
                 patch.object(pipeline.filter_bank_and_hometax, 'run', return_value={}) as bank, \
