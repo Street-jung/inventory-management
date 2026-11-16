@@ -1495,7 +1495,7 @@ def save_state(sync_drive=True, wait_drive=False, is_admin_mutation=False):
 def allow_iframe_embedding(response):
     response.headers.pop("X-Frame-Options", None)
     response.headers["Content-Security-Policy"] = (
-        "frame-ancestors * 'self' https://*.google.com https://*.googleusercontent.com https://*.usercontent.google.com https://sites.google.com"
+        "frame-ancestors 'self' https://sites.google.com https://*.google.com https://*.google.co.kr https://*.googleusercontent.com https://*.usercontent.google.com"
     )
     response.headers["Access-Control-Allow-Origin"] = "*"
     return response
@@ -1890,8 +1890,8 @@ def share_inventory():
             inventory = [{key: row.get(key) for key in fields} for row in summary.get('masters', [])]
             resp = make_response(render_template_string(SHARE_INVENTORY_TEMPLATE, is_share_mode=True,
                                                         inventory=inventory, updated=summary.get('stats', {}).get('last_updated')))
-            resp.headers['X-Frame-Options'] = 'ALLOWALL'
-            resp.headers['Content-Security-Policy'] = 'frame-ancestors *'
+            resp.headers.pop('X-Frame-Options', None)
+            resp.headers['Content-Security-Policy'] = "frame-ancestors 'self' https://sites.google.com https://*.google.com https://*.google.co.kr https://*.googleusercontent.com https://*.usercontent.google.com"
             resp.headers['Access-Control-Allow-Origin'] = '*'
             return resp
     except Exception:
@@ -1899,7 +1899,7 @@ def share_inventory():
 
     resp = make_response(render_template_string(HTML_TEMPLATE, is_share_mode=True))
     resp.headers.pop('X-Frame-Options', None)
-    resp.headers['Content-Security-Policy'] = "frame-ancestors * 'self' https://*.google.com https://*.googleusercontent.com https://*.usercontent.google.com https://sites.google.com"
+    resp.headers['Content-Security-Policy'] = "frame-ancestors 'self' https://sites.google.com https://*.google.com https://*.google.co.kr https://*.googleusercontent.com https://*.usercontent.google.com"
     resp.headers['Access-Control-Allow-Origin'] = "*"
     return resp
 
