@@ -3914,6 +3914,33 @@ HTML_TEMPLATE = """
             #cashflowFilterChips button > div:last-child { font-size: 11px; }
             #settlementListContainer .font-mono { font-size: 11px; }
         }
+
+        .mobile-detail-list, .detail-view-toggle { display: none; }
+        #salesTrendLegend > span, #btnToggleZeroSales { white-space: nowrap; }
+        @media (max-width: 640px) {
+            #mainTabBar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            #mainTabBar button { min-width: 0; justify-content: center; }
+            .dashboard-tab-content { min-width: 0; }
+            .dashboard-tab-content > div { min-width: 0; }
+            .detail-view-toggle { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 12px; }
+            .detail-view-toggle button { padding: 6px 10px; border-radius: 8px; font-size: 12px; white-space: nowrap; background: #f1f5f9; }
+            .detail-view-toggle button[aria-pressed="true"] { background: #0f172a; color: white; }
+            .mobile-detail-list { display: grid; gap: 10px; padding: 0 12px 12px; }
+            .detail-table-scroll { display: none; }
+            .dashboard-tab-content.detail-full-table .mobile-detail-list { display: none; }
+            .dashboard-tab-content.detail-full-table .detail-table-scroll { display: block; }
+            .mobile-detail-list article { min-width: 0; padding: 12px; border: 1px solid #e2e8f0; border-radius: 12px; font-size: 12px; background: white; overflow-wrap: anywhere; }
+            .mobile-detail-list h3 { font-weight: 700; white-space: normal; margin: 6px 0; }
+            .mobile-detail-list .card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: #64748b; }
+            .mobile-detail-list .card-badge { display: inline-block; padding: 2px 6px; border-radius: 6px; background: #f1f5f9; font-size: 11px; white-space: nowrap; }
+            .mobile-detail-list .card-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 10px; }
+            .mobile-detail-list .card-metrics > div { min-width: 0; }
+            .mobile-detail-list dt { color: #64748b; font-size: 11px; }
+            .mobile-detail-list dd { margin-top: 3px; font-weight: 700; font-variant-numeric: tabular-nums; }
+            .mobile-detail-list .card-amount { text-align: right; font-size: 16px; font-weight: 800; margin: 8px 0; font-variant-numeric: tabular-nums; }
+            #salesTrendLegend { flex-wrap: wrap; }
+            #settlementListContainer p { overflow-wrap: anywhere; }
+        }
         #mobileMasterList { display: none; }
         .inventory-view-toggle { display: none; }
         @media (max-width: 640px) {
@@ -4102,7 +4129,7 @@ HTML_TEMPLATE = """
 
         {% if not is_share_mode %}
         <!-- 4대 메인 탭 네비게이션 (모바일 가로 스크롤 지원 & PIN 기반 보안 잠금) -->
-        <nav id="mainTabBar" class="flex items-center gap-1.5 p-1 bg-slate-200/80 rounded-xl overflow-x-auto scrollbar-none text-xs font-semibold text-slate-600">
+        <nav id="mainTabBar" class="grid grid-cols-2 sm:flex items-center gap-1.5 p-1 bg-slate-200/80 rounded-xl text-xs font-semibold text-slate-600">
             <!-- ① 일일 상품 매출 (첫 화면, Default) -->
             <button type="button" onclick="switchDashboardTab('sales')" id="tabBtn_sales" class="dashboard-tab-btn active px-3.5 py-2 rounded-lg transition flex items-center gap-2 whitespace-nowrap bg-white text-slate-900 shadow-xs cursor-pointer">
                 <i class="fa-solid fa-chart-line text-indigo-600"></i>
@@ -4203,13 +4230,13 @@ HTML_TEMPLATE = """
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
                 <!-- 일별 매출 추이 그래프 (7 cols) -->
                 <div class="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-xs">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap gap-2 items-center justify-between">
+                        <div class="flex flex-wrap items-center gap-2">
                             <span class="font-bold text-xs text-slate-900">일별 매출 추이</span>
                             <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">누적 스냅샷 기준</span>
                             <span class="text-[11px] text-slate-400" id="salesTrendSubtitle">최근 일자별 실적</span>
                         </div>
-                        <div class="flex items-center gap-2 text-[10px] text-slate-500" id="salesTrendLegend">
+                        <div class="flex items-center gap-2 flex-wrap text-[10px] text-slate-500" id="salesTrendLegend">
                             <!-- 범례 -->
                         </div>
                     </div>
@@ -4220,8 +4247,8 @@ HTML_TEMPLATE = """
 
                 <!-- TOP 10 상품 매출 랭킹 (5 cols) -->
                 <div class="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-xs flex flex-col justify-between">
-                    <div class="flex items-center justify-between border-b border-slate-100 pb-2">
-                        <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap gap-2 items-center justify-between border-b border-slate-100 pb-2">
+                        <div class="flex flex-wrap items-center gap-2">
                             <span class="font-bold text-xs text-slate-900">TOP 10 베스트셀러 상품</span>
                             <span class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700">판매량순</span>
                         </div>
@@ -4236,23 +4263,28 @@ HTML_TEMPLATE = """
             <!-- 4. 하단 데이터 테이블: 상품별 상세 매출 테이블 + [미판매 품목(0원) 포함 보기] + [📥 매출 CSV 추출] -->
             <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
                 <div class="p-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                         <span class="font-bold text-xs text-slate-900">상품별 상세 매출 및 판매 실적</span>
                         <span id="salesDetailCountBadge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600">0건</span>
                         <span id="salesActiveFilterBadge" class="hidden px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">전체 채널</span>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <button type="button" onclick="toggleZeroSales()" id="btnToggleZeroSales" class="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-2xs cursor-pointer">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" onclick="toggleZeroSales()" id="btnToggleZeroSales" class="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition whitespace-nowrap flex items-center gap-1.5 shadow-2xs cursor-pointer">
                             <i id="iconToggleZeroSales" class="fa-regular fa-eye text-slate-400"></i>
                             <span id="textToggleZeroSales">미판매 품목(0원) 포함 보기</span>
                         </button>
-                        <button type="button" onclick="exportSalesCsv()" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-xs cursor-pointer">
+                        <button type="button" onclick="exportSalesCsv()" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition whitespace-nowrap flex items-center gap-1.5 shadow-xs cursor-pointer">
                             <i class="fa-solid fa-file-csv text-indigo-400"></i>
                             <span>📥 매출 CSV 추출</span>
                         </button>
                     </div>
                 </div>
-                <div class="overflow-x-auto relative">
+                <div class="detail-view-toggle" role="group" aria-label="목록 표시 방식">
+                    <button type="button" id="salesCompactButton" aria-pressed="true" onclick="setDetailTableView('sales', false)">모바일 뷰</button>
+                    <button type="button" id="salesTableButton" aria-pressed="false" onclick="setDetailTableView('sales', true)">전체 표 보기</button>
+                </div>
+                <div id="mobileSalesList" class="mobile-detail-list" aria-label="모바일 상세 목록"></div>
+                <div id="salesTableScrollWrap" class="detail-table-scroll overflow-x-auto relative">
                     <table class="w-full text-left text-xs border-collapse">
                         <thead class="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 text-[11px]">
                             <tr>
@@ -4604,8 +4636,8 @@ HTML_TEMPLATE = """
         <section id="tabContent_cashflow" class="dashboard-tab-content hidden space-y-3">
             <!-- 1. 최상단 정산 데드라인 배너 (settlements 데이터) -->
             <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-3">
-                <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                    <div class="flex items-center gap-2">
+                <div class="flex flex-wrap gap-2 items-center justify-between border-b border-slate-100 pb-2.5">
+                    <div class="flex flex-wrap items-center gap-2">
                         <div class="w-6 h-6 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center text-xs">
                             <i class="fa-solid fa-bell"></i>
                         </div>
@@ -4716,23 +4748,28 @@ HTML_TEMPLATE = """
             <!-- 4. 하단 데이터 테이블: 최근 입출금 거래내역 + [+ 수기 입출금 등록] + [📥 현금흐름 CSV 추출] -->
             <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
                 <div class="p-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                         <span class="font-bold text-xs text-slate-900">최근 입출금 거래내역</span>
                         <span id="cfRecentCountBadge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600">0건</span>
                         <span id="cfActiveFilterBadge" class="hidden px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">전체</span>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <button type="button" onclick="openManualTxModal()" class="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-xs cursor-pointer">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" onclick="openManualTxModal()" class="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold transition whitespace-nowrap flex items-center gap-1.5 shadow-xs cursor-pointer">
                             <i class="fa-solid fa-plus text-emerald-600"></i>
                             <span>+ 수기 입출금 등록</span>
                         </button>
-                        <button type="button" onclick="exportCashFlowCsv()" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-xs cursor-pointer">
+                        <button type="button" onclick="exportCashFlowCsv()" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition whitespace-nowrap flex items-center gap-1.5 shadow-xs cursor-pointer">
                             <i class="fa-solid fa-file-csv text-emerald-400"></i>
                             <span>📥 현금흐름 CSV 추출</span>
                         </button>
                     </div>
                 </div>
-                <div class="overflow-x-auto relative">
+                <div class="detail-view-toggle" role="group" aria-label="목록 표시 방식">
+                    <button type="button" id="cashflowCompactButton" aria-pressed="true" onclick="setDetailTableView('cashflow', false)">모바일 뷰</button>
+                    <button type="button" id="cashflowTableButton" aria-pressed="false" onclick="setDetailTableView('cashflow', true)">전체 표 보기</button>
+                </div>
+                <div id="mobileCashflowList" class="mobile-detail-list" aria-label="모바일 상세 목록"></div>
+                <div id="cashflowTableScrollWrap" class="detail-table-scroll overflow-x-auto relative">
                     <table class="w-full text-left text-xs border-collapse">
                         <thead class="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 text-[11px]">
                             <tr>
@@ -4751,7 +4788,7 @@ HTML_TEMPLATE = """
                 <!-- 거래내역 더보기 토글 바 -->
                 <div id="cfTableFooter" class="p-2.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between text-xs">
                     <span id="cfShowingCountText" class="text-slate-500 font-mono text-[11px]">0건 표시 중</span>
-                    <button type="button" onclick="toggleCashflowShowAll()" id="btnToggleCfShowAll" class="px-3 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition flex items-center gap-1.5 shadow-2xs cursor-pointer">
+                    <button type="button" onclick="toggleCashflowShowAll()" id="btnToggleCfShowAll" class="px-3 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition whitespace-nowrap flex items-center gap-1.5 shadow-2xs cursor-pointer">
                         <i id="iconToggleCfShowAll" class="fa-solid fa-angles-down text-slate-400"></i>
                         <span id="textToggleCfShowAll">전체 내역 보기</span>
                     </button>
@@ -4766,7 +4803,7 @@ HTML_TEMPLATE = """
             <!-- 1. 상단 월 선택 칩 4개 (디자인 시스템 통일 및 적자/흑자 상태 뱃지 포함) -->
             <div id="pnlMonthChips" class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <button type="button" onclick="setPnlMonth('all')" data-m="all" class="pnl-month-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
-                    <div class="flex items-center justify-between text-[11px] font-semibold text-slate-600">
+                    <div class="flex flex-wrap gap-2 items-center justify-between text-[11px] font-semibold text-slate-600">
                         <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span><span class="truncate">전체 (9~11월)</span></span>
                         <span id="pnlMonthBadge_all" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-slate-100 text-slate-700">누적</span>
                     </div>
@@ -4774,7 +4811,7 @@ HTML_TEMPLATE = """
                     <div class="mt-0.5 text-[11px] font-mono font-medium text-slate-500" id="pnlMonthSub_all">계산 중</div>
                 </button>
                 <button type="button" onclick="setPnlMonth('2026-09')" data-m="2026-09" class="pnl-month-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
-                    <div class="flex items-center justify-between text-[11px] font-semibold text-slate-600">
+                    <div class="flex flex-wrap gap-2 items-center justify-between text-[11px] font-semibold text-slate-600">
                         <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span><span class="truncate">2026-09</span></span>
                         <span id="pnlMonthBadge_09" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">흑자</span>
                     </div>
@@ -4782,7 +4819,7 @@ HTML_TEMPLATE = """
                     <div class="mt-0.5 text-[11px] font-mono font-medium text-emerald-600" id="pnlMonthSub_09">이익 +46.6만 (+2.2%)</div>
                 </button>
                 <button type="button" onclick="setPnlMonth('2026-10')" data-m="2026-10" class="pnl-month-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
-                    <div class="flex items-center justify-between text-[11px] font-semibold text-slate-600">
+                    <div class="flex flex-wrap gap-2 items-center justify-between text-[11px] font-semibold text-slate-600">
                         <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></span><span class="truncate">2026-10</span></span>
                         <span id="pnlMonthBadge_10" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-rose-100 text-rose-700">적자</span>
                     </div>
@@ -4790,7 +4827,7 @@ HTML_TEMPLATE = """
                     <div class="mt-0.5 text-[11px] font-mono font-bold text-rose-600" id="pnlMonthSub_10">이익 -144.2만 (-5.9%)</div>
                 </button>
                 <button type="button" onclick="setPnlMonth('2026-11')" data-m="2026-11" class="pnl-month-pill status-pill bg-slate-100/80 border border-slate-900 ring-1 ring-slate-900 rounded-xl px-3 py-2 text-left transition cursor-pointer">
-                    <div class="flex items-center justify-between text-[11px] font-semibold text-slate-600">
+                    <div class="flex flex-wrap gap-2 items-center justify-between text-[11px] font-semibold text-slate-600">
                         <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-900 shrink-0"></span><span class="truncate">2026-11 (당월)</span></span>
                         <span id="pnlMonthBadge_11" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-blue-100 text-blue-800">집계중</span>
                     </div>
@@ -4819,7 +4856,7 @@ HTML_TEMPLATE = """
             <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
                 <!-- 카드 1: 순매출액 -->
                 <div class="bg-white border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between shadow-xs">
-                    <div class="flex items-center justify-between text-slate-500 text-[11px] font-semibold">
+                    <div class="flex flex-wrap gap-2 items-center justify-between text-slate-500 text-[11px] font-semibold">
                         <span>순매출액</span>
                         <div class="w-6 h-6 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center">
                             <i class="fa-solid fa-sack-dollar text-xs"></i>
@@ -4833,7 +4870,7 @@ HTML_TEMPLATE = """
 
                 <!-- 카드 2: 매출원가 -->
                 <div class="bg-white border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between shadow-xs">
-                    <div class="flex items-center justify-between text-slate-500 text-[11px] font-semibold">
+                    <div class="flex flex-wrap gap-2 items-center justify-between text-slate-500 text-[11px] font-semibold">
                         <span>매출원가</span>
                         <div class="w-6 h-6 rounded-md bg-rose-50 text-rose-600 flex items-center justify-center">
                             <i class="fa-solid fa-box-open text-xs"></i>
@@ -4847,7 +4884,7 @@ HTML_TEMPLATE = """
 
                 <!-- 카드 3: 판매수수료 및 정산비용 -->
                 <div class="bg-white border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between shadow-xs">
-                    <div class="flex items-center justify-between text-slate-500 text-[11px] font-semibold">
+                    <div class="flex flex-wrap gap-2 items-center justify-between text-slate-500 text-[11px] font-semibold">
                         <span>정산비용·수수료</span>
                         <div class="w-6 h-6 rounded-md bg-amber-50 text-amber-600 flex items-center justify-center">
                             <i class="fa-solid fa-receipt text-xs"></i>
@@ -4861,7 +4898,7 @@ HTML_TEMPLATE = """
 
                 <!-- 카드 4: 기여이익 (이익률 %, 적자 시 빨간색 강조) -->
                 <div id="pnlProfitCardWrap" class="bg-white border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between shadow-xs">
-                    <div class="flex items-center justify-between text-slate-500 text-[11px] font-semibold">
+                    <div class="flex flex-wrap gap-2 items-center justify-between text-slate-500 text-[11px] font-semibold">
                         <span>기여이익</span>
                         <div id="pnlProfitIconWrap" class="w-6 h-6 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center">
                             <i id="pnlProfitIcon" class="fa-solid fa-arrow-trend-up text-xs"></i>
@@ -4878,7 +4915,7 @@ HTML_TEMPLATE = """
 
                 <!-- 카드 5: 월말 예상 또는 정산 확정 실적 -->
                 <div class="col-span-2 sm:col-span-1 bg-white border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between shadow-xs">
-                    <div class="flex items-center justify-between text-slate-600 text-[11px] font-semibold">
+                    <div class="flex flex-wrap gap-2 items-center justify-between text-slate-600 text-[11px] font-semibold">
                         <span class="flex items-center gap-1">
                             <span id="pnlForecastTitle">월말 예상 영업이익</span>
                             <span id="pnlForecastBadge" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">예측</span>
@@ -4896,7 +4933,7 @@ HTML_TEMPLATE = """
 
             <!-- 원가 미매칭 안내 배너 (미매칭 존재 시 표시) -->
             <div id="pnlUnmatchedBanner" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-3.5 text-xs text-amber-900 flex items-center justify-between gap-3">
-                <div class="flex items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2">
                     <i class="fa-solid fa-triangle-exclamation text-amber-600 text-sm"></i>
                     <span>기준 단품 원가가 아직 매칭되지 않은 주문이 <strong id="pnlUnmatchedCount" class="font-bold font-mono">0</strong>건 있습니다.</span>
                 </div>
@@ -4909,15 +4946,15 @@ HTML_TEMPLATE = """
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
                 <!-- 좌측: 9·10·11월 월별 비교 차트 (적자 월 빨간색 표시) -->
                 <div class="lg:col-span-6 bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col justify-between">
-                    <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-                        <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap gap-2 items-center justify-between pb-3 border-b border-slate-100">
+                        <div class="flex flex-wrap items-center gap-2">
                             <span class="font-bold text-xs text-slate-900">월별 매출 & 기여이익 비교 추이</span>
-                            <span class="text-[10px] text-slate-400 font-mono">9월 ~ 11월</span>
+                            <span class="text-[10px] text-slate-400 font-mono whitespace-nowrap">9월 ~ 11월</span>
                         </div>
                         <div class="flex items-center gap-2 text-[10px] font-mono">
-                            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-xs bg-indigo-600"></span>매출</span>
-                            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-xs bg-emerald-500"></span>흑자</span>
-                            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-xs bg-rose-500"></span>적자</span>
+                            <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2.5 h-2.5 rounded-xs bg-indigo-600"></span>매출</span>
+                            <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2.5 h-2.5 rounded-xs bg-emerald-500"></span>흑자</span>
+                            <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2.5 h-2.5 rounded-xs bg-rose-500"></span>적자</span>
                         </div>
                     </div>
                     <!-- 차트 영역 (클릭 시 해당 월 전환) -->
@@ -4933,12 +4970,12 @@ HTML_TEMPLATE = """
                 <!-- 우측: 매출 100% 대비 비용 구조 스택 바 -->
                 <div class="lg:col-span-6 bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col justify-between">
                     <div>
-                        <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+                        <div class="flex flex-wrap gap-2 items-center justify-between pb-2 border-b border-slate-100">
                             <span class="font-bold text-xs text-slate-900">선택 월 비용 및 이익 구조</span>
                             <span id="pnlStructureMonthBadge" class="text-[10px] font-mono px-2 py-0.5 bg-slate-100 rounded text-slate-700">2026-11 (당월)</span>
                         </div>
                         <div class="py-3">
-                            <div class="flex items-center justify-between text-[11px] text-slate-500 mb-1.5">
+                            <div class="flex flex-wrap gap-2 items-center justify-between text-[11px] text-slate-500 mb-1.5">
                                 <span>매출액 대비 구성비</span>
                                 <span id="pnlStructureSummary">원가 0% · 수수료 0% · 기여이익 0%</span>
                             </div>
@@ -4978,18 +5015,23 @@ HTML_TEMPLATE = """
             <!-- 4. 하단 세부 손익 분석 표 (정산서 항목 및 채널별 상세, [📥 공식 손익결산서(.xlsx) 다운로드]) -->
             <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
                 <div class="p-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                         <span id="pnlDetailTableTitle" class="font-bold text-xs text-slate-900">선택 월 세부 손익 및 정산 내역</span>
                         <span id="pnlChannelCountBadge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600">0건</span>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <button type="button" onclick="downloadManagementFile('/api/download-pnl-excel')" class="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition flex items-center gap-2 shadow-xs cursor-pointer">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" onclick="downloadManagementFile('/api/download-pnl-excel')" class="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition whitespace-nowrap flex items-center gap-2 shadow-xs cursor-pointer">
                             <i class="fa-solid fa-download text-emerald-400"></i>
                             <span>📥 공식 손익결산서(.xlsx) 다운로드</span>
                         </button>
                     </div>
                 </div>
-                <div class="overflow-x-auto relative">
+                <div class="detail-view-toggle" role="group" aria-label="목록 표시 방식">
+                    <button type="button" id="pnlCompactButton" aria-pressed="true" onclick="setDetailTableView('pnl', false)">모바일 뷰</button>
+                    <button type="button" id="pnlTableButton" aria-pressed="false" onclick="setDetailTableView('pnl', true)">전체 표 보기</button>
+                </div>
+                <div id="mobilePnlList" class="mobile-detail-list" aria-label="모바일 상세 목록"></div>
+                <div id="pnlTableScrollWrap" class="detail-table-scroll overflow-x-auto relative">
                     <table class="w-full text-left text-xs border-collapse">
                         <thead id="pnlDetailTableHead" class="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 text-[11px]">
                             <tr>
@@ -11717,6 +11759,55 @@ HTML_TEMPLATE = """
         // -------------------------------------------------------------
         // 탭 2: 일일 상품 매출 & 추이 렌더러
         // -------------------------------------------------------------
+
+        function cleanSettlementNote(note) {
+            return /raw_data[\\/]|\.xlsx:/i.test(String(note || ''))
+                ? '홈택스 전자세금계산서 대조 내역' : String(note || '');
+        }
+
+        function setDetailTableView(tab, fullTable) {
+            document.getElementById('tabContent_' + tab)?.classList.toggle('detail-full-table', fullTable);
+            document.getElementById(tab + 'CompactButton')?.setAttribute('aria-pressed', String(!fullTable));
+            document.getElementById(tab + 'TableButton')?.setAttribute('aria-pressed', String(fullTable));
+        }
+
+        // Reuse the final table results so cards share every filter, total and estimate.
+        function renderMobileDetailList(tab) {
+            const config = {
+                sales: ['salesDetailTableBody', 'mobileSalesList', 11],
+                cashflow: ['cfRecentTableBody', 'mobileCashflowList', 5],
+                pnl: ['pnlChannelDetailBody', 'mobilePnlList', 7]
+            }[tab];
+            const list = document.getElementById(config[1]);
+            const body = document.getElementById(config[0]);
+            if (!list || !body) return;
+            const rows = [...body.rows].filter(row => row.cells.length === config[2]);
+            const text = cell => cell.textContent.replace(/\s+/g, ' ').trim();
+            const safe = cell => escapeHtml(text(cell));
+            const badge = value => `<span class="card-badge">${value}</span>`;
+            const metric = (label, value, color='') => `<div><dt>${label}</dt><dd class="${color}">${value}</dd></div>`;
+            list.innerHTML = rows.map(row => {
+                const c = [...row.cells];
+                if (tab === 'sales') {
+                    const name = c[2].querySelector('div');
+                    const profit = text(c[9]);
+                    return `<article><div class="card-meta">${badge(safe(c[0]) + ' · ' + safe(c[1]))}${badge(safe(c[3]))}</div>
+                        <h3>${escapeHtml(name ? text(name) : text(c[2]))}</h3>
+                        <dl class="card-metrics">${metric('순매출액', safe(c[5]), 'text-indigo-600')}${metric('판매수량 / 평균단가(ASP)', safe(c[4]) + '개 / ' + safe(c[6]))}
+                        ${metric('기여이익 (이익률)', escapeHtml(profit), profit.startsWith('-') ? 'text-rose-600' : 'text-emerald-700')}${metric('현재 가용재고 (런웨이)', safe(c[10]))}</dl></article>`;
+                }
+                if (tab === 'cashflow') {
+                    const deposit = text(c[1]) === '입금';
+                    return `<article><div class="card-meta">${badge(safe(c[1]))}</div><h3>${safe(c[2])}</h3>
+                        <div class="card-amount ${deposit ? 'text-emerald-600' : 'text-rose-700'}">${safe(c[3])}</div>
+                        <div class="card-meta"><time>${safe(c[0])}</time>${badge(safe(c[4]))}</div></article>`;
+                }
+                return `<article><h3>${safe(c[0])}</h3><div class="card-meta">${badge(safe(c[1]))}</div>
+                    <dl class="card-metrics">${metric('매출액', safe(c[2]))}${metric('매출원가', safe(c[3]))}${metric('정산비용·수수료', safe(c[4]))}
+                    ${metric('기여이익 (마진율)', safe(c[5]) + ' (' + safe(c[6]) + ')', text(c[5]).startsWith('-') ? 'text-rose-600' : 'text-emerald-700')}</dl></article>`;
+            }).join('') || '<p class="p-3 text-xs text-slate-400">해당 조건의 내역이 없습니다.</p>';
+        }
+
         function renderSalesTab(d) {
             if (!d) return;
             const sp = d.sales_profit || {};
@@ -11810,9 +11901,9 @@ HTML_TEMPLATE = """
             const legendWrap = document.getElementById('salesTrendLegend');
             if (legendWrap) {
                 legendWrap.innerHTML = `
-                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-indigo-500"></span>로켓그로스</span>
-                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>스마트스토어</span>
-                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500"></span>카페24</span>
+                    <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-indigo-500"></span>로켓그로스</span>
+                    <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>스마트스토어</span>
+                    <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-amber-500"></span>카페24</span>
                 `;
             }
 
@@ -11888,7 +11979,8 @@ HTML_TEMPLATE = """
 
                     topWrap.innerHTML = topProducts.slice(0, 10).map((p, idx) => {
                         const rankClass = rankBadges[idx] || 'bg-slate-50 text-slate-500 border-slate-200';
-                        const pName = p.product_name || p.name || '-';
+                        const matchedMaster = findMasterByCode(p.product_code || p.code);
+                        const pName = escapeHtml(p.master_name || matchedMaster?.name || matchedMaster?.seller_name || p.product_name || p.name || '-');
                         const pQty = p.quantity !== undefined ? p.quantity : (p.qty || 0);
                         const pRev = p.revenue || 0;
                         const barWidth = Math.max(6, Math.round(((pRev || pQty || 1) / maxTopRev) * 100));
@@ -11923,10 +12015,10 @@ HTML_TEMPLATE = """
             if (btnToggleZero) {
                 if (showZeroSalesInSalesTab) {
                     btnToggleZero.innerHTML = '<i class="fa-solid fa-eye-slash mr-1"></i>미판매 품목 숨기기';
-                    btnToggleZero.className = 'px-2.5 py-1 bg-slate-900 text-white border border-slate-900 rounded-lg text-xs font-semibold transition flex items-center shadow-xs cursor-pointer';
+                    btnToggleZero.className = 'whitespace-nowrap px-2.5 py-1 bg-slate-900 text-white border border-slate-900 rounded-lg text-xs font-semibold transition flex items-center shadow-xs cursor-pointer';
                 } else {
                     btnToggleZero.innerHTML = '<i class="fa-solid fa-eye mr-1"></i>미판매 품목(0원) 포함 보기';
-                    btnToggleZero.className = 'px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition flex items-center shadow-2xs cursor-pointer';
+                    btnToggleZero.className = 'whitespace-nowrap px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition flex items-center shadow-2xs cursor-pointer';
                 }
             }
 
@@ -11968,7 +12060,7 @@ HTML_TEMPLATE = """
 
                         prodMap[key] = {
                             code: code,
-                            name: t.product_name || t.name || code,
+                            name: t.master_name || t.product_name || t.name || code,
                             channel: chLabel,
                             rawChannel: ch,
                             qty: 0,
@@ -12067,7 +12159,7 @@ HTML_TEMPLATE = """
                 } else {
                     dtTbody.innerHTML = detailRows.map((r, idx) => {
                         const m = r.master || findMasterByCode(r.code);
-                        const masterName = m ? m.name : r.name;
+                        const masterName = escapeHtml(m?.name || m?.seller_name || r.name);
                         const subName = (m && m.name !== r.name) ? `<div class="text-[10px] text-slate-400 truncate max-w-xs" title="${r.name}">${r.name}</div>` : '';
                         
                         const asp = r.qty > 0 ? Math.round(r.rev / r.qty) : (r.asp || 0);
@@ -12156,6 +12248,7 @@ HTML_TEMPLATE = """
                     </tr>
                 `;
             }
+            renderMobileDetailList('sales');
         }
 
         function getTxCategoryType(t) {
@@ -12264,7 +12357,7 @@ HTML_TEMPLATE = """
                                         <span class="font-mono font-bold ${isOverdue ? 'text-rose-600' : 'text-slate-800'}">${it.due_date || '-'}</span>
                                     </div>
                                 </div>
-                                ${it.note ? `<p class="text-[10px] text-slate-500 bg-slate-50/60 p-2 rounded-lg leading-relaxed">${it.note}</p>` : ''}
+                                ${(it.note || it.memo) ? `<p class="text-[10px] text-slate-500 bg-slate-50/60 p-2 rounded-lg leading-relaxed">${escapeHtml(cleanSettlementNote(it.note || it.memo))}</p>` : ''}
                             </div>
                         `;
                     }).join('');
@@ -12425,6 +12518,7 @@ HTML_TEMPLATE = """
                     }).join('');
                 }
             }
+            renderMobileDetailList('cashflow');
         }
 
         function renderPnLTab(d) {
@@ -12955,6 +13049,7 @@ HTML_TEMPLATE = """
                     chDetailBody.innerHTML = rowsHtml;
                 }
             }
+            renderMobileDetailList('pnl');
         }
 
         function openManualTxModal() {
