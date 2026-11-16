@@ -3898,6 +3898,42 @@ HTML_TEMPLATE = """
         .drag-col-over { border-left: 3px solid #0f172a !important; background-color: #f1f5f9 !important; }
         .drag-row-over { border-top: 3px solid #0f172a !important; }
         #masterTable { table-layout: fixed; }
+        body.inventory-tab-active main { max-width: none; }
+        .master-status-badge { white-space: normal; overflow-wrap: anywhere; }
+        #salesMonthlyRevenue, #salesForecastRevenue { white-space: nowrap; }
+        #cashflowFilterChips > button, #settlementListContainer > div { min-width: 0; }
+        #cashflowFilterChips button > div:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #settlementListContainer .font-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #settlementListContainer .justify-between { gap: 8px; min-width: 0; }
+        @media (max-width: 640px) {
+            #tabContent_sales table { min-width: 1100px; }
+            #tabContent_sales table th:nth-child(3), #tabContent_sales table td:nth-child(3) {
+                min-width: 220px; width: 220px; position: sticky; left: 0; z-index: 2; background: #f8fafc;
+            }
+            #tabContent_sales table td:nth-child(3) .truncate { white-space: normal; overflow: visible; }
+            #cashflowFilterChips button > div:last-child { font-size: 11px; }
+            #settlementListContainer .font-mono { font-size: 11px; }
+        }
+        #mobileMasterList { display: none; }
+        .inventory-view-toggle { display: none; }
+        @media (max-width: 640px) {
+            .inventory-view-toggle { display: inline-flex; }
+            #mobileMasterList { display: grid; gap: 12px; padding: 12px; }
+            #masterTableScrollWrap { display: none; }
+            body.mobile-full-table #mobileMasterList { display: none; }
+            body.mobile-full-table #masterTableScrollWrap { display: block; }
+            #btnColWidthToggle, #colWidthAdjustPanel, #masterTable th .fa-grip,
+            #masterTable .fa-grip-vertical, #masterTable .col-resizer { display: none !important; }
+            .inventory-summary-items { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; }
+            .inventory-summary-items > div { flex-wrap: wrap; row-gap: 4px; }
+            .inventory-summary-items > div > span { white-space: nowrap; }
+            .inventory-summary-items > div > span.text-slate-400 { white-space: normal; }
+            #mobileMasterList article { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+            #mobileMasterList h3 { white-space: normal; overflow-wrap: anywhere; }
+            #mobileMasterList .mobile-metrics { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 8px; }
+            #mobileMasterList .mobile-metrics > div { min-width: 0; }
+            [class~="text-[11px]"], [class~="text-[10px]"] { font-size: 11px; }
+        }
         #masterTable th, #masterTable td { box-sizing: border-box; }
         #masterTable th { position: relative; }
         .col-resizer {
@@ -4099,13 +4135,13 @@ HTML_TEMPLATE = """
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600">
                     <div class="flex items-center space-x-1.5">
                         <span class="text-slate-500">이달 누적 매출</span>
-                        <span id="salesMonthlyRevenue" class="font-bold font-mono text-indigo-600 text-sm">0원</span>
+                        <span id="salesMonthlyRevenue" class="whitespace-nowrap font-bold font-mono text-indigo-600 text-sm">0원</span>
                     </div>
                     <span class="text-slate-200 hidden sm:inline">|</span>
                     <div class="flex items-center space-x-1.5">
                         <span class="text-slate-500">월말 예상 매출(Forecast)</span>
-                        <span id="salesForecastRevenue" class="font-bold font-mono text-indigo-700 text-sm">0원</span>
-                        <span class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">예측</span>
+                        <span id="salesForecastRevenue" class="whitespace-nowrap font-bold font-mono text-indigo-700 text-sm">0원</span>
+                        <span class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">예측</span>
                     </div>
                     <span class="text-slate-200 hidden sm:inline">|</span>
                     <div class="flex items-center space-x-1.5">
@@ -4187,7 +4223,7 @@ HTML_TEMPLATE = """
                     <div class="flex items-center justify-between border-b border-slate-100 pb-2">
                         <div class="flex items-center gap-2">
                             <span class="font-bold text-xs text-slate-900">TOP 10 베스트셀러 상품</span>
-                            <span class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700">판매량순</span>
+                            <span class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700">판매량순</span>
                         </div>
                         <span class="text-[10px] text-slate-400">당월 누적</span>
                     </div>
@@ -4269,16 +4305,16 @@ HTML_TEMPLATE = """
 
         <!-- 1. 재고 요약 스트립 -->
         <div class="bg-white rounded-xl border border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600">
+            <div class="inventory-summary-items flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600">
                 <div class="flex items-center space-x-1.5">
-                    <span class="text-slate-500">단품</span>
-                    <span id="statTotalMasters" class="font-bold text-slate-900">38개</span>
+                    <span class="text-slate-500 whitespace-nowrap">단품</span>
+                    <span id="statTotalMasters" class="font-bold text-slate-900 whitespace-nowrap">38개</span>
                     <span id="statMasterSubtext" class="text-slate-400 text-[11px]">(수입 11 / 사입 27)</span>
                 </div>
                 <span class="text-slate-200 hidden sm:inline">|</span>
                 <div class="flex items-center space-x-1.5">
-                    <span class="text-slate-500">가용재고</span>
-                    <span id="statTotalStock" class="font-bold font-mono text-slate-900 text-sm">0개</span>
+                    <span class="text-slate-500 whitespace-nowrap">가용재고</span>
+                    <span id="statTotalStock" class="font-bold font-mono text-slate-900 text-sm whitespace-nowrap">0개</span>
                     {% if not is_share_mode %}
                     <span id="statTotalStockCost" class="font-bold font-mono text-indigo-700 text-xs bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md" title="마스터 원가 기준 실물 재고자산 총액">원가 기준 약 1억 4,300만 원</span>
                     {% endif %}
@@ -4286,9 +4322,9 @@ HTML_TEMPLATE = """
                 </div>
                 <span class="text-slate-200 hidden sm:inline">|</span>
                 <div class="flex items-center space-x-1.5">
-                    <span class="text-slate-500">출고</span>
-                    <span id="statTotalSales7d" class="font-bold font-mono text-slate-900">7일 0개</span>
-                    <span class="text-slate-400 text-[11px]">/ 30일 <span id="statTotalSales30d" class="font-mono text-slate-700">0</span>개</span>
+                    <span class="text-slate-500 whitespace-nowrap">출고</span>
+                    <span id="statTotalSales7d" class="font-bold font-mono text-slate-900 whitespace-nowrap">7일 0개</span>
+                    <span class="text-slate-400 text-[11px]">/ 30일 <span class="whitespace-nowrap"><span id="statTotalSales30d" class="font-mono text-slate-700">0</span>개</span></span>
                     <span id="statSalesSubtext" class="text-slate-400 text-[11px] hidden lg:inline"></span>
                 </div>
             </div>
@@ -4428,7 +4464,7 @@ HTML_TEMPLATE = """
                         </button>
 
                         <!-- 열 너비 조정 패널 토글 -->
-                        <button type="button" onclick="toggleColWidthPanel()" id="btnColWidthToggle" title="각 열의 가로 너비 조정 (헤더 경계선 드래그 가능)" class="text-xs px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium transition flex items-center gap-1">
+                        <button type="button" onclick="toggleColWidthPanel()" id="btnColWidthToggle" title="각 열의 가로 너비 조정 (헤더 경계선 드래그 가능)" class="hidden sm:inline-flex text-xs px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium transition items-center gap-1">
                             <i class="fa-solid fa-arrows-left-right text-slate-400"></i>
                             <span>열 너비</span>
                         </button>
@@ -4459,6 +4495,11 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
+            <div class="inventory-view-toggle gap-1 p-3" role="group" aria-label="재고 보기 방식">
+                <button id="mobileCompactButton" type="button" onclick="setMobileInventoryView(false)" aria-pressed="true" class="px-3 py-2 rounded-lg border text-xs font-semibold">모바일 뷰</button>
+                <button id="mobileTableButton" type="button" onclick="setMobileInventoryView(true)" aria-pressed="false" class="px-3 py-2 rounded-lg border text-xs">전체 표 보기</button>
+            </div>
+            <div id="mobileMasterList" aria-label="모바일 재고 목록"></div>
             <!-- 이동 및 너비 조정 가능한 액션보드 테이블 (11개 열) -->
             <div id="masterTableScrollWrap" class="overflow-x-auto relative">
                 <table id="masterTable" class="text-left text-xs border-collapse">
@@ -4608,7 +4649,7 @@ HTML_TEMPLATE = """
                     <div class="flex items-center space-x-1.5">
                         <span class="text-slate-500">미분류 내역</span>
                         <span id="cfUnclassifiedCount" class="font-bold font-mono text-slate-900 text-sm">0건</span>
-                        <span id="cfUnclassWarningBadge" class="hidden px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500 text-white">확인 필요</span>
+                        <span id="cfUnclassWarningBadge" class="hidden px-1.5 py-0.2 rounded text-[11px] font-bold bg-amber-500 text-white">확인 필요</span>
                     </div>
                 </div>
                 <span id="cashflowReportPeriod" class="text-[11px] text-slate-400">하나은행 기업뱅킹 내역 기준</span>
@@ -4727,7 +4768,7 @@ HTML_TEMPLATE = """
                 <button type="button" onclick="setPnlMonth('all')" data-m="all" class="pnl-month-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
                     <div class="flex items-center justify-between text-[11px] font-semibold text-slate-600">
                         <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span><span class="truncate">전체 (9~11월)</span></span>
-                        <span id="pnlMonthBadge_all" class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 text-slate-700">누적</span>
+                        <span id="pnlMonthBadge_all" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-slate-100 text-slate-700">누적</span>
                     </div>
                     <div class="mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight" id="pnlMonthPill_all">0원</div>
                     <div class="mt-0.5 text-[11px] font-mono font-medium text-slate-500" id="pnlMonthSub_all">계산 중</div>
@@ -4735,7 +4776,7 @@ HTML_TEMPLATE = """
                 <button type="button" onclick="setPnlMonth('2026-09')" data-m="2026-09" class="pnl-month-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
                     <div class="flex items-center justify-between text-[11px] font-semibold text-slate-600">
                         <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span><span class="truncate">2026-09</span></span>
-                        <span id="pnlMonthBadge_09" class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">흑자</span>
+                        <span id="pnlMonthBadge_09" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">흑자</span>
                     </div>
                     <div class="mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight" id="pnlMonthPill_09">0원</div>
                     <div class="mt-0.5 text-[11px] font-mono font-medium text-emerald-600" id="pnlMonthSub_09">이익 +46.6만 (+2.2%)</div>
@@ -4743,7 +4784,7 @@ HTML_TEMPLATE = """
                 <button type="button" onclick="setPnlMonth('2026-10')" data-m="2026-10" class="pnl-month-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
                     <div class="flex items-center justify-between text-[11px] font-semibold text-slate-600">
                         <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></span><span class="truncate">2026-10</span></span>
-                        <span id="pnlMonthBadge_10" class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-100 text-rose-700">적자</span>
+                        <span id="pnlMonthBadge_10" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-rose-100 text-rose-700">적자</span>
                     </div>
                     <div class="mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight" id="pnlMonthPill_10">0원</div>
                     <div class="mt-0.5 text-[11px] font-mono font-bold text-rose-600" id="pnlMonthSub_10">이익 -144.2만 (-5.9%)</div>
@@ -4751,7 +4792,7 @@ HTML_TEMPLATE = """
                 <button type="button" onclick="setPnlMonth('2026-11')" data-m="2026-11" class="pnl-month-pill status-pill bg-slate-100/80 border border-slate-900 ring-1 ring-slate-900 rounded-xl px-3 py-2 text-left transition cursor-pointer">
                     <div class="flex items-center justify-between text-[11px] font-semibold text-slate-600">
                         <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-900 shrink-0"></span><span class="truncate">2026-11 (당월)</span></span>
-                        <span id="pnlMonthBadge_11" class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-100 text-blue-800">집계중</span>
+                        <span id="pnlMonthBadge_11" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-blue-100 text-blue-800">집계중</span>
                     </div>
                     <div class="mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight" id="pnlMonthPill_11">0원</div>
                     <div class="mt-0.5 text-[11px] font-mono font-medium text-emerald-600" id="pnlMonthSub_11">이익 +51.4만</div>
@@ -4836,11 +4877,11 @@ HTML_TEMPLATE = """
                 </div>
 
                 <!-- 카드 5: 월말 예상 또는 정산 확정 실적 -->
-                <div class="bg-white border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between shadow-xs">
+                <div class="col-span-2 sm:col-span-1 bg-white border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between shadow-xs">
                     <div class="flex items-center justify-between text-slate-600 text-[11px] font-semibold">
                         <span class="flex items-center gap-1">
                             <span id="pnlForecastTitle">월말 예상 영업이익</span>
-                            <span id="pnlForecastBadge" class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">예측</span>
+                            <span id="pnlForecastBadge" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">예측</span>
                         </span>
                         <div id="pnlForecastIconWrap" class="w-6 h-6 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center">
                             <i id="pnlForecastIcon" class="fa-solid fa-wand-magic-sparkles text-xs"></i>
@@ -4903,9 +4944,9 @@ HTML_TEMPLATE = """
                             </div>
                             <!-- 누적 스택 바 -->
                             <div class="w-full bg-slate-100 rounded-lg h-7 p-1 flex overflow-hidden gap-1">
-                                <div id="pnlBarCost" class="bg-rose-500 h-full text-[9px] text-white flex items-center justify-center font-mono font-bold transition-all duration-500" style="width: 25.8%" title="매출원가">25.8%</div>
-                                <div id="pnlBarFees" class="bg-amber-500 h-full text-[9px] text-white flex items-center justify-center font-mono font-bold transition-all duration-500" style="width: 11.7%" title="판매수수료">11.7%</div>
-                                <div id="pnlBarProfit" class="bg-emerald-500 h-full text-[9px] text-white flex items-center justify-center font-mono font-bold transition-all duration-500" style="width: 62.5%" title="기여이익">62.5%</div>
+                                <div id="pnlBarCost" class="bg-rose-500 h-full text-[11px] text-white flex items-center justify-center font-mono font-bold transition-all duration-500" style="width: 25.8%" title="매출원가">25.8%</div>
+                                <div id="pnlBarFees" class="bg-amber-500 h-full text-[11px] text-white flex items-center justify-center font-mono font-bold transition-all duration-500" style="width: 11.7%" title="판매수수료">11.7%</div>
+                                <div id="pnlBarProfit" class="bg-emerald-500 h-full text-[11px] text-white flex items-center justify-center font-mono font-bold transition-all duration-500" style="width: 62.5%" title="기여이익">62.5%</div>
                             </div>
                         </div>
                     </div>
@@ -5874,16 +5915,16 @@ HTML_TEMPLATE = """
         // 열 정의 (11개 열): 관리코드 제외, 발주 권고·추천 조치 통합, 개미/쿠팡 재고·런웨이·소비기한 미니태그 포함
         const COLUMN_DEFS = {
             'no':            { id: 'no',            label: 'No',               width: 52,  minWidth: 42,  thClass: 'text-center text-[11px]', tdClass: 'py-2 px-1.5 text-center font-mono text-slate-400 text-[11px]' },
-            'status':        { id: 'status',        label: '발주 권고 · 조치',  width: 184, minWidth: 104, thClass: 'text-center', tdClass: 'py-2 px-1.5 text-center' },
-            'type':          { id: 'type',          label: '구분',             width: 58,  minWidth: 46,  thClass: 'text-center', tdClass: 'py-2 px-1.5 text-center' },
-            'name':          { id: 'name',          label: '마스터 상품명',     width: 245, minWidth: 110, thClass: 'text-left', tdClass: 'py-2 px-2 text-left' },
-            'total_stock':   { id: 'total_stock',   label: '총 가용재고',       width: 96,  minWidth: 68,  thClass: 'text-right font-bold text-slate-800 text-xs', tdClass: 'py-2 px-2 text-right font-mono font-bold text-xs text-slate-900' },
+            'status':        { id: 'status',        label: '발주 권고 · 조치',  width: 230, minWidth: 104, thClass: 'text-center', tdClass: 'py-2 px-1.5 text-center' },
+            'type':          { id: 'type',          label: '구분',             width: 68,  minWidth: 46,  thClass: 'text-center', tdClass: 'py-2 px-1.5 text-center' },
+            'name':          { id: 'name',          label: '마스터 상품명',     width: 340, minWidth: 110, thClass: 'text-left', tdClass: 'py-2 px-2 text-left' },
+            'total_stock':   { id: 'total_stock',   label: '총 가용재고',       width: 110,  minWidth: 68,  thClass: 'text-right font-bold text-slate-800 text-xs', tdClass: 'py-2 px-2 text-right font-mono font-bold text-xs text-slate-900' },
             'gaemi_stock':   { id: 'gaemi_stock',   label: '개미창고(3PL)',     width: 140, minWidth: 85,  thClass: 'text-right font-semibold text-slate-700', tdClass: 'py-2 px-2 text-right text-slate-800' },
-            'gaemi_runway':  { id: 'gaemi_runway',  label: '개미 런웨이',       width: 84,  minWidth: 62,  thClass: 'text-center text-slate-600 text-[11px] font-semibold', tdClass: 'py-2 px-1.5 text-center font-mono text-slate-700 text-[11px]' },
+            'gaemi_runway':  { id: 'gaemi_runway',  label: '개미 런웨이',       width: 96,  minWidth: 62,  thClass: 'text-center text-slate-600 text-[11px] font-semibold', tdClass: 'py-2 px-1.5 text-center font-mono text-slate-700 text-[11px]' },
             'coupang_stock': { id: 'coupang_stock', label: '쿠팡창고(실물)',    width: 98,  minWidth: 68,  thClass: 'text-right font-semibold text-slate-700', tdClass: 'py-2 px-2 text-right text-slate-800' },
-            'coupang_runway':{ id: 'coupang_runway',label: '쿠팡 런웨이',       width: 88,  minWidth: 62,  thClass: 'text-center text-slate-600 text-[11px] font-semibold', tdClass: 'py-2 px-1.5 text-center font-mono text-slate-700 text-[11px]' },
+            'coupang_runway':{ id: 'coupang_runway',label: '쿠팡 런웨이',       width: 96,  minWidth: 62,  thClass: 'text-center text-slate-600 text-[11px] font-semibold', tdClass: 'py-2 px-1.5 text-center font-mono text-slate-700 text-[11px]' },
             'total_sales':   { id: 'total_sales',   label: '출고량 (7일/30일)', width: 152, minWidth: 96,  thClass: 'text-right font-semibold text-slate-800', tdClass: 'py-2 px-2 text-right font-mono font-semibold text-slate-800' },
-            'total_runway':  { id: 'total_runway',  label: '통합 런웨이(D-Day)',width: 112, minWidth: 78,  thClass: 'text-center font-semibold text-slate-800', tdClass: 'py-2 px-1.5 text-center' }
+            'total_runway':  { id: 'total_runway',  label: '통합 런웨이(D-Day)',width: 130, minWidth: 78,  thClass: 'text-center font-semibold text-slate-800', tdClass: 'py-2 px-1.5 text-center' }
         };
 
         const DEFAULT_COLUMN_ORDER = [
@@ -5894,7 +5935,7 @@ HTML_TEMPLATE = """
         ];
 
         const COL_ORDER_STORAGE_KEY = 'iljeomodo_col_order_v7';
-        const COL_WIDTHS_STORAGE_KEY = 'iljeomodo_col_widths_v1';
+        const COL_WIDTHS_STORAGE_KEY = 'iljeomodo_col_widths_v2';
         let currentColumnOrder = [...DEFAULT_COLUMN_ORDER];
         let customColWidths = {};
         
@@ -5950,7 +5991,8 @@ HTML_TEMPLATE = """
                 totalW += w;
                 return `<col data-col-width="${colId}" style="width: ${w}px;">`;
             }).join('');
-            table.style.width = totalW + 'px';
+            table.style.minWidth = totalW + 'px';
+            table.style.width = '100%';
             syncSubrowViewportWidth();
         }
 
@@ -5964,7 +6006,8 @@ HTML_TEMPLATE = """
             currentColumnOrder.forEach(cid => {
                 totalW += getColWidth(cid);
             });
-            table.style.width = totalW + 'px';
+            table.style.minWidth = totalW + 'px';
+            table.style.width = '100%';
             const badgeEl = document.getElementById(`colWidthVal_${colId}`);
             if (badgeEl) badgeEl.innerText = `${newW}px`;
             const sliderEl = document.getElementById(`colWidthSlider_${colId}`);
@@ -6809,7 +6852,7 @@ HTML_TEMPLATE = """
                         <div class="text-[10px] font-semibold ${m.is_no_sales ? 'text-orange-800' : 'text-slate-500'}">출고 속도 · 통합</div>
                         <div class="font-bold font-mono text-sm ${m.is_no_sales ? 'text-orange-950' : 'text-slate-900'} mt-0.5">일 ${m.daily_sales}개</div>
                         <div class="text-[10px] ${m.is_no_sales ? 'text-orange-700' : 'text-slate-500'} truncate">7일 ${m.total_sales_7d} · 30일 ${m.total_sales_30d || 0}</div>
-                        <div class="text-[9px] text-slate-400 truncate mt-0.5 font-mono">쿠팡 ${(m.coupang_sales_7d || 0).toLocaleString()}/${(m.coupang_sales_30d || 0).toLocaleString()} · 타 ${(m.other_sales_7d || 0).toLocaleString()}/${(m.other_sales_30d || 0).toLocaleString()}</div>
+                        <div class="text-[11px] text-slate-400 truncate mt-0.5 font-mono">쿠팡 ${(m.coupang_sales_7d || 0).toLocaleString()}/${(m.coupang_sales_30d || 0).toLocaleString()} · 타 ${(m.other_sales_7d || 0).toLocaleString()}/${(m.other_sales_30d || 0).toLocaleString()}</div>
                     </div>
                 </div>
             `;
@@ -6855,17 +6898,17 @@ HTML_TEMPLATE = """
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                             ${activeGaemiLots.map((lot) => {
                                 const isNearest = (lot.expiry_date && lot.expiry_date === m.nearest_expiry_date);
-                                let fifoBadge = '<span class="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-medium">출고 대기</span>';
+                                let fifoBadge = '<span class="text-[11px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-medium">출고 대기</span>';
                                 let cardBorder = 'border-slate-200 bg-slate-50/50';
                                 if (lot.source === 'unassigned') {
-                                    fifoBadge = '<span class="text-[9px] bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded-full border border-rose-200">⚠️ 기한 필요</span>';
+                                    fifoBadge = '<span class="text-[11px] bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded-full border border-rose-200">⚠️ 기한 필요</span>';
                                     cardBorder = 'border-rose-200 bg-rose-50/40';
                                 } else if (isNearest && lot.stock > 0) {
-                                    fifoBadge = '<span class="text-[9px] bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded-full border border-rose-200">🥇 1순위 출고</span>';
+                                    fifoBadge = '<span class="text-[11px] bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded-full border border-rose-200">🥇 1순위 출고</span>';
                                     cardBorder = 'border-rose-200 bg-rose-50/40';
                                 }
                                 const expText = lot.expiry_date ? `${lot.expiry_date} (D-${lot.days_left}일)` : '미기재/로트명';
-                                const adminLotBadge = lot.is_admin_expiry ? ' <span class="text-[9px] bg-slate-200/70 text-slate-700 px-1 rounded font-semibold">관리자</span>' : '';
+                                const adminLotBadge = lot.is_admin_expiry ? ' <span class="text-[11px] bg-slate-200/70 text-slate-700 px-1 rounded font-semibold">관리자</span>' : '';
                                 return `
                                     <div class="p-2.5 rounded-lg border ${cardBorder} flex justify-between items-center gap-2">
                                         <div class="min-w-0 flex-1">
@@ -7209,9 +7252,9 @@ HTML_TEMPLATE = """
                         title="드래그: 열 순서 변경 · 우측 경계선 드래그: 너비 조정">
                         <div class="flex items-center justify-between gap-1 pr-2 min-w-0 overflow-hidden">
                             <span class="truncate">${col.label}</span>
-                            <i class="fa-solid fa-grip text-[9px] text-slate-400 shrink-0"></i>
+                            <i class="fa-solid fa-grip hidden sm:inline-flex text-[11px] text-slate-400 shrink-0"></i>
                         </div>
-                        <div class="col-resizer" data-resize-col="${colId}" title="좌우로 드래그해 열 너비 조정 (더블클릭: 기본 너비)"></div>
+                        <div class="col-resizer hidden sm:block" data-resize-col="${colId}" title="좌우로 드래그해 열 너비 조정 (더블클릭: 기본 너비)"></div>
                     </th>
                 `;
             });
@@ -7550,6 +7593,41 @@ HTML_TEMPLATE = """
             return themes[statusColor] || { dot: 'bg-slate-400', pill: 'bg-slate-50 text-slate-700 border-slate-200 font-medium', actionPill: 'bg-slate-50 text-slate-600 border-slate-200 font-medium' };
         }
 
+        function setMobileInventoryView(fullTable) {
+            document.body.classList.toggle('mobile-full-table', fullTable);
+            document.getElementById('mobileCompactButton').setAttribute('aria-pressed', String(!fullTable));
+            document.getElementById('mobileTableButton').setAttribute('aria-pressed', String(fullTable));
+            syncSubrowViewportWidth();
+        }
+
+        // First load always starts with the compact mobile list, independent of saved table widths.
+        document.body.classList.remove('mobile-full-table');
+
+        function renderMobileMasterList(rows) {
+            const list = document.getElementById('mobileMasterList');
+            const number = n => Number(n || 0).toLocaleString();
+            list.innerHTML = rows.length ? rows.map(m => {
+                const stock = Number(m.master_physical_total || 0) + (includeReturnsInTotal ? Number(m.coupang_return_physical_total || 0) : 0);
+                const theme = getStatusTheme(m.status_color);
+                return `<article class="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
+                    <div><span class="inline-flex px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] font-semibold">${escapeHtml(m.product_type || '사입')}</span>
+                    <h3 class="mt-1 font-bold text-sm text-slate-900">${escapeHtml(m.name || '')}</h3>
+                    <p class="mt-1 text-[11px] text-slate-500">${escapeHtml(m.category || '')} · ${escapeHtml(m.gaemi_details || '')}</p>
+                    <p class="text-[11px] text-slate-500">옵션 ${(m.options || []).length}개 · 보유재고 ${number(m.master_physical_total)}개</p></div>
+                    <div class="flex flex-wrap gap-1"><span class="px-2 py-1 rounded-lg border text-[11px] ${theme.pill}">${escapeHtml(m.status || '상태 확인')}</span>
+                    ${m.action_cta && m.action_cta !== m.status ? `<span class="text-[11px] text-slate-600">${escapeHtml(m.action_cta)}</span>` : ''}
+                    ${m.in_transit_qty > 0 ? `<span class="text-[11px] text-teal-700">입고 예정 +${number(m.in_transit_qty)}개</span>` : ''}</div>
+                    <div class="mobile-metrics text-slate-600">
+                        <div><p class="text-[11px]">가용재고 합계</p><strong class="text-base text-slate-900">${number(stock)}개</strong>
+                        <p class="text-[11px]">개미 ${number(m.gaemi_total)} / 쿠팡 ${isCoupangLinked(m) ? number(m.coupang_physical_total) : '미연결'}</p>
+                        ${includeReturnsInTotal && m.coupang_return_physical_total > 0 ? `<p class="text-[11px]">반품 포함 +${number(m.coupang_return_physical_total)}개</p>` : ''}</div>
+                        <div><p class="text-[11px]">런웨이 (소진일수)</p><strong class="text-base text-slate-900">${escapeHtml(m.total_runway_str || '—')}</strong>
+                        <p class="text-[11px]">7일 / 30일 출고 ${shouldMaskSalesCell(m) ? '미집계' : number(m.total_sales_7d) + '개 / ' + number(m.total_sales_30d) + '개'}</p></div>
+                    </div>
+                </article>`;
+            }).join('') : '<p class="p-4 text-sm text-slate-500">선택하신 조건에 일치하는 품목이 없습니다.</p>';
+        }
+
         function renderMasterTable() {
             syncSubrowViewportWidth();
             const tbody = document.getElementById('masterTableBody');
@@ -7591,6 +7669,7 @@ HTML_TEMPLATE = """
                 return true;
             });
 
+            renderMobileMasterList(filtered);
             document.getElementById('filteredCountText').innerText = filtered.length === allMasterData.length
                 ? `총 ${filtered.length}개`
                 : `${filtered.length}개 표시 / ${allMasterData.length}`;
@@ -7637,7 +7716,7 @@ HTML_TEMPLATE = """
                     : '<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-50 text-slate-600 border border-slate-200 whitespace-nowrap">사입</span>';
 
                 let b2bBadge = (m.has_b2b_set && m.b2b_linked_codes && m.b2b_linked_codes.length > 0)
-                    ? `<span class="px-1 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap" title="B2B/세트 출고 연동: ${escapeHtml(m.b2b_linked_codes.map(b => b.s_code + ' (x' + b.multiplier + ')').join(', '))}">B2B연동</span>`
+                    ? `<span class="px-1 py-0.2 rounded text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap" title="B2B/세트 출고 연동: ${escapeHtml(m.b2b_linked_codes.map(b => b.s_code + ' (x' + b.multiplier + ')').join(', '))}">B2B연동</span>`
                     : '';
 
                 // 개미 소비기한 미니 태그
@@ -7654,16 +7733,16 @@ HTML_TEMPLATE = """
                         const expShort = m.nearest_expiry_date.length >= 10 ? m.nearest_expiry_date.slice(2) : m.nearest_expiry_date;
                         const adminMark = m.has_admin_expiry ? '✏️ ' : '';
                         tags += `
-                            <span class="inline-flex items-center text-[9px] px-1.5 py-0.2 rounded border whitespace-nowrap ${dDayColor}" title="최단 소비기한: ${escapeHtml(m.nearest_expiry_date)}">
+                            <span class="inline-flex items-center text-[11px] px-1.5 py-0.2 rounded border whitespace-nowrap ${dDayColor}" title="최단 소비기한: ${escapeHtml(m.nearest_expiry_date)}">
                                 <i class="fa-regular fa-clock mr-1 text-[8px]"></i>${adminMark}${escapeHtml(expShort)} (D-${m.nearest_days_left})
                             </span>
                         `;
                     }
                     if (m.is_mixed_lots) {
-                        tags += `<span class="text-[9px] bg-slate-100 text-slate-600 border border-slate-200 px-1 rounded font-mono whitespace-nowrap" title="${m.lot_count}개 로트/기한 혼합">${m.lot_count}개 기한</span>`;
+                        tags += `<span class="text-[11px] bg-slate-100 text-slate-600 border border-slate-200 px-1 rounded font-mono whitespace-nowrap" title="${m.lot_count}개 로트/기한 혼합">${m.lot_count}개 기한</span>`;
                     }
                     if (m.has_unassigned_stock) {
-                        tags += `<span class="text-[9px] bg-rose-50 text-rose-700 border border-rose-200 px-1 rounded font-semibold whitespace-nowrap" title="신규 입고분의 소비기한 지정 필요">⚠️ 기한미지정</span>`;
+                        tags += `<span class="text-[11px] bg-rose-50 text-rose-700 border border-rose-200 px-1 rounded font-semibold whitespace-nowrap" title="신규 입고분의 소비기한 지정 필요">⚠️ 기한미지정</span>`;
                     }
                     expBadgeHtml = `<div class="mt-0.5 flex flex-wrap justify-end gap-1">${tags}</div>`;
                 }
@@ -7696,7 +7775,7 @@ HTML_TEMPLATE = """
                 const barPercent = (isOutOfStockTotal && !hasInboundCover) ? 8 : ((isStagnantTotal || (hasInboundCover && m.daily_sales <= 0)) ? 100 : Math.min(100, Math.max(8, (barMetric / barBase) * 100)));
 
                 const inTransitHtml = (m.in_transit_qty && m.in_transit_qty > 0)
-                    ? `<div class="text-[9px] font-semibold text-teal-700 mt-0.5 whitespace-nowrap" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 +${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
+                    ? `<div class="text-[11px] font-semibold text-teal-700 mt-0.5 whitespace-nowrap" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 +${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
                     : '';
 
                 const hasCoupangLink = isCoupangLinked(m);
@@ -7714,7 +7793,7 @@ HTML_TEMPLATE = """
                 currentColumnOrder.forEach(colId => {
                     const col = COLUMN_DEFS[colId];
                     if (colId === 'no') {
-                        html += `<td class="${col.tdClass} overflow-hidden"><i class="fa-solid fa-grip-vertical text-slate-300 mr-1 text-[9px]"></i>${idx + 1}</td>`;
+                        html += `<td class="${col.tdClass} overflow-hidden"><i class="fa-solid fa-grip-vertical text-slate-300 mr-1 text-[11px]"></i>${idx + 1}</td>`;
                     } else if (colId === 'status') {
                         const mapBtn = isAdminMode
                             ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition whitespace-nowrap shrink-0" title="3채널 코드 매핑 수동 지정">🔗</button>`
@@ -7731,7 +7810,7 @@ HTML_TEMPLATE = """
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
                                 <div class="flex items-center justify-center flex-wrap gap-1 min-w-0 max-w-full">
-                                    <span class="inline-block min-w-0 max-w-full truncate align-middle px-2 py-0.5 rounded-full text-[10px] border break-keep ${badgeClass}" title="${escapeHtml(statusTooltip)}">${escapeHtml(m.status)}</span>
+                                    <span class="master-status-badge inline-block min-w-0 max-w-full align-middle px-2 py-0.5 rounded-full text-[11px] border break-keep ${badgeClass}" title="${escapeHtml(statusTooltip)}">${escapeHtml(m.status)}</span>
                                     ${adminBtns}
                                 </div>
                             </td>
@@ -7740,7 +7819,7 @@ HTML_TEMPLATE = """
                         html += `<td class="${col.tdClass} overflow-hidden">${ptypeBadge}</td>`;
                     } else if (colId === 'name') {
                         const customLtBadge = (m.lead_time_days !== null && m.lead_time_days !== undefined)
-                            ? `<span class="text-[9px] bg-slate-100 text-slate-700 border border-slate-200 px-1 rounded font-mono shrink-0" title="품목 개별 리드타임">LT ${m.lead_time_days}일</span>`
+                            ? `<span class="text-[11px] bg-slate-100 text-slate-700 border border-slate-200 px-1 rounded font-mono shrink-0" title="품목 개별 리드타임">LT ${m.lead_time_days}일</span>`
                             : '';
                         const chevHtml = hasCoupangLink
                             ? `<i id="chev_${escapeHtml(m.id)}" class="fa-solid fa-angle-right text-[10px] shrink-0 transition-transform ${isSubExpanded ? 'rotate-90 text-slate-900' : 'text-slate-400'}"></i>`
@@ -7761,7 +7840,7 @@ HTML_TEMPLATE = """
                     } else if (colId === 'total_stock') {
                         const effStock = m.master_physical_total + (includeReturnsInTotal ? (m.coupang_return_physical_total || 0) : 0);
                         const retIncSub = (includeReturnsInTotal && (m.coupang_return_physical_total || 0) > 0)
-                            ? `<div class="text-[9px] text-slate-500 font-normal truncate">(반품 +${(m.coupang_return_physical_total || 0).toLocaleString()}개)</div>`
+                            ? `<div class="text-[11px] text-slate-500 font-normal truncate">(반품 +${(m.coupang_return_physical_total || 0).toLocaleString()}개)</div>`
                             : '';
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
@@ -7790,12 +7869,12 @@ HTML_TEMPLATE = """
                             const retPhys = m.coupang_return_physical_total || 0;
                             const retPkg = m.coupang_return_package_total || 0;
                             const retBadgeHtml = retPhys > 0
-                                ? `<div class="mt-0.5"><span class="inline-block text-[9px] px-1 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 font-medium whitespace-nowrap" title="쿠팡 반품 재고 (정상 가용재고 합산 제외 · ${retPkg}세트)">🔄 반품 ${retPhys.toLocaleString()}</span></div>`
+                                ? `<div class="mt-0.5"><span class="inline-block text-[11px] px-1 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 font-medium whitespace-nowrap" title="쿠팡 반품 재고 (정상 가용재고 합산 제외 · ${retPkg}세트)">🔄 반품 ${retPhys.toLocaleString()}</span></div>`
                                 : '';
                             html += `
                                 <td class="${col.tdClass} overflow-hidden">
                                     <div class="font-bold font-mono">${m.coupang_physical_total.toLocaleString()}</div>
-                                    ${m.coupang_package_total > 0 ? `<div class="text-[9px] text-slate-400 font-normal">(${m.coupang_package_total}세트)</div>` : ''}
+                                    ${m.coupang_package_total > 0 ? `<div class="text-[11px] text-slate-400 font-normal">(${m.coupang_package_total}세트)</div>` : ''}
                                     ${retBadgeHtml}
                                 </td>
                             `;
@@ -7814,7 +7893,7 @@ HTML_TEMPLATE = """
                                 <td class="${col.tdClass} overflow-hidden">
                                     <div class="masked-cell-value text-transparent select-none" aria-hidden="true">
                                         <div class="font-bold font-mono truncate">${s7}개 <span class="font-normal text-[10px]">/ 30일 ${s30}개</span></div>
-                                        <div class="text-[9px] font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
+                                        <div class="text-[11px] font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
                                     </div>
                                 </td>
                             `;
@@ -7822,7 +7901,7 @@ HTML_TEMPLATE = """
                             html += `
                                 <td class="${col.tdClass} overflow-hidden">
                                     <div class="font-bold font-mono text-slate-900 truncate">${s7}개 <span class="text-slate-400 font-normal text-[10px]">/ 30일 ${s30}개</span></div>
-                                    <div class="text-[9px] text-slate-400 font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
+                                    <div class="text-[11px] text-slate-400 font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
                                 </td>
                             `;
                         }
@@ -7831,7 +7910,7 @@ HTML_TEMPLATE = """
                             ? `<span class="inline-block px-1.5 py-0.2 rounded bg-orange-50 text-orange-800 border border-orange-200 font-semibold font-mono text-[10px] whitespace-nowrap" title="재고 보유 중 최근 7/30일 출고량 0">🔕 소진무</span>`
                             : `<div class="font-bold font-mono text-[11px] ${isOutOfStockTotal && !hasInboundCover ? 'text-rose-600' : 'text-slate-800'} truncate">${escapeHtml(m.total_runway_str)}</div>`;
                         const inboundRunwaySub = (m.in_transit_qty > 0 && m.daily_sales > 0 && m.effective_runway)
-                            ? `<div class="text-[9px] text-teal-700 font-semibold mt-0.5 truncate" title="입고 예정(+${m.in_transit_qty.toLocaleString()}개) 합산 기준 런웨이">입고포함 ${Math.floor(m.effective_runway)}일</div>`
+                            ? `<div class="text-[11px] text-teal-700 font-semibold mt-0.5 truncate" title="입고 예정(+${m.in_transit_qty.toLocaleString()}개) 합산 기준 런웨이">입고포함 ${Math.floor(m.effective_runway)}일</div>`
                             : '';
                         html += `
                             <td class="${col.tdClass} overflow-hidden">
@@ -7880,7 +7959,7 @@ HTML_TEMPLATE = """
                                     <span>세부정보보기</span>
                                 </button>
                                 <button type="button" onclick="event.stopPropagation(); toggleSingleOption('${escapeHtml(m.id)}')" class="px-2 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-500 hover:text-slate-800 text-[11px] font-medium transition flex items-center gap-1 whitespace-nowrap" title="접기">
-                                    <i class="fa-solid fa-chevron-up text-[9px]"></i>
+                                    <i class="fa-solid fa-chevron-up text-[11px]"></i>
                                     <span class="hidden sm:inline">접기</span>
                                 </button>
                             </div>
@@ -7957,10 +8036,10 @@ HTML_TEMPLATE = """
                         const normalRowsHtml = nOpts.map(opt => {
                             const hasStock = (opt.physical_stock || 0) > 0;
                             const missBadge = opt.grade_missing
-                                ? `<span class="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[9px] shrink-0" title="기존 업로드 데이터에 상품등급(G열) 정보가 없어 정상으로 표시될 수 있습니다. 쿠팡 파일 재업로드 또는 관리자 반품 지정을 이용하세요.">등급미확인</span>`
+                                ? `<span class="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[11px] shrink-0" title="기존 업로드 데이터에 상품등급(G열) 정보가 없어 정상으로 표시될 수 있습니다. 쿠팡 파일 재업로드 또는 관리자 반품 지정을 이용하세요.">등급미확인</span>`
                                 : '';
                             const toggleBtnHtml = isAdminMode
-                                ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, true, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 hover:border-slate-300 text-[9px] font-semibold transition shrink-0" title="이 옵션 ID를 정상 재고에서 제외하고 반품 재고로 지정합니다">🔄 반품 지정</button>`
+                                ? `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, true, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 hover:border-slate-300 text-[11px] font-semibold transition shrink-0" title="이 옵션 ID를 정상 재고에서 제외하고 반품 재고로 지정합니다">🔄 반품 지정</button>`
                                 : '';
                             return `
                                 <div class="px-3 py-2 flex items-center justify-between gap-3 bg-white">
@@ -7985,14 +8064,14 @@ HTML_TEMPLATE = """
                         const returnRowsHtml = rOpts.map(opt => {
                             let retActionHtml = '';
                             if (!opt.csv_is_return && isAdminMode && opt.option_is_return_flag) {
-                                retActionHtml = `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, false, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 text-[9px] font-semibold transition shrink-0" title="수동 반품 지정을 해제하고 정상 재고로 복귀합니다">↩️ 정상 복귀</button>`;
+                                retActionHtml = `<button type="button" data-prod-id="${escapeHtml(m.id)}" data-opt-id="${escapeHtml(opt.id)}" onclick="event.stopPropagation(); toggleCoupangOptionReturn(this.dataset.prodId, this.dataset.optId, false, this)" class="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-semibold transition shrink-0" title="수동 반품 지정을 해제하고 정상 재고로 복귀합니다">↩️ 정상 복귀</button>`;
                             }
                             return `
                                 <div class="px-3 py-2 flex items-center justify-between gap-3 bg-slate-50/75">
                                     <div class="min-w-0 flex-1">
                                         <div class="flex flex-wrap items-center gap-1">
-                                            <span class="px-1.5 py-0.2 rounded bg-slate-200/70 text-slate-700 border border-slate-300 font-semibold text-[9px] shrink-0">🔄 반품</span>
-                                            ${opt.grade ? `<span class="px-1.5 py-0.2 rounded bg-white text-slate-500 border border-slate-200 font-mono font-medium text-[9px] shrink-0">${escapeHtml(opt.grade)}</span>` : ''}
+                                            <span class="px-1.5 py-0.2 rounded bg-slate-200/70 text-slate-700 border border-slate-300 font-semibold text-[11px] shrink-0">🔄 반품</span>
+                                            ${opt.grade ? `<span class="px-1.5 py-0.2 rounded bg-white text-slate-500 border border-slate-200 font-mono font-medium text-[11px] shrink-0">${escapeHtml(opt.grade)}</span>` : ''}
                                             <span class="text-xs font-semibold text-slate-600 truncate">${escapeHtml(opt.name)}</span>
                                         </div>
                                         ${(opt.id || retActionHtml) ? `
@@ -8073,7 +8152,7 @@ HTML_TEMPLATE = """
                     const avgGRunway = sumDailySales > 0 ? (sumGaemiStock / sumDailySales).toFixed(1) + '일' : (sumGaemiStock > 0 ? '소진무' : '-');
                     footHtml += `<td class="py-2.5 px-1.5 text-center font-semibold font-mono text-slate-700 text-[11px] overflow-hidden">${avgGRunway}</td>`;
                 } else if (colId === 'coupang_stock') {
-                    footHtml += `<td class="py-2.5 px-2 text-right font-bold font-mono text-slate-800 text-xs overflow-hidden"><div>${sumCoupangStock.toLocaleString()}</div>${sumCoupangReturnStock > 0 ? `<div class="text-[9px] font-medium text-slate-500">🔄 반품 ${sumCoupangReturnStock.toLocaleString()}</div>` : ''}</td>`;
+                    footHtml += `<td class="py-2.5 px-2 text-right font-bold font-mono text-slate-800 text-xs overflow-hidden"><div>${sumCoupangStock.toLocaleString()}</div>${sumCoupangReturnStock > 0 ? `<div class="text-[11px] font-medium text-slate-500">🔄 반품 ${sumCoupangReturnStock.toLocaleString()}</div>` : ''}</td>`;
                 } else if (colId === 'coupang_runway') {
                     const avgCRunway = sumCoupangSales > 0 ? (sumCoupangStock / (sumCoupangSales / 7.0)).toFixed(1) + '일' : (sumCoupangStock > 0 ? '소진무' : '-');
                     footHtml += `<td class="py-2.5 px-1.5 text-center font-semibold font-mono text-slate-700 text-[11px] overflow-hidden">${avgCRunway}</td>`;
@@ -10058,14 +10137,14 @@ HTML_TEMPLATE = """
                     infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock.toLocaleString()}개${row.lot_count > 1 ? ` (${row.lot_count}개 로트 합계)` : ''}</div>`;
                 } else {
                     const retBadge = row.isReturn
-                        ? `<div class="mt-0.5"><span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-semibold text-[9px]">🔄 반품</span></div>`
+                        ? `<div class="mt-0.5"><span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-semibold text-[11px]">🔄 반품</span></div>`
                         : '';
                     chBadge = `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-[10px]">쿠팡옵션</span>${retBadge}`;
                     let gradeChip = '';
                     if (row.grade && (row.isReturn || row.grade.toUpperCase() !== 'NEW')) {
-                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-white text-slate-500 border border-slate-200 font-mono font-medium text-[9px]">${escapeHtml(row.grade)}</span></div>`;
+                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-white text-slate-500 border border-slate-200 font-mono font-medium text-[11px]">${escapeHtml(row.grade)}</span></div>`;
                     } else if (row.gradeMissing && !row.isReturn) {
-                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[9px]" title="등급(G열) 업데이트 이전 업로드 데이터입니다">등급미확인</span></div>`;
+                        gradeChip = `<div class="mt-0.5"><span class="inline-block px-1 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[11px]" title="등급(G열) 업데이트 이전 업로드 데이터입니다">등급미확인</span></div>`;
                     }
                     codeCell = `<div class="font-mono font-bold text-slate-900">${escapeHtml(row.option_id)}</div><div class="text-[10px] text-slate-600">${escapeHtml(row.option_name || '')}</div>${gradeChip}`;
                     const pidTxt = row.product_id ? ` · 등록ID ${escapeHtml(row.product_id)}` : '';
@@ -10104,7 +10183,7 @@ HTML_TEMPLATE = """
                     ? (row.suggested.master.id || row.suggested.master.seller_code)
                     : '';
                 const suggestedBadge = (row.suggested && row.suggested.master)
-                    ? `<span class="text-[9px] text-emerald-700 font-semibold whitespace-nowrap" title="${escapeHtml(row.suggested.reason || '추천 매핑')}">✨ 추천 ${escapeHtml(row.suggested.master.seller_code)}</span>`
+                    ? `<span class="text-[11px] text-emerald-700 font-semibold whitespace-nowrap" title="${escapeHtml(row.suggested.reason || '추천 매핑')}">✨ 추천 ${escapeHtml(row.suggested.master.seller_code)}</span>`
                     : '';
                 const isChecked = !row.isMapped && acMapSelectedExpKeys.has(row.expKey);
                 const checkCellHtml = !row.isMapped
@@ -10578,7 +10657,7 @@ HTML_TEMPLATE = """
                         const cls = hasCustomSales
                             ? 'bg-slate-100 text-slate-900 border-slate-300'
                             : 'bg-slate-50 text-slate-700 border-slate-200';
-                        const tag = hasCustomSales ? '' : '<span class="text-[9px] text-slate-400 mr-0.5">기본</span>';
+                        const tag = hasCustomSales ? '' : '<span class="text-[11px] text-slate-400 mr-0.5">기본</span>';
                         return `<span class="inline-block px-1.5 py-0.5 rounded border font-mono text-[10px] mr-1 mb-1 ${cls}">${tag}${escapeHtml(up)}${hitTxt}</span>`;
                     }).join('');
                 }
@@ -10627,7 +10706,7 @@ HTML_TEMPLATE = """
                 return `
                     <tr class="${isAct ? 'hover:bg-slate-50' : 'bg-slate-100/70 opacity-75'}">
                         <td class="p-2.5 align-top">
-                            <div class="font-mono font-bold text-slate-800">${escapeHtml(m.seller_code)}${!isAct ? ' <span class="text-[9px] bg-slate-200 text-slate-600 px-1 rounded">숨김</span>' : ''}</div>
+                            <div class="font-mono font-bold text-slate-800">${escapeHtml(m.seller_code)}${!isAct ? ' <span class="text-[11px] bg-slate-200 text-slate-600 px-1 rounded">숨김</span>' : ''}</div>
                             <div class="font-semibold text-slate-700 mt-0.5">${escapeHtml(m.name)}</div>
                         </td>
                         <td class="p-2.5 align-top">${salesHtml}</td>
@@ -10744,7 +10823,7 @@ HTML_TEMPLATE = """
                 const hit = salesInv[sc];
                 const statTxt = hit ? ` · 7일 ${hit.total_7d} / 30일 ${hit.total_30d}` : ' · CSV 미매칭';
                 const defBadge = (!cmState.sales_is_custom && sc === String(cmState.seller_code).toUpperCase())
-                    ? '<span class="text-[9px] bg-slate-100 text-slate-700 px-1 rounded mr-1">기본</span>'
+                    ? '<span class="text-[11px] bg-slate-100 text-slate-700 px-1 rounded mr-1">기본</span>'
                     : '';
                 return `
                     <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-900 font-mono text-[11px] font-bold">
@@ -11240,7 +11319,7 @@ HTML_TEMPLATE = """
                     ? `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-semibold text-[10px]">🔄 반품${it.grade ? ` (${escapeHtml(it.grade)})` : ''}</span>`
                     : '';
                 const pidBadge = !isSelected && it.samePid
-                    ? '<span class="px-1 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold text-[9px]">🔗 동일 등록ID</span>'
+                    ? '<span class="px-1 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold text-[11px]">🔗 동일 등록ID</span>'
                     : '';
                 const btnHtml = isSelected
                     ? `<button type="button" onclick="toggleCmCoupangCsvItem(${idx})" class="px-2 py-0.5 rounded bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 font-semibold text-[10px]">해제</button>`
@@ -11410,6 +11489,7 @@ HTML_TEMPLATE = """
                 try { sessionStorage.setItem('activeDashboardTab', tabId); } catch(e) {}
             }
 
+            document.body.classList.toggle('inventory-tab-active', tabId === 'inventory');
             const tabs = ['sales', 'inventory', 'cashflow', 'pnl'];
             tabs.forEach(t => {
                 const btn = document.getElementById('tabBtn_' + t);
@@ -11755,7 +11835,7 @@ HTML_TEMPLATE = """
                                 <div class="opacity-0 group-hover:opacity-100 transition absolute -top-8 px-2 py-1 bg-slate-900 text-white rounded text-[10px] font-mono whitespace-nowrap z-20 pointer-events-none shadow-md">
                                     ${t.date}: ${fmtWon(barRev)}
                                 </div>
-                                <span class="text-[9px] font-mono font-bold text-slate-700 truncate">${barRev > 0 ? (barRev >= 10000 ? Math.round(barRev / 10000) + '만' : fmtNum(barRev)) : ''}</span>
+                                <span class="text-[11px] font-mono font-bold text-slate-700 truncate">${barRev > 0 ? (barRev >= 10000 ? Math.round(barRev / 10000) + '만' : fmtNum(barRev)) : ''}</span>
                                 <div class="w-full max-w-[36px] bg-slate-100 rounded-t-md overflow-hidden flex flex-col justify-end transition-all group-hover:brightness-95" style="height: ${heightPct}px; min-height: 10px;">
                                     <div class="bg-indigo-500 w-full h-full"></div>
                                 </div>
@@ -12018,7 +12098,7 @@ HTML_TEMPLATE = """
                             const stock = m.master_physical_total !== undefined ? m.master_physical_total : (m.total_available_stock || 0);
                             const runwayStr = m.effective_runway_str || (m.effective_runway !== undefined ? m.effective_runway + '일' : '-');
                             const isLowStock = (stock <= 0) || (m.effective_runway !== undefined && m.effective_runway <= 14) || String(m.status || '').includes('결품') || String(m.action_cta || '').includes('발주');
-                            const urgentBadge = isLowStock ? '<span class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-600 text-white shrink-0">🚨 품절임박</span>' : '';
+                            const urgentBadge = isLowStock ? '<span class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-rose-600 text-white shrink-0">🚨 품절임박</span>' : '';
                             const stockText = stock <= 0 ? '<span class="text-rose-600 font-bold font-mono">0개</span>' : `<span class="font-mono font-bold text-slate-800">${fmtNum(stock)}개</span>`;
                             const runwayText = `<span class="text-[10px] text-slate-500 font-mono">(${runwayStr})</span>`;
                             stockHtml = `<div class="flex items-center justify-end gap-1.5">${stockText}${runwayText}${urgentBadge}</div>`;
@@ -12329,7 +12409,7 @@ HTML_TEMPLATE = """
                         const amount = isDep ? (depAmt || t.amount || 0) : (wthAmt || t.amount || 0);
                         const badgeClass = isDep ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200';
                         const amountClass = isDep ? 'text-emerald-600 font-bold' : 'text-slate-900 font-bold';
-                        const manualBadge = t.is_manual ? '<span class="px-1.5 py-0.2 rounded text-[9px] bg-slate-200 text-slate-700 font-normal mr-1">수기</span>' : '';
+                        const manualBadge = t.is_manual ? '<span class="px-1.5 py-0.2 rounded text-[11px] bg-slate-200 text-slate-700 font-normal mr-1">수기</span>' : '';
                         const customerText = t.customer || t.description || t.name || t.summary || '-';
                         const sign = isDep ? '+' : '-';
 
@@ -12504,7 +12584,7 @@ HTML_TEMPLATE = """
                 if (forecastTitleEl) forecastTitleEl.innerText = '정산 마감 실적';
                 if (forecastBadgeEl) {
                     forecastBadgeEl.innerText = '확정';
-                    forecastBadgeEl.className = 'px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 text-slate-700';
+                    forecastBadgeEl.className = 'px-1.5 py-0.2 rounded text-[11px] font-bold bg-slate-100 text-slate-700';
                 }
                 if (forecastProfEl) {
                     forecastProfEl.innerText = fmtWon(profit);
@@ -12522,7 +12602,7 @@ HTML_TEMPLATE = """
                 if (forecastTitleEl) forecastTitleEl.innerText = '현실 예상 기여이익';
                 if (forecastBadgeEl) {
                     forecastBadgeEl.innerText = '실질 추정';
-                    forecastBadgeEl.className = 'px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800';
+                    forecastBadgeEl.className = 'px-1.5 py-0.2 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800';
                 }
                 const estProfit = (m11 && m11.estimated_real_profit) || 991415;
                 const estMargin = (m11 && m11.estimated_real_margin_pct) || 5.54;
@@ -12536,7 +12616,7 @@ HTML_TEMPLATE = """
                 if (forecastTitleEl) forecastTitleEl.innerText = '9~11월 누적 기여이익';
                 if (forecastBadgeEl) {
                     forecastBadgeEl.innerText = '누적';
-                    forecastBadgeEl.className = 'px-1.5 py-0.2 rounded text-[9px] font-bold bg-indigo-100 text-indigo-800';
+                    forecastBadgeEl.className = 'px-1.5 py-0.2 rounded text-[11px] font-bold bg-indigo-100 text-indigo-800';
                 }
                 if (forecastProfEl) {
                     forecastProfEl.innerText = fmtWon(sumAllProfit);
@@ -12583,24 +12663,24 @@ HTML_TEMPLATE = """
 
                     return `
                         <div class="flex flex-col items-center gap-1 group relative cursor-pointer ${ringStyle}" onclick="setPnlMonth('${m.month}')">
-                            <div class="opacity-0 group-hover:opacity-100 transition absolute -top-12 px-2.5 py-1.5 bg-slate-900 text-white rounded text-[11px] font-mono whitespace-nowrap z-20 pointer-events-none shadow-md">
+                            <div class="hidden sm:block opacity-0 group-hover:opacity-100 transition absolute -top-12 px-2.5 py-1.5 bg-slate-900 text-white rounded text-[11px] font-mono whitespace-nowrap z-20 pointer-events-none shadow-md">
                                 <strong class="text-indigo-200">${m.month}</strong> | 매출: ${fmtWon(m.revenue)} · 기여이익: <span class="${isNeg ? 'text-rose-300 font-bold' : 'text-emerald-300 font-bold'}">${fmtWon(m.profit)}</span> (${m.margin_pct !== undefined ? m.margin_pct + '%' : ''})
                             </div>
                             <div class="flex items-end gap-1.5 h-[115px]">
                                 <!-- 매출 바 -->
                                 <div class="flex flex-col items-center">
-                                    <span class="text-[9px] font-mono font-bold text-slate-700">${m.revenue >= 10000000 ? Math.round(m.revenue / 10000) + '만' : fmtWon(m.revenue)}</span>
+                                    <span class="text-[11px] font-mono font-bold text-slate-700">${m.revenue >= 10000000 ? Math.round(m.revenue / 10000) + '만' : fmtWon(m.revenue)}</span>
                                     <div class="w-7 sm:w-9 bg-indigo-600 rounded-t-md transition-all group-hover:brightness-95" style="height: ${revHeight}px;"></div>
                                 </div>
                                 <!-- 기여이익 바 (적자 시 빨간색 표시) -->
                                 <div class="flex flex-col items-center">
-                                    <span class="text-[9px] font-mono font-bold ${textColor}">${profLabel}</span>
+                                    <span class="text-[11px] font-mono font-bold ${textColor}">${profLabel}</span>
                                     <div class="w-7 sm:w-9 ${barColor} rounded-t-md transition-all group-hover:brightness-95" style="height: ${profHeight}px;"></div>
                                 </div>
                             </div>
                             <div class="flex items-center gap-1 mt-1">
                                 <span class="text-[11px] font-mono font-bold text-slate-700">${m.month}</span>
-                                ${isNeg ? '<span class="px-1 py-0.2 rounded text-[9px] font-bold bg-rose-100 text-rose-700">적자</span>' : '<span class="px-1 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-700">흑자</span>'}
+                                ${isNeg ? '<span class="px-1 py-0.2 rounded text-[11px] font-bold bg-rose-100 text-rose-700">적자</span>' : '<span class="px-1 py-0.2 rounded text-[11px] font-bold bg-emerald-100 text-emerald-700">흑자</span>'}
                             </div>
                         </div>
                     `;
