@@ -52,7 +52,7 @@ if _PROJECT_ROOT not in sys.path:
 DATA_FILE = os.environ.get('DATA_FILE') or os.path.join(BASE_DIR, 'inventory_master_store.json')
 LOGO_FILE = os.path.join(BASE_DIR, 'logo.png')
 GAS_SCRIPT_FILE = os.path.join(BASE_DIR, 'google_apps_script_bridge.gs')
-MANUAL_TX_FILE = os.path.join(BASE_DIR, 'manual_transactions.json')
+MANUAL_TX_FILE = os.environ.get('MANUAL_TX_FILE') or os.path.join(BASE_DIR, 'manual_transactions.json')
 
 
 def get_effective_dashboard_data_path():
@@ -64,9 +64,141 @@ def get_effective_dashboard_data_path():
     )
 
 
+def is_generation_configured() -> bool:
+    """Check if generation cache mode is explicitly configured."""
+    return bool(app.config.get('GENERATION_CACHE_ROOT') or os.environ.get('GENERATION_CACHE_ROOT'))
+
+
+def is_remote_generation_configured() -> bool:
+    """Check if remote generation polling mode is explicitly configured."""
+    enabled_val = app.config.get('GENERATION_REMOTE_ENABLED') or os.environ.get('GENERATION_REMOTE_ENABLED')
+    is_enabled = str(enabled_val).lower() in ('true', '1', 'yes')
+    has_endpoint = bool(app.config.get('GENERATION_REMOTE_ENDPOINT') or os.environ.get('GENERATION_REMOTE_ENDPOINT'))
+    has_token = bool(app.config.get('GENERATION_READ_TOKEN') or os.environ.get('GENERATION_READ_TOKEN'))
+    has_cache = is_generation_configured()
+    return is_enabled and has_endpoint and has_token and has_cache
+
+
+def get_generation_reader():
+    """Get or create singleton GenerationReader for app."""
+    cache_root = app.config.get('GENERATION_CACHE_ROOT') or os.environ.get('GENERATION_CACHE_ROOT')
+    if not cache_root:
+        return None
+    if getattr(app, '_generation_reader', None) is not None:
+        if getattr(app, '_generation_reader_root', None) == str(cache_root):
+            return app._generation_reader
+    try:
+        from generation_reader import GenerationReader
+        reader = GenerationReader(cache_root)
+        app._generation_reader = reader
+        app._generation_reader_root = str(cache_root)
+        return reader
+    except Exception as e:
+        app.logger.error(f"Failed to initialize GenerationReader: {e}")
+        return None
+
+
+def get_remote_syncer():
+    """Get or create singleton RemoteGenerationSyncer if configured."""
+    if not is_remote_generation_configured():
+        return None
+    cache_root = app.config.get('GENERATION_CACHE_ROOT') or os.environ.get('GENERATION_CACHE_ROOT')
+    if getattr(app, '_remote_syncer', None) is not None:
+        if getattr(app, '_remote_syncer_root', None) == str(cache_root):
+            return app._remote_syncer
+    try:
+        from generation_remote_reader import RemoteGenerationClient, RemoteGenerationSyncer
+        endpoint = app.config.get('GENERATION_REMOTE_ENDPOINT') or os.environ.get('GENERATION_REMOTE_ENDPOINT')
+        token = app.config.get('GENERATION_READ_TOKEN') or os.environ.get('GENERATION_READ_TOKEN')
+        allow_loopback = str(app.config.get('GENERATION_ALLOW_LOOPBACK') or os.environ.get('GENERATION_ALLOW_LOOPBACK', '')).lower() in ('true', '1', 'yes')
+        timeout = int(app.config.get('GENERATION_POLL_TIMEOUT') or os.environ.get('GENERATION_POLL_TIMEOUT', '15'))
+
+        client = RemoteGenerationClient(
+            endpoint=endpoint,
+            token=token,
+            enabled=True,
+            allow_loopback=allow_loopback,
+            timeout=timeout
+        )
+        gen_reader = get_generation_reader()
+        poll_interval = float(app.config.get('GENERATION_POLL_INTERVAL') or os.environ.get('GENERATION_POLL_INTERVAL', '30'))
+        failure_backoff = float(app.config.get('GENERATION_FAILURE_BACKOFF') or os.environ.get('GENERATION_FAILURE_BACKOFF', '10'))
+        syncer = RemoteGenerationSyncer(
+            client=client,
+            cache_root=Path(cache_root),
+            local_reader=gen_reader,
+            poll_interval=poll_interval,
+            failure_backoff=failure_backoff
+        )
+        app._remote_syncer = syncer
+        app._remote_syncer_root = str(cache_root)
+        return syncer
+    except Exception as e:
+        app.logger.error(f"Failed to initialize RemoteGenerationSyncer: {e}")
+        return None
+
+
+def _safe_ascii_header(val, limit=200):
+    clean = str(val or '').replace('\r', ' ').replace('\n', ' ')
+    return clean.encode('ascii', 'replace').decode('ascii')[:limit]
+
+
 @app.route('/dashboard_data.json')
 @app.route('/api/dashboard-data')
 def serve_dashboard_data():
+    if is_generation_configured():
+        gen_reader = get_generation_reader()
+        if gen_reader is None:
+            return jsonify({'error': '유효한 세대 데이터를 읽을 수 없습니다 (모듈 초기화 실패)'}), 503
+
+        # If remote syncer is active, perform controlled sync_if_needed()
+        remote_syncer = get_remote_syncer()
+        remote_sync_failed = False
+        if remote_syncer is not None:
+            sync_ok, sync_info = remote_syncer.sync_if_needed()
+            if not sync_ok:
+                remote_sync_failed = True
+                gen_reader._last_error = f"원격 세대 동기화 실패: {sync_info}"
+
+        rec = gen_reader.resolve()
+        if rec is None:
+            err_msg = gen_reader._last_error or '유효한 세대 데이터가 아직 준비되지 않았습니다'
+            resp = jsonify({'error': f'유효한 세대 데이터가 없습니다: {err_msg}'})
+            if remote_syncer is not None:
+                resp.headers['X-Remote-Sync-Status'] = 'failed'
+                if remote_syncer.last_sync_error:
+                    resp.headers['X-Remote-Sync-Error'] = _safe_ascii_header(remote_syncer.last_sync_error)
+            return resp, 503
+
+        # If remote sync failed, mark retained fallback on rec to trigger warning UI
+        if remote_sync_failed:
+            rec.is_retained_fallback = True
+            rec.last_error = remote_syncer.last_sync_error if remote_syncer else '원격 동기화 실패'
+
+        status_info = gen_reader.get_status_info(rec)
+        if remote_syncer is not None:
+            status_info['last_success_time'] = remote_syncer.last_success_time
+            status_info['last_sync_time'] = remote_syncer.last_sync_time
+            status_info['consecutive_failures'] = remote_syncer.consecutive_failures
+            status_info['poll_interval'] = remote_syncer.poll_interval
+            status_info['failure_backoff'] = remote_syncer.failure_backoff
+
+        data = copy.deepcopy(rec.dashboard_data)
+        data['_generation'] = status_info
+        resp_body = json.dumps(data, ensure_ascii=False)
+        response = Response(resp_body, mimetype='application/json')
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['X-Generation-Revision'] = rec.revision
+        response.headers['X-Source-As-Of'] = rec.source_as_of
+        response.headers['X-Generation-Status'] = 'retained' if rec.is_retained_fallback else 'active'
+        if remote_syncer is not None:
+            response.headers['X-Remote-Sync-Status'] = 'failed' if remote_sync_failed else 'ok'
+            if remote_syncer.last_success_time:
+                response.headers['X-Remote-Last-Success'] = str(int(remote_syncer.last_success_time))
+            if remote_syncer.last_sync_error:
+                response.headers['X-Remote-Sync-Error'] = _safe_ascii_header(remote_syncer.last_sync_error)
+        return response
+
     path = get_effective_dashboard_data_path()
     if not os.path.isfile(path):
         return jsonify({'error': '대시보드 데이터가 아직 생성되지 않았습니다'}), 404
@@ -185,6 +317,38 @@ def download_pnl_excel():
     month = request.args.get('month')
     if month and not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month):
         return jsonify(error='월 형식: YYYY-MM'), 400
+
+    revision = request.args.get('revision')
+    if revision and not re.fullmatch(r'[0-9a-fA-F]{12,64}', revision):
+        return jsonify(error='유효하지 않은 revision 형식입니다'), 400
+
+    if is_generation_configured():
+        gen_reader = get_generation_reader()
+        if gen_reader is None:
+            return jsonify({'error': '세대 캐시 모듈을 초기화할 수 없습니다'}), 503
+
+        active_rec = gen_reader.resolve()
+        if not month:
+            if active_rec and getattr(active_rec, 'requested_date', None):
+                month = active_rec.requested_date[:7]
+            else:
+                month = '2026-11'
+
+        excel_bytes = gen_reader.get_excel_bytes(month, revision=revision)
+        if excel_bytes is None:
+            return jsonify({'error': f'{month} 결산서 엑셀을 찾을 수 없습니다'}), 404
+
+        target_rev = revision if revision else (active_rec.revision if active_rec else '')
+        filename = f"{month}_식품부문_손익결산서.xlsx"
+        response = send_file(
+            io.BytesIO(excel_bytes),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['X-Generation-Revision'] = target_rev
+        return response
 
     explicit_dir, fallback_dirs = get_pnl_search_context()
     target_dirs = [explicit_dir] if explicit_dir else fallback_dirs
@@ -11655,7 +11819,14 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
         async function downloadManagementFile(url, fallbackType = null) {
             try {
-                const response = await (adminToken ? adminFetch(url) : fetch(url));
+                let reqUrl = url;
+                if (typeof window !== 'undefined' && window.currentGenerationRevision && reqUrl.includes('/api/download-pnl-excel')) {
+                    const sep = reqUrl.includes('?') ? '&' : '?';
+                    if (!reqUrl.includes('revision=')) {
+                        reqUrl = reqUrl + sep + 'revision=' + encodeURIComponent(window.currentGenerationRevision);
+                    }
+                }
+                const response = await (adminToken ? adminFetch(reqUrl) : fetch(reqUrl));
                 if (response.ok) {
                     const blobUrl = URL.createObjectURL(await response.blob());
                     const link = document.createElement('a');
@@ -11744,7 +11915,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             notifyUser('현금흐름 CSV 파일을 성공적으로 내보냈습니다.', 'success');
         }
 
+        let latestDashboardDataSeq = 0;
         async function loadDashboardData(showToast = false) {
+            const reqSeq = ++latestDashboardDataSeq;
             try {
                 const res = await (adminToken ? adminFetch('/api/dashboard-data', { cache: 'no-store' }) : fetch('/api/dashboard-data', { cache: 'no-store' }));
                 if (!res.ok) {
@@ -11752,7 +11925,13 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     return;
                 }
                 const data = await res.json();
+                if (reqSeq < latestDashboardDataSeq) {
+                    return;
+                }
                 currentDashboardData = data;
+                if (typeof window !== 'undefined') {
+                    window.currentGenerationRevision = (data._generation && data._generation.revision) || null;
+                }
                 renderSalesTab(data);
                 renderCashFlowTab(data);
                 renderPnLTab(data);
@@ -11962,7 +12141,17 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 }
                 const provBadge = (sp.provisional || monthly.data_status === 'partial') ? '<span class="text-indigo-700 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 text-[11px] ml-1">잠정집계</span>' : '';
 
-                periodEl.innerHTML = `<span>기준일: <strong class="font-mono text-slate-700 font-bold">${repDate}</strong> · 귀속월: <strong class="font-mono text-slate-700 font-bold">${curMonth}</strong>${provBadge} · 총 판매수량: <strong class="font-mono text-slate-700 font-bold">${fmtNum(totalQtyVal)}</strong>${qtySuffix}${coverageNote}</span>`;
+                let genBadge = '';
+                const genMeta = d && d._generation;
+                if (genMeta && genMeta.available) {
+                    if (genMeta.is_retained) {
+                        genBadge = ` · <span id="salesGenStatusBadge" class="bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[11px] font-semibold" title="개정판 ${genMeta.short_revision || ''} (${genMeta.revision || ''}) - 이전 검증 자료 유지">${genMeta.status_text || '⚠️ 갱신 실패 · 이전 자료 유지'}</span>`;
+                    } else {
+                        genBadge = ` · <span id="salesGenStatusBadge" class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded text-[11px] font-medium" title="개정판 ${genMeta.short_revision || ''} (${genMeta.revision || ''})">${genMeta.status_text || ('자료 기준 ' + (genMeta.source_as_of_short || ''))}</span>`;
+                    }
+                }
+
+                periodEl.innerHTML = `<span>기준일: <strong class="font-mono text-slate-700 font-bold">${repDate}</strong> · 귀속월: <strong class="font-mono text-slate-700 font-bold">${curMonth}</strong>${provBadge}${genBadge} · 총 판매수량: <strong class="font-mono text-slate-700 font-bold">${fmtNum(totalQtyVal)}</strong>${qtySuffix}${coverageNote}</span>`;
             }
 
             // 2. 상단 요약 바
@@ -12435,19 +12624,16 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     if (t.cost !== null && t.cost !== undefined) {
                         prodMap[key].cost += Number(t.cost);
                         prodMap[key].hasCost = true;
-                    } else if (t.matched_cost !== null && t.matched_cost !== undefined) {
-                        prodMap[key].cost += Number(t.matched_cost);
-                        prodMap[key].hasCost = true;
                     }
                     if (t.fees !== null && t.fees !== undefined) {
                         prodMap[key].fees += Number(t.fees);
                         prodMap[key].hasFees = true;
                     }
-                    if (t.profit !== null && t.profit !== undefined) {
-                        prodMap[key].profit += Number(t.profit);
-                        prodMap[key].hasProfit = true;
-                    } else if (t.contribution_profit !== null && t.contribution_profit !== undefined) {
+                    if (t.contribution_profit !== null && t.contribution_profit !== undefined) {
                         prodMap[key].profit += Number(t.contribution_profit);
+                        prodMap[key].hasProfit = true;
+                    } else if (t.profit !== null && t.profit !== undefined) {
+                        prodMap[key].profit += Number(t.profit);
                         prodMap[key].hasProfit = true;
                     }
                 });
@@ -13192,9 +13378,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             }
 
             const rev = activeData.revenue;
-            const cost = activeData.cost !== undefined ? activeData.cost : (activeData.month === monthly.month ? monthly.matched_cost : null);
-            const fees = activeData.fees !== undefined ? activeData.fees : (activeData.month === monthly.month ? monthly.fees : null);
-            const profit = activeData.profit !== undefined ? activeData.profit : (activeData.month === monthly.month ? (monthly.matched_contribution_profit ?? monthly.profit) : null);
+            const cost = (activeData.cost !== undefined && activeData.cost !== null) ? activeData.cost : (activeData.month === monthly.month ? monthly.cost : null);
+            const fees = (activeData.fees !== undefined && activeData.fees !== null) ? activeData.fees : (activeData.month === monthly.month ? monthly.fees : null);
+            const profit = (activeData.contribution_profit !== undefined && activeData.contribution_profit !== null) ? activeData.contribution_profit : ((activeData.profit !== undefined && activeData.profit !== null) ? activeData.profit : (activeData.month === monthly.month ? (monthly.contribution_profit !== undefined ? monthly.contribution_profit : monthly.profit) : null));
             const isNegativeProfit = profit != null && profit < 0;
 
             // 5. 핵심 손익 KPI 카드 5종 (0, 음수, null 엄격 구분)
@@ -13636,9 +13822,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         rowsHtml = channels.map(ch => {
                             const label = channelNames[ch.channel] || ch.channel;
                             const cRev = ch.revenue;
-                            const cCost = ch.matched_cost ?? ch.cost;
-                            const cFees = ch.fees;
-                            const cProfit = ch.matched_contribution_profit ?? ch.profit;
+                            const cCost = (ch.cost !== undefined) ? ch.cost : null;
+                            const cFees = (ch.fees !== undefined) ? ch.fees : null;
+                            const cProfit = (ch.contribution_profit !== undefined) ? ch.contribution_profit : ((ch.profit !== undefined) ? ch.profit : null);
                             const cMargin = (cRev != null && cRev > 0 && cProfit != null) ? ((cProfit / cRev) * 100).toFixed(1) + '%' : '-';
                             return `
                                 <tr class="hover:bg-slate-50/80 transition">
