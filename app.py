@@ -45,25 +45,68 @@ def today_kst():
 
 app = Flask(__name__)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(BASE_DIR)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+DATA_FILE = os.environ.get('DATA_FILE') or os.path.join(BASE_DIR, 'inventory_master_store.json')
+LOGO_FILE = os.path.join(BASE_DIR, 'logo.png')
+GAS_SCRIPT_FILE = os.path.join(BASE_DIR, 'google_apps_script_bridge.gs')
+MANUAL_TX_FILE = os.path.join(BASE_DIR, 'manual_transactions.json')
+
+
+def get_effective_dashboard_data_path():
+    """Return explicit, configured, or bundled dashboard_data.json path."""
+    return (
+        app.config.get('DASHBOARD_DATA_FILE')
+        or os.environ.get('DASHBOARD_DATA_FILE')
+        or os.path.join(BASE_DIR, 'dashboard_data.json')
+    )
+
 
 @app.route('/dashboard_data.json')
 @app.route('/api/dashboard-data')
 def serve_dashboard_data():
-    path = app.config.get('DASHBOARD_DATA_FILE') or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dashboard_data.json')
+    path = get_effective_dashboard_data_path()
     if not os.path.isfile(path):
         return jsonify({'error': '대시보드 데이터가 아직 생성되지 않았습니다'}), 404
     response = send_file(path, mimetype='application/json', max_age=0)
     response.headers['Cache-Control'] = 'no-store'
     return response
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(BASE_DIR)
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
-DATA_FILE = os.path.join(BASE_DIR, 'inventory_master_store.json')
-LOGO_FILE = os.path.join(BASE_DIR, 'logo.png')
-GAS_SCRIPT_FILE = os.path.join(BASE_DIR, 'google_apps_script_bridge.gs')
-MANUAL_TX_FILE = os.path.join(BASE_DIR, 'manual_transactions.json')
+
+def get_pnl_search_context():
+    """
+    Resolve Excel PnL directory context.
+    Returns (explicit_dir, fallback_dirs).
+    If an explicit or bundled release directory exists, explicit_dir is set and fallback_dirs is empty (no fallback).
+    """
+    # 1. Configured or environment path has highest priority
+    cfg_dir = app.config.get('PNL_OUTPUT_DIR') or os.environ.get('PNL_OUTPUT_DIR')
+    if cfg_dir:
+        # 명시적 설정이 존재하는 경우 디렉터리 존재 여부와 무관하게 검색 범위를 고정 (fallback 절대 금지)
+        return cfg_dir, []
+
+    # 2. Bundled output_excel in flat deployment root (BASE_DIR/output_excel)
+    flat_dir = os.path.join(BASE_DIR, 'output_excel')
+    if os.path.isdir(flat_dir):
+        return flat_dir, []
+
+    # 3. Bundled output_excel in nested web_dashboard structure (dirname(BASE_DIR)/output_excel)
+    if os.path.basename(BASE_DIR) == 'web_dashboard':
+        parent_dir = os.path.join(os.path.dirname(BASE_DIR), 'output_excel')
+        if os.path.isdir(parent_dir):
+            return parent_dir, []
+
+    # 4. Fallback legacy mode when no explicit release directory is present
+    legacy_fallbacks = [
+        os.path.join(BASE_DIR, '.cloud_cache/output_excel'),
+        os.path.join(os.path.dirname(BASE_DIR), 'output_excel'),
+        os.path.join(BASE_DIR, '..', 'output_excel'),
+        r'C:\AI\경영관리\output_excel'
+    ]
+    existing_fallbacks = [d for d in legacy_fallbacks if os.path.isdir(d)]
+    return None, existing_fallbacks
 
 _cloud_read_lock = threading.Lock()
 _cloud_read_checked = 0.0
@@ -91,10 +134,25 @@ def refresh_cloud_files(force=False):
         result = restore_latest(cache, store)
         cloud_read_state.update(result)
         if result['status'] in ('synced', 'local_newer'):
-            app.config['DASHBOARD_DATA_FILE'] = str(cache / 'web_dashboard/dashboard_data.json')
+            # 1. 재고 원천 및 채널 화이트리스트는 항상 클라우드 캐시에서 갱신 (재고 동기화 보존)
             app.config['INVENTORY_RAW_DIR'] = str(cache / 'raw_data/inventory')
             app.config['CHANNEL_WHITELIST_FILE'] = str(cache / 'master_data/오키드상품정보.xlsx')
-            app.config['PNL_OUTPUT_DIR'] = str(cache / 'output_excel')
+
+            # 2. 고정 / 명시적 릴리스 모드 보호:
+            # DASHBOARD_DATA_FILE이 환경변수 또는 고정 릴리스 설정으로 명시된 경우 구버전 클라우드 캐시로 덮어쓰지 않음
+            explicit_json = os.environ.get('DASHBOARD_DATA_FILE') or (app.config.get('DASHBOARD_DATA_FILE') if app.config.get('FIXED_RELEASE_DATA') else None)
+            if explicit_json:
+                app.config['DASHBOARD_DATA_FILE'] = explicit_json
+            else:
+                app.config['DASHBOARD_DATA_FILE'] = str(cache / 'web_dashboard/dashboard_data.json')
+
+            # PNL_OUTPUT_DIR이 환경변수 또는 고정 릴리스 설정으로 명시된 경우 구버전 클라우드 캐시로 덮어쓰지 않음
+            explicit_pnl = os.environ.get('PNL_OUTPUT_DIR') or (app.config.get('PNL_OUTPUT_DIR') if app.config.get('FIXED_RELEASE_DATA') else None)
+            if explicit_pnl:
+                app.config['PNL_OUTPUT_DIR'] = explicit_pnl
+            else:
+                app.config['PNL_OUTPUT_DIR'] = str(cache / 'output_excel')
+
             if result['status'] == 'synced':
                 cloud_read_state['last_success'] = now_kst().isoformat()
     except Exception:
@@ -127,34 +185,46 @@ def download_pnl_excel():
     month = request.args.get('month')
     if month and not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month):
         return jsonify(error='월 형식: YYYY-MM'), 400
-    search_dirs = [
-        app.config.get('PNL_OUTPUT_DIR') or os.path.join(BASE_DIR, '.cloud_cache/output_excel'),
-        os.path.join(os.path.dirname(BASE_DIR), 'output_excel'),
-        os.path.join(BASE_DIR, '..', 'output_excel'),
-        r'C:\AI\경영관리\output_excel'
-    ]
-    pnl_files = []
-    for d in search_dirs:
+
+    explicit_dir, fallback_dirs = get_pnl_search_context()
+    target_dirs = [explicit_dir] if explicit_dir else fallback_dirs
+
+    if explicit_dir and not os.path.isdir(explicit_dir):
+        return jsonify({'error': f'지정된 결산서 디렉터리를 찾을 수 없습니다: {explicit_dir}'}), 404
+
+    if not target_dirs:
+        return jsonify({'error': '월간 손익결산서 엑셀 디렉터리를 찾을 수 없습니다'}), 404
+
+    # Search in target directories
+    for d in target_dirs:
+        candidates = []
         if os.path.isdir(d):
             for f in os.listdir(d):
+                if not f.endswith('.xlsx'):
+                    continue
                 if month and not f.startswith(month + '_'):
                     continue
-                if f.endswith('.xlsx') and ('손익결산서' in f or 'pnl' in f.lower()):
+                if '손익결산서' in f or 'pnl' in f.lower():
                     full_path = os.path.join(d, f)
                     try:
-                        pnl_files.append((os.path.getmtime(full_path), full_path))
+                        candidates.append((os.path.getmtime(full_path), full_path))
                     except Exception:
                         pass
-    if not pnl_files:
-        return jsonify({'error': '월간 손익결산서 엑셀 파일을 찾을 수 없습니다'}), 404
-    pnl_files.sort(key=lambda x: x[0], reverse=True)
-    latest_file = pnl_files[0][1]
-    return send_file(
-        latest_file,
-        as_attachment=True,
-        download_name=os.path.basename(latest_file),
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
+        if candidates:
+            # Sort by mtime descending within the authoritative directory
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            chosen_file = candidates[0][1]
+            return send_file(
+                chosen_file,
+                as_attachment=True,
+                download_name=os.path.basename(chosen_file),
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+        # If explicit directory was specified but requested month is missing, do NOT fallback to legacy/dev paths!
+        if explicit_dir:
+            return jsonify({'error': f'{month} 월간 손익결산서 엑셀 파일을 찾을 수 없습니다'}), 404
+
+    return jsonify({'error': '월간 손익결산서 엑셀 파일을 찾을 수 없습니다'}), 404
 
 
 @app.route('/api/cash-flow/manual-transaction', methods=['POST'])
@@ -222,7 +292,7 @@ def add_manual_transaction():
         pass
 
     # 2. dashboard_data.json에 즉시 반영
-    data_path = app.config.get('DASHBOARD_DATA_FILE') or os.path.join(BASE_DIR, 'dashboard_data.json')
+    data_path = app.config.get('DASHBOARD_DATA_FILE') or os.environ.get('DASHBOARD_DATA_FILE') or os.path.join(BASE_DIR, 'dashboard_data.json')
     if os.path.isfile(data_path):
         try:
             with open(data_path, 'r', encoding='utf-8') as f:
@@ -762,7 +832,7 @@ def export_management_csv(dataset):
     }
     if dataset not in selectors:
         return jsonify(error='지원하지 않는 데이터셋입니다.'), 404
-    path = app.config.get('DASHBOARD_DATA_FILE') or os.path.join(BASE_DIR, 'dashboard_data.json')
+    path = app.config.get('DASHBOARD_DATA_FILE') or os.environ.get('DASHBOARD_DATA_FILE') or os.path.join(BASE_DIR, 'dashboard_data.json')
     if not os.path.isfile(path):
         return jsonify(error='대시보드 데이터를 먼저 생성하세요.'), 404
     with open(path, encoding='utf-8') as source:
@@ -850,7 +920,7 @@ def _restore_inventory_from_disk(need_gaemi=True, need_coupang=True):
 
     if need_gaemi or need_coupang:
         try:
-            dashboard_file = app.config.get('DASHBOARD_DATA_FILE') or (Path(BASE_DIR) / 'dashboard_data.json')
+            dashboard_file = app.config.get('DASHBOARD_DATA_FILE') or os.environ.get('DASHBOARD_DATA_FILE') or (Path(BASE_DIR) / 'dashboard_data.json')
             if os.path.exists(str(dashboard_file)):
                 with open(str(dashboard_file), 'r', encoding='utf-8') as f:
                     db_data = json.load(f)
@@ -3871,7 +3941,7 @@ def admin_backup_import():
 # -------------------------------------------------------------
 # 모던 일쩜오도 발주 의사결정 액션보드 HTML
 # -------------------------------------------------------------
-HTML_TEMPLATE = """
+HTML_TEMPLATE = r"""
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -4181,10 +4251,10 @@ HTML_TEMPLATE = """
                         <span id="salesTotalQty" class="font-bold font-mono text-slate-900 text-sm">0개</span>
                         <span id="salesSkuCountBadge" class="text-slate-500 font-semibold text-[11px]">(판매 품목 36종)</span>
                         <span class="text-slate-300">·</span>
-                        <span class="text-slate-400 text-[11px]">전일: <span id="salesDailyRevenue" class="font-mono text-slate-700 font-semibold">0원</span></span>
+                        <span class="text-slate-400 text-[11px]"><span id="salesDailyLabel">일별</span>: <span id="salesDailyRevenue" class="font-mono text-slate-700 font-semibold">0원</span></span>
                     </div>
                 </div>
-                <span id="salesReportPeriod" class="text-[11px] text-slate-400">전일 및 당월 누적 집계</span>
+                <span id="salesReportPeriod" class="text-[11px] text-slate-400">일별 및 당월 누적 집계</span>
             </div>
 
             <!-- 2. 상태 필터 칩 (채널별 필터 칩 5개) -->
@@ -4233,7 +4303,7 @@ HTML_TEMPLATE = """
                     <div class="flex flex-wrap gap-2 items-center justify-between">
                         <div class="flex flex-wrap items-center gap-2">
                             <span class="font-bold text-xs text-slate-900">일별 매출 추이</span>
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">누적 스냅샷 기준</span>
+                            <span id="salesTrendBasisBadge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">기준</span>
                             <span class="text-[11px] text-slate-400" id="salesTrendSubtitle">최근 일자별 실적</span>
                         </div>
                         <div class="flex items-center gap-2 flex-wrap text-[10px] text-slate-500" id="salesTrendLegend">
@@ -4651,20 +4721,17 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- 2-0. 정산 월 선택 칩 스트립 (전체 9~11월 / 2026-09 / 2026-10 / 2026-11) -->
-            <div class="flex items-center gap-2 overflow-x-auto pb-0.5 text-xs">
+            <!-- 2-0. 정산 월 선택 칩 스트립 (동적 렌더링) -->
+            <div id="cfMonthSelectorStrip" class="flex items-center gap-2 overflow-x-auto pb-0.5 text-xs">
                 <span class="text-slate-500 font-semibold shrink-0 text-[11px]"><i class="fa-regular fa-calendar-check mr-1 text-slate-400"></i>정산 월 선택:</span>
-                <button type="button" onclick="setCashflowMonth('all')" id="cfMonthBtn_all" class="cf-month-btn px-2.5 py-1 rounded-lg border text-xs font-semibold transition bg-white text-slate-700 border-slate-200 hover:bg-slate-50 cursor-pointer">전체 (9~11월)</button>
-                <button type="button" onclick="setCashflowMonth('2026-09')" id="cfMonthBtn_2026-09" class="cf-month-btn px-2.5 py-1 rounded-lg border text-xs font-semibold transition bg-white text-slate-700 border-slate-200 hover:bg-slate-50 cursor-pointer">2026년 9월</button>
-                <button type="button" onclick="setCashflowMonth('2026-10')" id="cfMonthBtn_2026-10" class="cf-month-btn px-2.5 py-1 rounded-lg border text-xs font-semibold transition bg-white text-slate-700 border-slate-200 hover:bg-slate-50 cursor-pointer">2026년 10월</button>
-                <button type="button" onclick="setCashflowMonth('2026-11')" id="cfMonthBtn_2026-11" class="cf-month-btn active px-2.5 py-1 rounded-lg border text-xs font-bold transition bg-slate-900 text-white border-slate-900 shadow-xs cursor-pointer">2026년 11월 (당월)</button>
+                <button type="button" onclick="setCashflowMonth('all')" data-m="all" class="cf-month-btn active px-2.5 py-1 rounded-lg border text-xs font-bold transition bg-slate-900 text-white border-slate-900 shadow-xs cursor-pointer">전체 (누적)</button>
             </div>
 
             <!-- 2. 상단 요약 바 -->
             <div class="bg-white rounded-xl border border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600">
                     <div class="flex items-center space-x-1.5">
-                        <span id="cfSummaryMonthLabel" class="text-slate-500">11월 식품 입금 합계</span>
+                        <span id="cfSummaryMonthLabel" class="text-slate-500">식품 입금 합계</span>
                         <span id="cfDepositTotal" class="font-bold font-mono text-emerald-600 text-sm">0원</span>
                     </div>
                     <span class="text-slate-200 hidden sm:inline">|</span>
@@ -4674,7 +4741,7 @@ HTML_TEMPLATE = """
                     </div>
                     <span class="text-slate-200 hidden sm:inline">|</span>
                     <div class="flex items-center space-x-1.5">
-                        <span class="text-slate-500">순현금흐름</span>
+                        <span class="text-slate-500" title="선택된 월/범위 내 식품 거래 내역 합계">선택 범위 식품 순현금흐름</span>
                         <span id="cfNetTotal" class="font-bold font-mono text-slate-900 text-sm">0원</span>
                     </div>
                     <span class="text-slate-200 hidden sm:inline">|</span>
@@ -4683,6 +4750,14 @@ HTML_TEMPLATE = """
                         <span id="cfUnclassifiedCount" class="font-bold font-mono text-slate-900 text-sm">0건</span>
                         <span id="cfUnclassWarningBadge" class="hidden px-1.5 py-0.2 rounded text-[11px] font-bold bg-amber-500 text-white">확인 필요</span>
                     </div>
+                </div>
+                <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600 items-center">
+                    <span>해외 원물 송금 <strong id="cfImportOutflow" class="font-mono text-slate-800">0원</strong></span>
+                    <span class="text-slate-300">|</span>
+                    <span title="원물 수입 시 발생하는 대규모 일시 송금액을 제외하여 일상 자금 흐름을 파악하기 위한 관리용 지표입니다. (회계상 영업현금흐름 아님)">
+                        수입원물 제외 순현금흐름 <strong id="cfOperatingNet" class="font-mono text-slate-800">0원</strong>
+                        <span class="text-[10px] text-slate-400 font-normal ml-0.5">(관리용 지표)</span>
+                    </span>
                 </div>
                 <span id="cashflowReportPeriod" class="text-[11px] text-slate-400">하나은행 기업뱅킹 내역 기준</span>
             </div>
@@ -4800,55 +4875,20 @@ HTML_TEMPLATE = """
         <!-- 탭 4: 월 손익결산 & 예상 손익 (MD 실무자 맞춤형) -->
         <!-- ============================================================= -->
         <section id="tabContent_pnl" class="dashboard-tab-content hidden space-y-3">
-            <!-- 1. 상단 월 선택 칩 4개 (디자인 시스템 통일 및 적자/흑자 상태 뱃지 포함) -->
+            <!-- 1. 월별 실적 요약 카드 (동적 렌더링) -->
             <div id="pnlMonthChips" class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <button type="button" onclick="setPnlMonth('all')" data-m="all" class="pnl-month-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
-                    <div class="flex flex-wrap gap-2 items-center justify-between text-[11px] font-semibold text-slate-600">
-                        <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span><span class="truncate">전체 (9~11월)</span></span>
-                        <span id="pnlMonthBadge_all" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-slate-100 text-slate-700">누적</span>
-                    </div>
-                    <div class="mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight" id="pnlMonthPill_all">0원</div>
-                    <div class="mt-0.5 text-[11px] font-mono font-medium text-slate-500" id="pnlMonthSub_all">계산 중</div>
-                </button>
-                <button type="button" onclick="setPnlMonth('2026-09')" data-m="2026-09" class="pnl-month-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
-                    <div class="flex flex-wrap gap-2 items-center justify-between text-[11px] font-semibold text-slate-600">
-                        <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span><span class="truncate">2026-09</span></span>
-                        <span id="pnlMonthBadge_09" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">흑자</span>
-                    </div>
-                    <div class="mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight" id="pnlMonthPill_09">0원</div>
-                    <div class="mt-0.5 text-[11px] font-mono font-medium text-emerald-600" id="pnlMonthSub_09">이익 +46.6만 (+2.2%)</div>
-                </button>
-                <button type="button" onclick="setPnlMonth('2026-10')" data-m="2026-10" class="pnl-month-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
-                    <div class="flex flex-wrap gap-2 items-center justify-between text-[11px] font-semibold text-slate-600">
-                        <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></span><span class="truncate">2026-10</span></span>
-                        <span id="pnlMonthBadge_10" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-rose-100 text-rose-700">적자</span>
-                    </div>
-                    <div class="mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight" id="pnlMonthPill_10">0원</div>
-                    <div class="mt-0.5 text-[11px] font-mono font-bold text-rose-600" id="pnlMonthSub_10">이익 -144.2만 (-5.9%)</div>
-                </button>
-                <button type="button" onclick="setPnlMonth('2026-11')" data-m="2026-11" class="pnl-month-pill status-pill bg-slate-100/80 border border-slate-900 ring-1 ring-slate-900 rounded-xl px-3 py-2 text-left transition cursor-pointer">
-                    <div class="flex flex-wrap gap-2 items-center justify-between text-[11px] font-semibold text-slate-600">
-                        <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-900 shrink-0"></span><span class="truncate">2026-11 (당월)</span></span>
-                        <span id="pnlMonthBadge_11" class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-blue-100 text-blue-800">집계중</span>
-                    </div>
-                    <div class="mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight" id="pnlMonthPill_11">0원</div>
-                    <div class="mt-0.5 text-[11px] font-mono font-medium text-emerald-600" id="pnlMonthSub_11">이익 +51.4만</div>
-                </button>
+                <!-- 동적 렌더링 카드 -->
             </div>
 
-            <!-- 11월 임시 집계 흑자 착시 방지 안내 배너 -->
+            <!-- 임시 집계 흑자 착시 방지 안내 배너 -->
             <div id="pnlProvisionalAlert" class="hidden rounded-xl border border-amber-300 bg-amber-50/90 p-3.5 text-xs text-amber-950 flex items-start gap-3">
                 <i class="fa-solid fa-triangle-exclamation text-amber-600 mt-0.5 text-base shrink-0"></i>
                 <div class="space-y-1">
                     <div class="font-bold text-amber-900 flex items-center gap-2">
-                        <span>11월 손익 결산 시 필독 안내 (흑자 착시 방지)</span>
+                        <span id="pnlProvisionalAlertTitle">당월 손익 결산 시 필독 안내 (흑자 착시 방지)</span>
                         <span class="px-2 py-0.5 rounded text-[10px] bg-amber-200 text-amber-900 font-extrabold">임시집계 주의</span>
                     </div>
-                    <p class="leading-relaxed text-amber-900/90">
-                        11월은 쿠팡 월말 정산서 발행 전 임시 판매내역 집계 단계로, 기본 판매수수료(약 11.6%)만 차감되어 <strong>임시 기여이익이 1,116만 원(62.4%)</strong>으로 크게 나타납니다.
-                        실제로는 물류비, 보관료, 광고비, 대행수수료(최근 9~10월 실질 비판매수수료율 56.9%)가 월말 정산 시 차감되므로, 
-                        <strong>현실적 예상 기여이익은 약 99만 원(5.5%)</strong> 수준으로 추정됩니다.
-                    </p>
+                    <p id="pnlProvisionalText" class="leading-relaxed text-amber-900/90"></p>
                 </div>
             </div>
 
@@ -5933,7 +5973,8 @@ HTML_TEMPLATE = """
 
     <!-- 스크립트 로직 -->
     <script>
-        const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'false' }}) || window.location.pathname.includes('/share/inventory') || window.location.pathname.includes('/embed/inventory');
+
+const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'false' }}) || window.location.pathname.includes('/share/inventory') || window.location.pathname.includes('/embed/inventory');
         let includeReturnsInTotal = false;
         function toggleReturnsInTotal(checked) {
             includeReturnsInTotal = Boolean(checked);
@@ -5978,10 +6019,11 @@ HTML_TEMPLATE = """
 
         const COL_ORDER_STORAGE_KEY = 'iljeomodo_col_order_v7';
         const COL_WIDTHS_STORAGE_KEY = 'iljeomodo_col_widths_v2';
+        const LEGACY_COL_WIDTHS_STORAGE_KEY = 'iljeomodo_col_widths_v1';
         let currentColumnOrder = [...DEFAULT_COLUMN_ORDER];
         let customColWidths = {};
         
-        // localStorage에서 저장된 열 순서 & 너비 불러오기 (v7 11열 보드 전용)
+        // localStorage에서 저장된 열 순서 & 너비 불러오기 (v7 11열 보드 전용, v1 호환 지원)
         try {
             const savedOrder = localStorage.getItem(COL_ORDER_STORAGE_KEY);
             if (savedOrder) {
@@ -5997,7 +6039,7 @@ HTML_TEMPLATE = """
             }
         } catch (e) {}
         try {
-            const savedWidths = localStorage.getItem(COL_WIDTHS_STORAGE_KEY);
+            const savedWidths = localStorage.getItem(COL_WIDTHS_STORAGE_KEY) || localStorage.getItem(LEGACY_COL_WIDTHS_STORAGE_KEY);
             if (savedWidths) {
                 const parsedW = JSON.parse(savedWidths);
                 if (parsedW && typeof parsedW === 'object' && !Array.isArray(parsedW)) {
@@ -6431,7 +6473,7 @@ HTML_TEMPLATE = """
         }
 
         function getSaveFeedbackInfo(baseMsg, ds) {
-            const cleanBase = String(baseMsg || '저장 완료').replace(/^[✅⚠️\\s]+/, '').trim();
+            const cleanBase = String(baseMsg || '저장 완료').replace(/^[✅⚠️\s]+/, '').trim();
             const hhmmss = new Date().toTimeString().slice(0, 8);
             const warnNotice = formatDriveSyncNotice(ds);
             if (warnNotice) {
@@ -6604,7 +6646,7 @@ HTML_TEMPLATE = """
             const matchSheet = (sheetRows) => {
                 const preview = sheetRows.slice(0, 25).map(r =>
                     (Array.isArray(r) ? r : []).map(c => String(c == null ? '' : c)).join(' ')
-                ).join(' ').replace(/\\s+/g, '');
+                ).join(' ').replace(/\s+/g, '');
                 if (source === 'coupang') return preview.includes('옵션ID') || preview.includes('판매가능재고');
                 if (source === 'gaemi') return preview.includes('상품코드') && preview.includes('재고량');
                 if (source === 'sales') return preview.includes('관리코드') || preview.includes('주문수량');
@@ -6633,10 +6675,10 @@ HTML_TEMPLATE = """
             reader.onload = async function(e) {
                 try {
                     const data = new Uint8Array(e.target.result);
-                    const isTextCsv = /\\.(csv|tsv|txt)$/i.test(file.name || '');
+                    const isTextCsv = /\.(csv|tsv|txt)$/i.test(file.name || '');
                     let wb;
                     if (isTextCsv) {
-                        const textStr = decodeTextBytes(data).replace(/^\uFEFF/, '');
+                        const textStr = decodeTextBytes(data).replace(/^﻿/, '');
                         wb = XLSX.read(textStr, { type: 'string' });
                     } else {
                         wb = XLSX.read(data, { type: 'array' });
@@ -6686,7 +6728,7 @@ HTML_TEMPLATE = """
                 return;
             }
             const ok = await showConfirmModal(
-                "현재 재고 수량을 테스트용 샘플 CSV 데이터로 덮어쓰시겠습니까?\\n(관리자 마스터 설정은 유지됩니다)",
+                "현재 재고 수량을 테스트용 샘플 CSV 데이터로 덮어쓰시겠습니까?\n(관리자 마스터 설정은 유지됩니다)",
                 { title: '샘플 데이터 로드', okText: '덮어쓰고 로드', danger: true }
             );
             if (!ok) return;
@@ -8288,10 +8330,10 @@ HTML_TEMPLATE = """
         function formatDriveSyncNotice(ds) {
             if (!ds || !ds.configured) return '';
             if (ds.sync_blocked || ds.status === 'blocked') {
-                return '\\n⚠️ 현재 Drive 자동 덮어쓰기 잠금 상태로 로컬에만 저장되었습니다. 상단 배너 또는 [Google Drive·백업] 탭에서 복원 상태를 확인하세요.';
+                return '\n⚠️ 현재 Drive 자동 덮어쓰기 잠금 상태로 로컬에만 저장되었습니다. 상단 배너 또는 [Google Drive·백업] 탭에서 복원 상태를 확인하세요.';
             }
             if (ds.status === 'error') {
-                return `\\n⚠️ Google Drive 동기화 실패(로컬만 저장됨): ${ds.last_error || '연결 오류'}`;
+                return `\n⚠️ Google Drive 동기화 실패(로컬만 저장됨): ${ds.last_error || '연결 오류'}`;
             }
             return '';
         }
@@ -8304,7 +8346,7 @@ HTML_TEMPLATE = """
         function excelSerialToJsIso(val) {
             if (val === null || val === undefined || typeof val === 'boolean') return '';
             const s = String(val).trim();
-            if (!/^\\d{5}(?:\\.\\d+)?$/.test(s)) return '';
+            if (!/^\d{5}(?:\.\d+)?$/.test(s)) return '';
             const num = parseFloat(s);
             if (!Number.isFinite(num) || num < 20000 || num > 80000) return '';
             const dayInt = Math.floor(num);
@@ -8323,7 +8365,7 @@ HTML_TEMPLATE = """
             if (fromSerial) return fromSerial;
             const s = cleanJsNfc(val);
             if (!s) return '';
-            const m = s.match(/^(\\d{2,4})[./-](\\d{1,2})[./-](\\d{1,2})(?:[ T]+(\\d{1,2}):(\\d{1,2})(?::(\\d{1,2}))?)?$/);
+            const m = s.match(/^(\d{2,4})[./-](\d{1,2})[./-](\d{1,2})(?:[ T]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
             if (!m) return s;
             let y = parseInt(m[1], 10);
             if (y < 100) y += 2000;
@@ -8347,7 +8389,7 @@ HTML_TEMPLATE = """
             if (!regRaw) return { canonFull: canonOpt, canonDateOnly: canonOpt, canonOpt, rawHasTime: false };
             const canonReg = normalizeJsGaemiRegDate(regRaw);
             const canonFull = canonReg ? `${canonOpt}||${canonReg}` : canonOpt;
-            const datePart = /^\\d{4}-\\d{2}-\\d{2}/.test(canonReg) ? canonReg.slice(0, 10) : canonReg;
+            const datePart = /^\d{4}-\d{2}-\d{2}/.test(canonReg) ? canonReg.slice(0, 10) : canonReg;
             const canonDateOnly = datePart ? `${canonOpt}||${datePart}` : canonOpt;
             return { canonFull, canonDateOnly, canonOpt, rawHasTime: canonFull !== canonDateOnly };
         }
@@ -8507,18 +8549,10 @@ HTML_TEMPLATE = """
             } else {
                 box.classList.add('hidden');
                 legacyFields.classList.remove('hidden');
-                badges.innerHTML = '';
             }
         }
 
-        function clearEpGaemiMappingsOverride() {
-            epGaemiMappingsState = [];
-            epGaemiClearedExplicit = true;
-            renderEpGaemiMappingSection();
-        }
-
-        function openCreateProductModal(prefill = null) {
-            if (!isAdminMode) { openPinModal(); return; }
+        function openCreateProductModal(prefill) {
             document.getElementById('ep_modal_title').innerText = '신규 단품 마스터 등록';
             document.getElementById('ep_is_new').value = '1';
             document.getElementById('ep_id').value = '';
@@ -9044,7 +9078,7 @@ HTML_TEMPLATE = """
         async function deleteCurrentProductHard() {
             const code = document.getElementById('ep_seller_code').value.trim();
             const ok = await showConfirmModal(
-                `[${code}] 상품을 마스터 목록에서 영구 삭제하시겠습니까?\\n이 작업은 되돌릴 수 없습니다.`,
+                `[${code}] 상품을 마스터 목록에서 영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`,
                 { title: '상품 영구 삭제 확인', okText: '영구 삭제', danger: true }
             );
             if (!ok) return;
@@ -9553,7 +9587,7 @@ HTML_TEMPLATE = """
                 if (res.status === 409 && json.require_force && !force) {
                     setButtonBusy(targetBtn, false);
                     const ok = await showConfirmModal(
-                        `⚠️ ${json.message}\\n\\n정말 현재 서버 상태로 Google Drive 기존 데이터를 강제 덮어쓰기(백업)하시겠습니까?`,
+                        `⚠️ ${json.message}\n\n정말 현재 서버 상태로 Google Drive 기존 데이터를 강제 덮어쓰기(백업)하시겠습니까?`,
                         { title: 'Google Drive 강제 덮어쓰기 확인', okText: '강제 덮어쓰기', danger: true }
                     );
                     if (ok) {
@@ -9718,9 +9752,9 @@ HTML_TEMPLATE = """
 
         function guessCoupangBundle(text) {
             const s = String(text || '');
-            const m1 = s.match(/(\\d+)\\s*개(?!입)/);
+            const m1 = s.match(/(\d+)\s*개(?!입)/);
             if (m1) return Math.max(1, parseInt(m1[1], 10) || 1);
-            const m2 = s.match(/(\\d+)\\s*(?:팩|입|병|봉|통|박스)/);
+            const m2 = s.match(/(\d+)\s*(?:팩|입|병|봉|통|박스)/);
             if (m2) return Math.max(1, parseInt(m2[1], 10) || 1);
             return 1;
         }
@@ -9888,8 +9922,8 @@ HTML_TEMPLATE = """
 
         function extractUnitTokens(text) {
             const s = String(text || '').toLowerCase();
-            const m = s.match(/(\\d+(?:\\.\\d+)?)\\s*(?:ml|l|g|kg)/g);
-            return m ? Array.from(new Set(m.map(t => t.replace(/\\s+/g, '')))) : [];
+            const m = s.match(/(\d+(?:\.\d+)?)\s*(?:ml|l|g|kg)/g);
+            return m ? Array.from(new Set(m.map(t => t.replace(/\s+/g, '')))) : [];
         }
 
         function suggestMasterForCoupangCsvRow(row, cfg, idxData) {
@@ -9914,7 +9948,7 @@ HTML_TEMPLATE = """
                     rowUnits.forEach(u => {
                         if (hayUnits.includes(u)) score += 10;
                     });
-                    const words = String(owner.name || '').toLowerCase().split(/\\s+/).filter(w => w.length >= 2);
+                    const words = String(owner.name || '').toLowerCase().split(/\s+/).filter(w => w.length >= 2);
                     words.forEach(w => {
                         if (rowText.includes(w)) score += 2;
                     });
@@ -11478,14 +11512,14 @@ HTML_TEMPLATE = """
 
         function findMasterByCode(code) {
             if (!code || !allMasterData || !allMasterData.length) return null;
-            const norm = String(code).trim().toUpperCase().replace(/[-_\\s]/g, '');
+            const norm = String(code).trim().toUpperCase().replace(/[-_\s]/g, '');
             for (let i = 0; i < allMasterData.length; i++) {
                 const m = allMasterData[i];
-                const sc = String(m.seller_code || '').trim().toUpperCase().replace(/[-_\\s]/g, '');
+                const sc = String(m.seller_code || '').trim().toUpperCase().replace(/[-_\s]/g, '');
                 if (norm === sc || norm.startsWith(sc) || sc.startsWith(norm)) return m;
                 const codes = m.sales_codes || [];
                 for (let j = 0; j < codes.length; j++) {
-                    const cc = String(codes[j]).trim().toUpperCase().replace(/[-_\\s]/g, '');
+                    const cc = String(codes[j]).trim().toUpperCase().replace(/[-_\s]/g, '');
                     if (norm === cc || norm.startsWith(cc) || cc.startsWith(norm)) return m;
                 }
             }
@@ -11601,13 +11635,13 @@ HTML_TEMPLATE = """
         }
 
         function exportCsvBlob(filename, headers, rows) {
-            const csvContent = '\\uFEFF' + [
+            const csvContent = '\uFEFF' + [
                 headers.join(','),
                 ...rows.map(row => row.map(cell => {
                     const str = String(cell === null || cell === undefined ? '' : cell).replace(/"/g, '""');
-                    return /[",\\n]/.test(str) ? `"${str}"` : str;
+                    return /[",\n]/.test(str) ? `"${str}"` : str;
                 }).join(','))
-            ].join('\\r\\n');
+            ].join('\r\n');
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
@@ -11761,7 +11795,7 @@ HTML_TEMPLATE = """
         // -------------------------------------------------------------
 
         function cleanSettlementNote(note) {
-            return /raw_data[\\/]|\.xlsx:/i.test(String(note || ''))
+            return /raw_data[\/]|[.]xlsx:/i.test(String(note || ''))
                 ? '홈택스 전자세금계산서 대조 내역' : String(note || '');
         }
 
@@ -11815,128 +11849,464 @@ HTML_TEMPLATE = """
             const monthly = sp.monthly || {};
             const meta = d.metadata || {};
 
-            // 1. 기간 표시
+            // 1. 기간 표시 및 수집 상태 안내
             const periodEl = document.getElementById('salesReportPeriod');
+            const dKpi = sp.daily_kpi || d.daily_kpi;
+            const curMonth = monthly.month || meta.month || '-';
+            const curMonthlyItem = (sp.monthly_series || d.monthly_series || []).find(m => m.month === curMonth) || {};
+            const qtyUnit = monthly.quantity_unit || curMonthlyItem.quantity_unit || sp.quantity_unit || (dKpi && (dKpi.quantity_unit || (dKpi.channels && dKpi.channels[0] && dKpi.channels[0].quantity_unit))) || 'ea';
+            const isOptionQty = qtyUnit === 'option_sales';
+            const qtySuffix = isOptionQty ? '개 (옵션수량, 실물환산 전)' : '개';
+
             if (periodEl) {
-                const totalQtyVal = monthly.total_quantity || 875;
-                periodEl.innerHTML = `<span>전일: <strong class="font-mono text-slate-700 font-bold">${daily.date || '2026-11-14'}</strong> · 당월: <strong class="font-mono text-slate-700 font-bold">${monthly.month || '2026-11'}</strong> · 집계: <strong class="font-mono text-slate-700 font-bold">${fmtNum(totalQtyVal)}</strong>개</span>`;
+                const totalQtyVal = monthly.total_quantity !== undefined ? monthly.total_quantity : 0;
+                const repDate = (dKpi && dKpi.sales_date) || meta.report_date || daily.date || '-';
+
+                let coverageNote = '';
+                const collStatus = d.collection_status || sp.collection_status || {};
+                const srcStatus = sp.source_status || d.source_status || {};
+                const uncollected = [];
+
+                function formatChannelSourceStatus(chName, chKey) {
+                    const chSrc = srcStatus[chKey] || {};
+                    const collInfo = collStatus[chKey] || {};
+                    const parts = [];
+
+                    // 1) API 축: source_status[chKey].api_failure 계약 경로 우선 조회
+                    const apiObj = chSrc.api || collInfo;
+                    const apiStatus = apiObj?.status;
+                    const failInfo = chSrc.api_failure || apiObj?.api_failure || apiObj?.legacy_failure || collInfo.legacy_failure;
+
+                    if (apiStatus === 'success') {
+                        parts.push('API 정상 수집');
+                    } else if (apiStatus === 'failed') {
+                        const failCode = failInfo?.code || (failInfo?.http_status ? `HTTP ${failInfo.http_status}` : (failInfo?.failure_stage || failInfo?.stage || ''));
+                        parts.push(failCode ? `API 실패(${failCode})` : 'API 실패');
+                    } else if (apiStatus === 'partial') {
+                        if (apiObj.collected_days === 0 && (apiObj.available_file_days > 0)) {
+                            parts.push(`API 미검증(파일 ${apiObj.available_file_days}일)`);
+                        } else if (apiObj.collected_days > 0 || apiObj.available_file_days > 0) {
+                            parts.push(`API 일부(${apiObj.collected_days || 0}/${apiObj.expected_days || 15}일)`);
+                        } else if (chKey !== 'coupang') {
+                            parts.push('API 미수집');
+                        }
+                    } else if (apiStatus === 'not_collected') {
+                        parts.push('API 미수집');
+                    } else if (!apiStatus && failInfo?.code) {
+                        parts.push(`API 실패(${failInfo.code})`);
+                    }
+
+                    // 2) 브라우저 축: browser.status 기준 독립 렌더링
+                    if (chSrc.browser?.status === 'validated') {
+                        const p = chSrc.browser.period;
+                        const pStr = p ? `(${p.start.slice(5)}~${p.end.slice(5)})` : '';
+                        parts.push(`브라우저 확보${pStr}`);
+                    }
+
+                    // 3) 집계 반영 축: aggregation.status 기준 독립 렌더링
+                    const aggStatus = chSrc.aggregation?.status;
+                    if (aggStatus === 'included') {
+                        parts.push('집계 반영');
+                    } else if (aggStatus === 'included_provisional') {
+                        parts.push('판매분석 잠정반영(쿠폰전)');
+                    } else if (aggStatus === 'review_only') {
+                        parts.push('집계 검토중(매출 미반영)');
+                    } else if (aggStatus === 'excluded') {
+                        parts.push('집계 제외');
+                    } else if (chKey === 'coupang' && chSrc.browser?.status === 'validated' && !aggStatus) {
+                        parts.push('판매분석 잠정반영(쿠폰전)');
+                    }
+
+                    if (parts.length === 0) return '';
+                    return `${chName}: ${parts.join(' · ')}`;
+                }
+
+                // 3대 채널 개별 상태 산출 (독립적 세 축 렌더링)
+                const cpStatusText = formatChannelSourceStatus('쿠팡', 'coupang');
+                const ssStatusText = formatChannelSourceStatus('스마트스토어', 'smartstore');
+                const c24StatusText = formatChannelSourceStatus('카페24', 'cafe24');
+
+                if (cpStatusText) uncollected.push(cpStatusText);
+                if (ssStatusText) uncollected.push(ssStatusText);
+                if (c24StatusText) uncollected.push(c24StatusText);
+
+                // 간결한 요약 배지 생성 (모바일 및 20년 차 MD 첫인상 개선)
+                const conciseSummaryParts = [];
+                const cpAgg = srcStatus.coupang?.aggregation?.status;
+                const ssAgg = srcStatus.smartstore?.aggregation?.status;
+                const c24Agg = srcStatus.cafe24?.aggregation?.status;
+
+                if (cpAgg === 'included') conciseSummaryParts.push('쿠팡 반영');
+                else if (cpAgg === 'included_provisional') conciseSummaryParts.push('쿠팡 잠정반영');
+
+                if (ssAgg === 'included' && c24Agg === 'included') conciseSummaryParts.push('스토어/카페24 반영');
+                else if (ssAgg === 'review_only' && c24Agg === 'review_only') conciseSummaryParts.push('스토어/카페24 검토중');
+                else {
+                    if (ssAgg === 'included') conciseSummaryParts.push('스토어 반영');
+                    else if (ssAgg === 'review_only') conciseSummaryParts.push('스토어 미반영');
+                    if (c24Agg === 'included') conciseSummaryParts.push('카페24 반영');
+                    else if (c24Agg === 'review_only') conciseSummaryParts.push('카페24 미반영');
+                }
+                const conciseSummary = conciseSummaryParts.join(' · ');
+
+                if (uncollected.length > 0) {
+                    coverageNote = ` · <span class="text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px] whitespace-nowrap">${conciseSummary || '채널 검토중'}</span>
+                    <details class="inline-block align-middle ml-1">
+                        <summary class="cursor-pointer text-slate-500 hover:text-slate-800 underline text-[11px] font-normal select-none">
+                            상세 진단 ▾
+                        </summary>
+                        <div class="mt-1.5 p-2 bg-amber-50/95 rounded-lg border border-amber-200 text-[11px] text-amber-900 leading-relaxed font-normal shadow-2xs">
+                            ${uncollected.join(' · ')}
+                        </div>
+                    </details>`;
+                }
+                const provBadge = (sp.provisional || monthly.data_status === 'partial') ? '<span class="text-indigo-700 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 text-[11px] ml-1">잠정집계</span>' : '';
+
+                periodEl.innerHTML = `<span>기준일: <strong class="font-mono text-slate-700 font-bold">${repDate}</strong> · 귀속월: <strong class="font-mono text-slate-700 font-bold">${curMonth}</strong>${provBadge} · 총 판매수량: <strong class="font-mono text-slate-700 font-bold">${fmtNum(totalQtyVal)}</strong>${qtySuffix}${coverageNote}</span>`;
             }
 
             // 2. 상단 요약 바
             const mRevEl = document.getElementById('salesMonthlyRevenue');
-            if (mRevEl) mRevEl.innerText = fmtWon(monthly.revenue || 0);
+            if (mRevEl) mRevEl.innerText = fmtWon(monthly.revenue ?? 0);
 
+            // [P1 개선] daily_kpi 우선 사용 (기준일 as_of vs 대상 판매일 sales_date 분리, scope 반영)
             const dRevEl = document.getElementById('salesDailyRevenue');
-            if (dRevEl) dRevEl.innerText = fmtWon(daily.revenue || 0);
+            const dLabelEl = document.getElementById('salesDailyLabel');
+            const dailySeries = Array.isArray(sp.daily_series) ? sp.daily_series : [];
+            const repDateVal = (dKpi && dKpi.sales_date) || meta.report_date || daily.date || '';
+
+            if (dKpi && dKpi.sales_date) {
+                const sDate = dKpi.sales_date;
+                const scopeTag = dKpi.scope === 'selected_sources_only' ? '(선택원천)' : '';
+                if (dLabelEl) {
+                    dLabelEl.innerText = `${sDate.slice(5)} 실적${scopeTag}`;
+                }
+                if (dRevEl) {
+                    if (dKpi.status === 'confirmed_zero' || dKpi.revenue === 0) {
+                        dRevEl.innerText = '0원';
+                        dRevEl.className = 'font-mono text-slate-700 font-semibold';
+                    } else if (dKpi.revenue !== null && dKpi.revenue !== undefined) {
+                        const isNeg = dKpi.revenue < 0;
+                        dRevEl.innerText = (isNeg ? '-' : '') + fmtWon(Math.abs(dKpi.revenue));
+                        dRevEl.className = isNeg ? 'font-mono text-rose-600 font-bold' : 'font-mono text-slate-700 font-semibold';
+                    } else {
+                        dRevEl.innerText = '일별 미확인';
+                        dRevEl.className = 'text-xs text-slate-400 font-normal';
+                    }
+                }
+            } else {
+                const repDayRow = dailySeries.find(r => r.date === repDateVal);
+                if (dLabelEl) {
+                    dLabelEl.innerText = repDateVal ? `${repDateVal.slice(5)} 실적` : '일별 실적';
+                }
+                if (dRevEl) {
+                    if (repDayRow && repDayRow.revenue !== undefined && repDayRow.revenue !== null) {
+                        const isNeg = repDayRow.revenue < 0;
+                        dRevEl.innerText = (isNeg ? '-' : '') + fmtWon(Math.abs(repDayRow.revenue));
+                        dRevEl.className = isNeg ? 'font-mono text-rose-600 font-bold' : 'font-mono text-slate-700 font-semibold';
+                    } else {
+                        dRevEl.innerText = '일별 미확인';
+                        dRevEl.className = 'text-xs text-slate-400 font-normal';
+                    }
+                }
+            }
 
             const momBadge = document.getElementById('salesMomBadge');
             if (momBadge) {
                 const forecast = sp.monthly_forecast || d.monthly_forecast || {};
                 const projRev = Number(forecast.projected_revenue) || 0;
                 const series = d.monthly_series || (sp && sp.monthly_series) || [];
-                const octItem = series.find(s => s.month === '2026-10');
-                const octRev = octItem ? (Number(octItem.revenue) || 0) : 24281610;
+                const curMonthStr = monthly.month || meta.month || '';
 
-                if (projRev > 0 && octRev > 0) {
-                    const growthRate = ((projRev - octRev) / octRev) * 100;
+                const sortedSeries = [...series].sort((a, b) => String(a.month || '').localeCompare(String(b.month || '')));
+                const curIdx = sortedSeries.findIndex(s => s.month === curMonthStr);
+                const prevItem = curIdx > 0 ? sortedSeries[curIdx - 1] : (sortedSeries.length > 1 ? sortedSeries[sortedSeries.length - 2] : null);
+                const prevRev = prevItem ? (Number(prevItem.revenue) || 0) : 0;
+                const prevMonthLabel = prevItem ? `${parseInt(prevItem.month.split('-')[1] || '0', 10)}월` : '전월';
+                const isCurProvisional = sp.provisional || monthly.data_status === 'partial';
+
+                // 쿠팡 판매분석(쿠폰 전) vs 과거 정산(쿠폰 후) 단순 MoM 비교 금지
+                const isAnalysisBasis = monthly.basis === 'coupang_sales_analysis' || sp.basis === 'coupang_sales_analysis';
+                const isIncomparable = sp.mom_growth_pct === null || sp.mom_basis === 'incomparable' || isAnalysisBasis;
+
+                if (isIncomparable) {
+                    momBadge.innerText = '전월비 비교 불가 (판매분석 쿠폰 전 vs 정산 쿠폰 후)';
+                    momBadge.className = 'text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500';
+                } else if (sp.mom_growth_pct !== null && sp.mom_growth_pct !== undefined) {
+                    const sign = sp.mom_growth_pct >= 0 ? '+' : '';
+                    momBadge.innerText = `전월비 ${sign}${sp.mom_growth_pct.toFixed(1)}% (확정실적)`;
+                    momBadge.className = sp.mom_growth_pct >= 0
+                        ? 'text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700'
+                        : 'text-xs font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700';
+                } else if (projRev > 0 && prevRev > 0 && !isAnalysisBasis) {
+                    const growthRate = ((projRev - prevRev) / prevRev) * 100;
                     const sign = growthRate >= 0 ? '+' : '';
-                    momBadge.innerText = `${sign}${growthRate.toFixed(1)}% (월말예상)`;
+                    momBadge.innerText = `${sign}${growthRate.toFixed(1)}% (월말예상 vs ${prevMonthLabel}실적)`;
                     momBadge.className = growthRate >= 0
                         ? 'text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700'
                         : 'text-xs font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700';
                 } else {
-                    const mom = d.mom_growth_pct || sp.mom_growth_pct || '+12.4%';
-                    momBadge.innerText = '전월비 ' + mom;
+                    momBadge.innerText = '전월비 산출 불가 (비교기간 불일치)';
+                    momBadge.className = 'text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500';
                 }
             }
 
             const forecastRevEl = document.getElementById('salesForecastRevenue');
-            const currentDay = parseInt((meta.report_date || '2026-11-14').split('-')[2] || '14', 10) || 14;
-            const forecastSales = (d.monthly_forecast && d.monthly_forecast.forecast_sales) ||
-                                  (sp.monthly_forecast && sp.monthly_forecast.forecast_sales) ||
-                                  Math.round(((monthly.revenue || 17890260) / currentDay) * 30);
-            if (forecastRevEl) forecastRevEl.innerText = fmtWon(forecastSales);
-
-            // [MD 필수 개선] 총 판매수량 합계(875개) 및 판매 품목수(36종) 표기
-            const totalQtyEl = document.getElementById('salesTotalQty');
-            const totalQty = monthly.total_quantity || 875;
-            if (totalQtyEl) totalQtyEl.innerText = fmtNum(totalQty) + '개';
-
-            const skuCountBadge = document.getElementById('salesSkuCountBadge');
-            const activeSkuCount = monthly.active_sku_count || (sp.transactions ? new Set(sp.transactions.map(t => t.product_code)).size : 36) || 36;
-            if (skuCountBadge) skuCountBadge.innerText = `(판매 품목 ${activeSkuCount}종)`;
-
-            // 3. 상태 필터 칩 5개 금액 집계
-            const channels = monthly.channels || daily.channels || [];
-            let chRevs = {
-                'all': monthly.revenue || 0,
-                'coupang_growth': 0,
-                'smartstore': 0,
-                'cafe24': 0,
-                'b2b': 0
-            };
-            channels.forEach(c => {
-                if (c.channel === 'coupang_growth' || c.channel === 'coupang') chRevs.coupang_growth += (c.revenue || 0);
-                else if (c.channel === 'smartstore') chRevs.smartstore += (c.revenue || 0);
-                else if (c.channel === 'cafe24') chRevs.cafe24 += (c.revenue || 0);
-                else if (c.channel === 'b2b') chRevs.b2b += (c.revenue || 0);
-            });
-            if (chRevs.b2b === 0 && allMasterData) {
-                chRevs.b2b = allMasterData.filter(m => String(m.seller_code || '').startsWith('S')).reduce((s, m) => s + ((m.master_7d_total_out || 0) * 45000), 0);
+            const repDateStr = (dKpi && dKpi.sales_date) || meta.report_date || daily.date || '';
+            const currentDay = repDateStr ? parseInt(repDateStr.split('-')[2] || '1', 10) : 1;
+            let forecastSales = (d.monthly_forecast && d.monthly_forecast.forecast_sales) ??
+                                  (sp.monthly_forecast && sp.monthly_forecast.forecast_sales);
+            if (forecastSales === undefined && monthly.revenue > 0 && currentDay > 0) {
+                forecastSales = Math.round((monthly.revenue / currentDay) * 30);
+            }
+            if (forecastRevEl) {
+                forecastRevEl.innerText = forecastSales != null && forecastSales > 0 ? fmtWon(forecastSales) : (monthly.revenue ? fmtWon(monthly.revenue) : '0원');
             }
 
-            const setChipText = (id, val) => {
-                const el = document.getElementById(id);
-                if (el) el.innerText = val > 0 ? fmtWon(val) : '0원';
-            };
-            setChipText('salesChipAllRev', chRevs.all);
-            setChipText('salesChipCoupangGrowthRev', chRevs.coupang_growth);
-            setChipText('salesChipSmartstoreRev', chRevs.smartstore);
-            setChipText('salesChipCafe24Rev', chRevs.cafe24);
-            setChipText('salesChipB2bRev', chRevs.b2b);
+            // [MD 필수 개선] 총 판매수량 합계 (옵션수량 여부 명시) 및 판매 품목수 표기
+            const totalQtyEl = document.getElementById('salesTotalQty');
+            const totalQty = monthly.total_quantity !== undefined ? monthly.total_quantity : 0;
+            if (totalQtyEl) {
+                totalQtyEl.innerText = isOptionQty ? `${fmtNum(totalQty)}개 (옵션수량)` : `${fmtNum(totalQty)}개`;
+            }
 
-            // 4. 일별 매출 추이 그래프 (daily_trend)
+            const skuCountBadge = document.getElementById('salesSkuCountBadge');
+            const activeSkuCount = monthly.active_sku_count !== undefined 
+                ? monthly.active_sku_count 
+                : (sp.transactions ? new Set(sp.transactions.filter(t => (t.revenue || t.qty) > 0).map(t => t.product_code || t.code)).size : 0);
+            if (skuCountBadge) skuCountBadge.innerText = `(판매 품목 ${activeSkuCount}종)`;
+
+            // 3. 상태 필터 칩 5개 금액 집계 (음수, 0원, null, 검토중 분리)
+            const channels = monthly.channels || daily.channels || [];
+            let chRevs = {
+                'all': monthly.revenue !== undefined ? monthly.revenue : null,
+                'coupang_growth': null,
+                'smartstore': null,
+                'cafe24': null,
+                'b2b': null
+            };
+            channels.forEach(c => {
+                const chKey = c.channel;
+                const rVal = c.revenue !== undefined ? c.revenue : null;
+                if (chKey === 'coupang_growth' || chKey === 'coupang' || chKey === 'rocket_growth') {
+                    chRevs.coupang_growth = (chRevs.coupang_growth !== null ? chRevs.coupang_growth : 0) + (rVal || 0);
+                } else if (chKey === 'smartstore') {
+                    chRevs.smartstore = (chRevs.smartstore !== null ? chRevs.smartstore : 0) + (rVal || 0);
+                } else if (chKey === 'cafe24') {
+                    chRevs.cafe24 = (chRevs.cafe24 !== null ? chRevs.cafe24 : 0) + (rVal || 0);
+                } else if (chKey === 'b2b') {
+                    chRevs.b2b = (chRevs.b2b !== null ? chRevs.b2b : 0) + (rVal || 0);
+                }
+            });
+
+            // 채널칩 금액/상태 서식화 함수 (음수, 정상 0, 미산출, 검토중 엄격 구분)
+            const formatChannelChip = (val, srcInfo, defaultNullLabel = '미수집') => {
+                if (srcInfo?.aggregation?.status === 'review_only') {
+                    return '검토 중 (미반영)';
+                }
+                const apiStatus = srcInfo?.api?.status;
+                const failInfo = srcInfo?.api_failure || srcInfo?.api?.api_failure || srcInfo?.api?.legacy_failure;
+                if (apiStatus === 'failed' || (!apiStatus && failInfo?.code)) {
+                    const failCode = failInfo?.code || (failInfo?.http_status ? `HTTP ${failInfo.http_status}` : (failInfo?.failure_stage || failInfo?.stage || ''));
+                    return failCode ? `수집 실패 (${failCode})` : '수집 실패';
+                }
+                if (srcInfo?.aggregation?.status === 'not_included') {
+                    return '미반영';
+                }
+                if (srcInfo?.aggregation?.status === 'excluded') {
+                    return '집계 제외';
+                }
+                if (apiStatus === 'not_collected') {
+                    return '미수집';
+                }
+                if (apiStatus === 'success_empty') {
+                    return '0원 (주문 0건)';
+                }
+                if (val === null || val === undefined) {
+                    return defaultNullLabel;
+                }
+                if (val < 0) {
+                    return `-${fmtWon(Math.abs(val))}`;
+                }
+                if (val === 0) {
+                    return '0원';
+                }
+                return fmtWon(val);
+            };
+
+            const srcStatus = sp.source_status || d.source_status || {};
+            const collStatus = d.collection_status || sp.collection_status || {};
+
+            // 전체 칩
+            const allChipEl = document.getElementById('salesChipAllRev');
+            if (allChipEl) {
+                if (chRevs.all === null) allChipEl.innerText = '미산출';
+                else if (chRevs.all < 0) allChipEl.innerText = `-${fmtWon(Math.abs(chRevs.all))}`;
+                else allChipEl.innerText = fmtWon(chRevs.all);
+            }
+
+            // 쿠팡 칩
+            const cpChipEl = document.getElementById('salesChipCoupangGrowthRev');
+            if (cpChipEl) {
+                const cpSrc = { api: collStatus.coupang, ...srcStatus.coupang };
+                cpChipEl.innerText = formatChannelChip(chRevs.coupang_growth, cpSrc, '미산출');
+            }
+
+            // 스마트스토어 칩
+            const ssChipEl = document.getElementById('salesChipSmartstoreRev');
+            if (ssChipEl) {
+                const ssSrc = { api: collStatus.smartstore, ...srcStatus.smartstore };
+                ssChipEl.innerText = formatChannelChip(chRevs.smartstore, ssSrc, '미수집');
+            }
+
+            // 카페24 칩
+            const c24ChipEl = document.getElementById('salesChipCafe24Rev');
+            if (c24ChipEl) {
+                const c24Src = { api: collStatus.cafe24, ...srcStatus.cafe24 };
+                if (c24Src.aggregation?.status === 'included') {
+                    c24ChipEl.innerText = formatChannelChip(chRevs.cafe24, c24Src, '0원');
+                } else if (c24Src.aggregation?.status === 'review_only') {
+                    c24ChipEl.innerText = '검토 중 (미반영)';
+                } else if (c24Src.api?.status === 'partial' && c24Src.api?.collected_days === 0 && (c24Src.api?.available_file_days || 0) > 0) {
+                    c24ChipEl.innerText = `미검증 (파일 ${c24Src.api.available_file_days}일)`;
+                } else {
+                    c24ChipEl.innerText = formatChannelChip(chRevs.cafe24, c24Src, '미수집');
+                }
+            }
+
+            // B2B 칩
+            const b2bChipEl = document.getElementById('salesChipB2bRev');
+            if (b2bChipEl) {
+                if (chRevs.b2b === null) b2bChipEl.innerText = '0원';
+                else if (chRevs.b2b < 0) b2bChipEl.innerText = `-${fmtWon(Math.abs(chRevs.b2b))}`;
+                else b2bChipEl.innerText = fmtWon(chRevs.b2b);
+            }
+
+            // 4. 일별 매출 추이 그래프 (daily_series)
             const trendWrap = document.getElementById('salesTrendChartContainer');
-            const trendList = d.daily_trend || sp.daily_trend || sp.daily_history || [];
+            let rawTrend = Array.isArray(sp.daily_series) ? sp.daily_series : [];
+            rawTrend = [...rawTrend].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+
+            const trendList = rawTrend.map(t => {
+                if (currentSalesChannelFilter === 'all') {
+                    return {
+                        ...t,
+                        revenue: t.revenue !== undefined ? t.revenue : null,
+                        isConfirmed: t.revenue !== undefined && t.revenue !== null
+                    };
+                }
+                const selected = (t.channels || []).find(c => c.channel === currentSalesChannelFilter ||
+                    (currentSalesChannelFilter === 'coupang_growth' && (c.channel === 'coupang' || c.channel === 'rocket_growth')));
+                return {
+                    ...t,
+                    revenue: selected ? selected.revenue : null,
+                    isConfirmed: !!selected
+                };
+            });
+
+            // 필터 채널별 그래프 바 색상 지정 (전체는 중립 슬레이트)
+            let chartBarColor = 'bg-slate-700';
+            if (currentSalesChannelFilter === 'smartstore') chartBarColor = 'bg-emerald-500';
+            else if (currentSalesChannelFilter === 'cafe24') chartBarColor = 'bg-amber-500';
+            else if (currentSalesChannelFilter === 'b2b') chartBarColor = 'bg-teal-500';
+            else if (currentSalesChannelFilter === 'coupang_growth') chartBarColor = 'bg-indigo-500';
+
             const legendWrap = document.getElementById('salesTrendLegend');
             if (legendWrap) {
                 legendWrap.innerHTML = `
+                    <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-slate-700"></span>전체(합산)</span>
                     <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-indigo-500"></span>로켓그로스</span>
                     <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>스마트스토어</span>
                     <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-amber-500"></span>카페24</span>
+                    <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-teal-500"></span>B2B</span>
                 `;
+            }
+
+            // 기준 배지 업데이트 (판매분석 잠정 / 결제일 / 정산인식일)
+            const basisBadge = document.getElementById('salesTrendBasisBadge');
+            if (basisBadge) {
+                const basis = sp.daily_basis || sp.basis || (rawTrend[0] && rawTrend[0].basis) || '';
+                if (basis.includes('settlement') || basis.includes('정산')) {
+                    basisBadge.innerText = '정산인식일 기준';
+                    basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300';
+                } else if (basis.includes('payment') || basis.includes('결제')) {
+                    basisBadge.innerText = '결제일 기준 (잠정)';
+                    basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200';
+                } else if (basis.includes('analysis') || basis.includes('판매분석') || sp.provisional) {
+                    basisBadge.innerText = '판매분석 기준 (잠정)';
+                    basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200';
+                } else {
+                    basisBadge.innerText = '일별 실적 (잠정)';
+                    basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200';
+                }
+            }
+
+            const subTitleEl = document.getElementById('salesTrendSubtitle');
+            if (subTitleEl) {
+                if (trendList.length > 0) {
+                    const startD = trendList[0].date || '';
+                    const endD = trendList[trendList.length - 1].date || '';
+                    subTitleEl.innerText = `${startD} ~ ${endD} (${trendList.length}일간, 당월 누적과 구분)`;
+                } else {
+                    subTitleEl.innerText = '최근 일자별 실적';
+                }
             }
 
             if (trendWrap) {
                 if (trendList.length === 0) {
-                    trendWrap.innerHTML = '<div class="text-center text-xs text-slate-400 py-10 w-full">일별 매출 추이 데이터가 준비 중입니다.</div>';
+                    trendWrap.innerHTML = '<div class="text-center text-xs text-slate-400 py-10 w-full flex flex-col items-center justify-center gap-1.5"><i class="fa-regular fa-chart-bar text-slate-300 text-lg"></i><span>일별 시계열 데이터가 없습니다. (누적 스냅샷은 일별 그래프에서 제외)</span></div>';
                 } else {
-                    const maxRev = Math.max(...trendList.map(t => t.revenue || 0), 1);
-                    const barsHtml = trendList.slice(-14).map(t => {
-                        let barRev = t.revenue || 0;
-                        if (currentSalesChannelFilter !== 'all') {
-                            const foundCh = (t.channels || []).find(c => c.channel === currentSalesChannelFilter);
-                            barRev = foundCh ? (foundCh.revenue || 0) : 0;
-                        }
-                        const heightPct = Math.max(10, Math.round((barRev / maxRev) * 100));
+                    // 양수 및 음수 최댓값 산출
+                    const maxPosRev = Math.max(...trendList.filter(t => t.revenue != null && t.revenue > 0).map(t => t.revenue), 1);
+                    const maxNegRev = Math.max(...trendList.filter(t => t.revenue != null && t.revenue < 0).map(t => Math.abs(t.revenue)), 1);
+
+                    const barsHtml = trendList.map(t => {
+                        const rev = t.revenue;
+                        const hasData = rev !== null && rev !== undefined;
+                        const isPos = hasData && rev > 0;
+                        const isNeg = hasData && rev < 0;
+                        const isZero = hasData && rev === 0;
+
+                        const posHeightPct = isPos ? Math.min(100, Math.max(10, Math.round((rev / maxPosRev) * 100))) : 0;
+                        const negHeightPct = isNeg ? Math.min(100, Math.max(15, Math.round((Math.abs(rev) / maxNegRev) * 100))) : 0;
                         const dateShort = (t.date || '').slice(5);
 
+                        let topLabel = '<span class="text-[10px] font-mono text-slate-300">-</span>';
+                        if (isPos) {
+                            topLabel = `<span class="text-[11px] font-mono font-bold text-slate-700 truncate">${rev >= 10000 ? Math.round(rev / 10000) + '만' : fmtNum(rev)}</span>`;
+                        } else if (isZero) {
+                            topLabel = '<span class="text-[10px] font-mono text-slate-400">0</span>';
+                        } else if (isNeg) {
+                            topLabel = '<span class="text-[10px] font-mono text-transparent">.</span>';
+                        }
+
+                        let tooltipText = `${t.date}: ${hasData ? fmtWon(rev) : '미수집 / 미확인'}`;
+
                         return `
-                            <div class="flex-1 flex flex-col items-center gap-1 group relative">
+                            <div class="flex-1 flex flex-col items-center group relative min-w-[20px] max-w-[36px]">
                                 <div class="opacity-0 group-hover:opacity-100 transition absolute -top-8 px-2 py-1 bg-slate-900 text-white rounded text-[10px] font-mono whitespace-nowrap z-20 pointer-events-none shadow-md">
-                                    ${t.date}: ${fmtWon(barRev)}
+                                    ${tooltipText}
                                 </div>
-                                <span class="text-[11px] font-mono font-bold text-slate-700 truncate">${barRev > 0 ? (barRev >= 10000 ? Math.round(barRev / 10000) + '만' : fmtNum(barRev)) : ''}</span>
-                                <div class="w-full max-w-[36px] bg-slate-100 rounded-t-md overflow-hidden flex flex-col justify-end transition-all group-hover:brightness-95" style="height: ${heightPct}px; min-height: 10px;">
-                                    <div class="bg-indigo-500 w-full h-full"></div>
+                                ${topLabel}
+                                <!-- 양수 막대 영역 (기준선 위) -->
+                                <div class="w-full h-24 flex items-end justify-center">
+                                    ${isPos ? `<div class="${chartBarColor} w-full rounded-t-sm transition-all group-hover:brightness-95" style="height: ${posHeightPct}%;"></div>` : ''}
+                                    ${!hasData ? `<div class="w-full h-full border-b border-dashed border-slate-200"></div>` : ''}
                                 </div>
+                                <!-- 기준선 (0선) -->
+                                <div class="w-full border-t border-slate-300"></div>
+                                <!-- 음수 막대 영역 (기준선 아래) -->
+                                <div class="w-full h-7 flex items-start justify-center">
+                                    ${isNeg ? `<div class="bg-rose-500 w-full rounded-b-sm transition-all group-hover:brightness-95" style="height: ${negHeightPct}%;"></div>` : ''}
+                                </div>
+                                ${isNeg ? `<span class="text-[10px] font-mono font-bold text-rose-600 truncate">-${Math.abs(rev) >= 10000 ? Math.round(Math.abs(rev) / 10000) + '만' : fmtNum(Math.abs(rev))}</span>` : ''}
                                 <span class="text-[10px] font-mono text-slate-500 whitespace-nowrap">${dateShort}</span>
                             </div>
                         `;
                     }).join('');
 
                     trendWrap.innerHTML = `
-                        <div class="flex items-end justify-between gap-1.5 w-full h-full pt-4 px-1">
+                        <div class="flex items-end justify-between gap-1 w-full h-full pt-1 px-1 overflow-x-auto">
                             ${barsHtml}
                         </div>
                     `;
@@ -11952,23 +12322,10 @@ HTML_TEMPLATE = """
             } else if (rawTop && typeof rawTop === 'object') {
                 topProducts = rawTop.by_revenue || rawTop.by_quantity || [];
             }
-            if ((!topProducts || topProducts.length === 0) && allMasterData && allMasterData.length > 0) {
-                topProducts = allMasterData
-                    .filter(m => !String(m.seller_code || '').startsWith('S') && (m.master_7d_total_out || 0) > 0)
-                    .sort((a, b) => (b.master_7d_total_out || 0) - (a.master_7d_total_out || 0))
-                    .slice(0, 10)
-                    .map((m, idx) => ({
-                        rank: idx + 1,
-                        name: m.seller_name || m.name,
-                        code: m.seller_code,
-                        qty: m.master_7d_total_out,
-                        revenue: (m.master_7d_total_out || 1) * 32000
-                    }));
-            }
 
             if (topWrap) {
-                if (topProducts.length === 0) {
-                    topWrap.innerHTML = '<div class="text-center text-xs text-slate-400 py-8">베스트셀러 데이터가 없습니다.</div>';
+                if (!topProducts || topProducts.length === 0) {
+                    topWrap.innerHTML = '<div class="text-center text-xs text-slate-400 py-8">베스트셀러 집계 데이터가 없습니다.</div>';
                 } else {
                     const maxTopRev = Math.max(...topProducts.map(p => (p.revenue || p.quantity || p.qty || 1)), 1);
                     const rankBadges = [
@@ -12067,50 +12424,51 @@ HTML_TEMPLATE = """
                             rev: 0,
                             cost: 0,
                             fees: 0,
-                            profit: 0
+                            profit: 0,
+                            hasCost: false,
+                            hasFees: false,
+                            hasProfit: false
                         };
                     }
                     prodMap[key].qty += (Number(t.quantity) || Number(t.qty) || 0);
                     prodMap[key].rev += (Number(t.revenue) || Number(t.rev) || 0);
-                    prodMap[key].cost += (Number(t.cost) || Number(t.matched_cost) || 0);
-                    prodMap[key].fees += (Number(t.fees) || 0);
-                    prodMap[key].profit += (t.profit !== undefined ? Number(t.profit) : (t.contribution_profit !== undefined ? Number(t.contribution_profit) : 0));
+                    if (t.cost !== null && t.cost !== undefined) {
+                        prodMap[key].cost += Number(t.cost);
+                        prodMap[key].hasCost = true;
+                    } else if (t.matched_cost !== null && t.matched_cost !== undefined) {
+                        prodMap[key].cost += Number(t.matched_cost);
+                        prodMap[key].hasCost = true;
+                    }
+                    if (t.fees !== null && t.fees !== undefined) {
+                        prodMap[key].fees += Number(t.fees);
+                        prodMap[key].hasFees = true;
+                    }
+                    if (t.profit !== null && t.profit !== undefined) {
+                        prodMap[key].profit += Number(t.profit);
+                        prodMap[key].hasProfit = true;
+                    } else if (t.contribution_profit !== null && t.contribution_profit !== undefined) {
+                        prodMap[key].profit += Number(t.contribution_profit);
+                        prodMap[key].hasProfit = true;
+                    }
                 });
-                detailRows = Object.values(prodMap);
-            } else if (allMasterData && allMasterData.length > 0) {
-                detailRows = allMasterData.filter(m => !String(m.seller_code || '').startsWith('S')).map((m) => {
-                    const qty = m.master_7d_total_out || 0;
-                    const rev = qty * 32000;
-                    const cost = qty * (m.unit_cost || 0);
-                    const fees = Math.round(rev * 0.116);
+                detailRows = Object.values(prodMap).map(r => {
                     return {
-                        code: m.seller_code || '-',
-                        name: m.name || m.seller_name || '-',
-                        channel: '로켓그로스',
-                        rawChannel: 'coupang_growth',
-                        qty,
-                        rev,
-                        cost,
-                        fees,
-                        profit: rev - cost - fees
+                        ...r,
+                        cost: r.hasCost ? r.cost : null,
+                        fees: r.hasFees ? r.fees : null,
+                        profit: (r.hasCost && r.hasFees && r.hasProfit) ? r.profit : null
                     };
                 });
             }
 
-            // 마스터 원가 및 ASP 보정
+            // 마스터 및 ASP 연결 (실물환산 규격 미확정 시 원가/이익 임의 추정 금지)
             detailRows.forEach(r => {
                 const m = findMasterByCode(r.code);
                 if (m) {
                     r.master = m;
-                    if (!r.cost && m.unit_cost) {
-                        r.cost = Math.round(r.qty * m.unit_cost);
-                    }
                 }
                 if (!r.asp && r.qty > 0) {
                     r.asp = Math.round(r.rev / r.qty);
-                }
-                if (r.profit === undefined || (r.profit === 0 && (r.rev > 0 || r.cost > 0))) {
-                    r.profit = r.rev - (r.cost || 0) - (r.fees || 0);
                 }
             });
 
@@ -12163,17 +12521,17 @@ HTML_TEMPLATE = """
                         const subName = (m && m.name !== r.name) ? `<div class="text-[10px] text-slate-400 truncate max-w-xs" title="${r.name}">${r.name}</div>` : '';
                         
                         const asp = r.qty > 0 ? Math.round(r.rev / r.qty) : (r.asp || 0);
-                        const cost = r.cost || 0;
-                        const fees = r.fees || 0;
-                        const profit = r.profit !== undefined ? r.profit : (r.rev - cost - fees);
-                        const marginPctNum = r.rev > 0 ? ((profit / r.rev) * 100) : 0;
-                        const marginPctStr = marginPctNum.toFixed(1) + '%';
+                        const cost = r.cost !== undefined && r.cost !== null ? r.cost : null;
+                        const fees = r.fees !== undefined && r.fees !== null ? r.fees : null;
+                        const profit = r.profit !== undefined && r.profit !== null ? r.profit : null;
+                        const marginPctNum = (profit !== null && r.rev > 0) ? ((profit / r.rev) * 100) : null;
+                        const marginPctStr = marginPctNum !== null ? marginPctNum.toFixed(1) + '%' : '-';
 
                         // [MD 실무 기준 색상] 마이너스 적자: 빨간색, 10% 미만: 주황/경고색, 10% 이상: 초록색
                         let marginBadgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                        if (profit < 0 || marginPctNum < 0) {
+                        if (profit !== null && (profit < 0 || marginPctNum < 0)) {
                             marginBadgeClass = 'bg-rose-50 text-rose-700 border-rose-200 font-bold';
-                        } else if (marginPctNum < 10) {
+                        } else if (marginPctNum !== null && marginPctNum < 10) {
                             marginBadgeClass = 'bg-amber-50 text-amber-800 border-amber-200 font-bold';
                         }
 
@@ -12196,6 +12554,32 @@ HTML_TEMPLATE = """
                             stockHtml = `<div class="flex items-center justify-end gap-1.5">${stockText}${runwayText}${urgentBadge}</div>`;
                         }
 
+                        let profitCell = '';
+                        if (profit === null) {
+                            profitCell = `<span class="text-[11px] text-slate-400">미산출</span>`;
+                        } else if (profit < 0) {
+                            profitCell = `
+                                <div class="flex flex-col items-end gap-0.5">
+                                    <span class="font-mono font-bold text-rose-600">-${fmtWon(Math.abs(profit))}</span>
+                                    <span class="px-1.5 py-0.2 rounded text-[10px] border ${marginBadgeClass}">${marginPctStr}</span>
+                                </div>
+                            `;
+                        } else if (profit === 0) {
+                            profitCell = `
+                                <div class="flex flex-col items-end gap-0.5">
+                                    <span class="font-mono font-bold text-slate-600">0원</span>
+                                    <span class="px-1.5 py-0.2 rounded text-[10px] border bg-slate-100 text-slate-600 border-slate-200">0.0%</span>
+                                </div>
+                            `;
+                        } else {
+                            profitCell = `
+                                <div class="flex flex-col items-end gap-0.5">
+                                    <span class="font-mono font-bold text-slate-900">${fmtWon(profit)}</span>
+                                    <span class="px-1.5 py-0.2 rounded text-[10px] border ${marginBadgeClass}">+${marginPctStr}</span>
+                                </div>
+                            `;
+                        }
+
                         return `
                             <tr class="hover:bg-slate-50/80 transition ${r.isZeroSale ? 'opacity-60 bg-slate-50/30' : ''}">
                                 <td class="py-2.5 px-3 text-center font-mono font-bold text-slate-500">${idx + 1}</td>
@@ -12208,14 +12592,9 @@ HTML_TEMPLATE = """
                                 <td class="py-2.5 px-2.5 text-center font-mono font-bold text-slate-900 whitespace-nowrap">${fmtNum(r.qty)}</td>
                                 <td class="py-2.5 px-2.5 text-right font-mono font-bold text-indigo-600 whitespace-nowrap">${fmtWon(r.rev)}</td>
                                 <td class="py-2.5 px-2.5 text-right font-mono text-slate-700 whitespace-nowrap">${fmtWon(asp)}</td>
-                                <td class="py-2.5 px-2.5 text-right font-mono text-slate-600 whitespace-nowrap">${fmtWon(cost)}</td>
-                                <td class="py-2.5 px-2.5 text-right font-mono text-slate-600 whitespace-nowrap">${fmtWon(fees)}</td>
-                                <td class="py-2.5 px-3 text-right whitespace-nowrap">
-                                    <div class="flex flex-col items-end gap-0.5">
-                                        <span class="font-mono font-bold ${profit < 0 ? 'text-rose-600' : 'text-slate-900'}">${fmtWon(profit)}</span>
-                                        <span class="px-1.5 py-0.2 rounded text-[10px] border ${marginBadgeClass}">${profit >= 0 ? '+' : ''}${marginPctStr}</span>
-                                    </div>
-                                </td>
+                                <td class="py-2.5 px-2.5 text-right font-mono text-slate-600 whitespace-nowrap">${cost !== null ? fmtWon(cost) : '<span class="text-slate-400">-</span>'}</td>
+                                <td class="py-2.5 px-2.5 text-right font-mono text-slate-600 whitespace-nowrap">${fees !== null ? fmtWon(fees) : '<span class="text-slate-400">-</span>'}</td>
+                                <td class="py-2.5 px-3 text-right whitespace-nowrap">${profitCell}</td>
                                 <td class="py-2.5 px-3 text-right whitespace-nowrap">${stockHtml}</td>
                             </tr>
                         `;
@@ -12223,15 +12602,28 @@ HTML_TEMPLATE = """
                 }
             }
 
-            // 테이블 요약 footer (합계 행)
+            // 테이블 요약 footer (합계 행 - 미산출, 0원, 음수 엄격 분리)
             if (dtTfoot) {
                 const sumQty = detailRows.reduce((s, r) => s + (r.qty || 0), 0);
                 const sumRev = detailRows.reduce((s, r) => s + (r.rev || 0), 0);
-                const sumCost = detailRows.reduce((s, r) => s + (r.cost || 0), 0);
-                const sumFees = detailRows.reduce((s, r) => s + (r.fees || 0), 0);
-                const sumProfit = detailRows.reduce((s, r) => s + (r.profit !== undefined ? r.profit : (r.rev - (r.cost || 0) - (r.fees || 0))), 0);
-                const avgMarginPct = sumRev > 0 ? ((sumProfit / sumRev) * 100).toFixed(1) : '0.0';
+                const activeRows = detailRows.filter(r => (r.rev || 0) > 0 || (r.qty || 0) > 0);
+                const hasNullCostInActive = activeRows.some(r => r.cost === null || r.cost === undefined);
+                const hasNullFeesInActive = activeRows.some(r => r.fees === null || r.fees === undefined);
+                const hasNullProfitInActive = activeRows.some(r => r.profit === null || r.profit === undefined);
+
+                const sumCost = hasNullCostInActive ? null : activeRows.reduce((s, r) => s + r.cost, 0);
+                const sumFees = hasNullFeesInActive ? null : activeRows.reduce((s, r) => s + r.fees, 0);
+                const sumProfit = hasNullProfitInActive ? null : activeRows.reduce((s, r) => s + r.profit, 0);
+                const avgMarginPct = (sumRev > 0 && sumProfit !== null) ? ((sumProfit / sumRev) * 100).toFixed(1) : '-';
                 const avgAsp = sumQty > 0 ? Math.round(sumRev / sumQty) : 0;
+
+                const costCellText = sumCost !== null ? fmtWon(sumCost) : '<span class="text-slate-400">미산출</span>';
+                const feesCellText = sumFees !== null ? fmtWon(sumFees) : '<span class="text-slate-400">미산출</span>';
+                let profitCellHtml = '<span class="text-slate-400">미산출</span>';
+                if (sumProfit !== null) {
+                    const profColor = sumProfit < 0 ? 'text-rose-600' : 'text-emerald-700';
+                    profitCellHtml = `<span class="${profColor}">${fmtWon(sumProfit)} ${avgMarginPct !== '-' ? `(${avgMarginPct}%)` : ''}</span>`;
+                }
 
                 dtTfoot.innerHTML = `
                     <tr class="bg-slate-50/90 font-bold border-t-2 border-slate-200">
@@ -12239,10 +12631,10 @@ HTML_TEMPLATE = """
                         <td class="py-3 px-2.5 text-center font-mono font-bold text-slate-900">${fmtNum(sumQty)}</td>
                         <td class="py-3 px-2.5 text-right font-mono font-bold text-indigo-700">${fmtWon(sumRev)}</td>
                         <td class="py-3 px-2.5 text-right font-mono text-slate-700">${fmtWon(avgAsp)}</td>
-                        <td class="py-3 px-2.5 text-right font-mono text-slate-700">${fmtWon(sumCost)}</td>
-                        <td class="py-3 px-2.5 text-right font-mono text-slate-700">${fmtWon(sumFees)}</td>
-                        <td class="py-3 px-3 text-right font-mono font-bold ${sumProfit < 0 ? 'text-rose-600' : 'text-emerald-700'}">
-                            ${fmtWon(sumProfit)} (${avgMarginPct}%)
+                        <td class="py-3 px-2.5 text-right font-mono text-slate-700">${costCellText}</td>
+                        <td class="py-3 px-2.5 text-right font-mono text-slate-700">${feesCellText}</td>
+                        <td class="py-3 px-3 text-right font-mono font-bold">
+                            ${profitCellHtml}
                         </td>
                         <td class="py-3 px-3 text-right text-slate-500 font-normal text-[11px]">-</td>
                     </tr>
@@ -12270,22 +12662,72 @@ HTML_TEMPLATE = """
             const unclassCount = unclass.count || 0;
             const meta = d.metadata || {};
 
-            // 1. 기간 표시
-            const periodEl = document.getElementById('cashflowReportPeriod');
-            if (periodEl) {
-                periodEl.innerHTML = `<span>기준일: <strong class="font-mono text-slate-700 font-bold">${meta.report_date || '2026-11-14'}</strong> · 거래: ${meta.bank_transaction_start || '2026-09-01'} ~ ${meta.bank_transaction_end || '2026-11-14'}</span>`;
+            // 1. 가용 월 목록 동적 산출 및 월 선택 스트립 렌더링
+            const allTx = (cf && Array.isArray(cf.transactions) && cf.transactions.length > 0)
+                ? cf.transactions
+                : (cf.recent_transactions || []);
+
+            const txMonths = new Set();
+            allTx.forEach(t => {
+                const dt = String(t.date || t.datetime || '');
+                if (dt.length >= 7) txMonths.add(dt.slice(0, 7));
+            });
+            const pnlSeries = d.monthly_series || (d.sales_profit && d.sales_profit.monthly_series) || [];
+            pnlSeries.forEach(m => { if (m.month) txMonths.add(m.month); });
+            if (meta.month) txMonths.add(meta.month);
+            if (meta.report_date) txMonths.add(meta.report_date.slice(0, 7));
+
+            const availMonths = Array.from(txMonths).filter(Boolean).sort();
+            if (!availMonths.includes(currentCashflowMonth) && currentCashflowMonth !== 'all') {
+                currentCashflowMonth = availMonths.length > 0 ? availMonths[availMonths.length - 1] : 'all';
             }
 
-            // 2. 상단 정산 알람 배너 (settlements)
+            const cfStrip = document.getElementById('cfMonthSelectorStrip');
+            if (cfStrip) {
+                let btnsHtml = `<span class="text-slate-500 font-semibold shrink-0 text-[11px]"><i class="fa-regular fa-calendar-check mr-1 text-slate-400"></i>정산 월 선택:</span>`;
+                const isAllActive = currentCashflowMonth === 'all';
+                const allRangeText = availMonths.length > 0 ? `전체 (${availMonths[0].slice(5)}~${availMonths[availMonths.length - 1].slice(5)}월)` : '전체 (누적)';
+                btnsHtml += `<button type="button" onclick="setCashflowMonth('all')" data-m="all" class="cf-month-btn px-2.5 py-1 rounded-lg border text-xs ${isAllActive ? 'font-bold bg-slate-900 text-white border-slate-900 shadow-xs' : 'font-semibold bg-white text-slate-700 border-slate-200 hover:bg-slate-50'} cursor-pointer">${allRangeText}</button>`;
+                
+                availMonths.forEach((m, idx) => {
+                    const isActive = currentCashflowMonth === m;
+                    const isLatest = idx === availMonths.length - 1;
+                    const y = m.split('-')[0];
+                    const mo = parseInt(m.split('-')[1] || '0', 10);
+                    const mLabel = `${y}년 ${mo}월${isLatest ? ' (당월)' : ''}`;
+                    btnsHtml += `<button type="button" onclick="setCashflowMonth('${m}')" data-m="${m}" class="cf-month-btn px-2.5 py-1 rounded-lg border text-xs ${isActive ? 'font-bold bg-slate-900 text-white border-slate-900 shadow-xs' : 'font-semibold bg-white text-slate-700 border-slate-200 hover:bg-slate-50'} cursor-pointer">${mLabel}</button>`;
+                });
+                cfStrip.innerHTML = btnsHtml;
+            }
+
+            // 기간 표시
+            const periodEl = document.getElementById('cashflowReportPeriod');
+            if (periodEl) {
+                const repDate = meta.report_date || meta.as_of || (availMonths.length > 0 ? availMonths[availMonths.length - 1] : '-');
+                const allDates = allTx.map(t => String(t.date || t.datetime || '').slice(0, 10)).filter(Boolean).sort();
+                const txStart = meta.bank_transaction_start || (allDates.length > 0 ? allDates[0] : '-');
+                const txEnd = meta.bank_transaction_end || (allDates.length > 0 ? allDates[allDates.length - 1] : repDate);
+                periodEl.innerHTML = `<span>기준일: <strong class="font-mono text-slate-700 font-bold">${repDate}</strong> · 은행 거래 집계: ${txStart} ~ ${txEnd}</span>`;
+            }
+
+            // 2. 상단 정산 알람 배너 (settlements) - 선택 월 동기화
             const stListContainer = document.getElementById('settlementListContainer');
             const stBadge = document.getElementById('settlementCountBadge');
             const settlements = d.settlements || {};
-            const items = settlements.items || [];
+            let items = settlements.items || [];
+            if (currentCashflowMonth !== 'all') {
+                items = items.filter(it => {
+                    const noteStr = String(it.note || it.memo || '');
+                    if (noteStr.includes(currentCashflowMonth)) return true;
+                    if (it.issue_date && String(it.issue_date).startsWith(currentCashflowMonth)) return true;
+                    return false;
+                });
+            }
             if (stBadge) stBadge.innerText = items.length + '건';
 
             if (stListContainer) {
                 if (items.length === 0) {
-                    stListContainer.innerHTML = '<div class="col-span-full py-6 text-center text-xs text-slate-400 bg-slate-50/70 rounded-xl">등록된 정산 알람 내역이 없습니다.</div>';
+                    stListContainer.innerHTML = '<div class="col-span-full py-6 text-center text-xs text-slate-400 bg-slate-50/70 rounded-xl">해당 월에 등록된 정산 알람 내역이 없습니다.</div>';
                 } else {
                     stListContainer.innerHTML = items.map(it => {
                         const isCompleted = String(it.status || '').includes('완료') || (it.outstanding_amount === 0 && (it.paid_amount > 0 || it.net_amount > 0));
@@ -12365,23 +12807,20 @@ HTML_TEMPLATE = """
             }
 
             // 3. 정산 월 선택에 따른 거래내역 및 상단 요약 바 동기화
-            const allTx = (cf && Array.isArray(cf.transactions) && cf.transactions.length > 0)
-                ? cf.transactions
-                : (cf.recent_transactions || []);
-
             let monthTx = allTx;
             if (currentCashflowMonth !== 'all') {
                 monthTx = allTx.filter(t => String(t.date || t.datetime || '').startsWith(currentCashflowMonth));
             }
 
-            const monthLabels = {
-                'all': '9~11월 누적 식품 입금',
-                '2026-09': '9월 식품 입금 합계',
-                '2026-10': '10월 식품 입금 합계',
-                '2026-11': '11월 식품 입금 합계'
-            };
             const lbl = document.getElementById('cfSummaryMonthLabel');
-            if (lbl) lbl.innerText = monthLabels[currentCashflowMonth] || `${currentCashflowMonth} 입금 합계`;
+            if (lbl) {
+                if (currentCashflowMonth === 'all') {
+                    lbl.innerText = '전체 누적 식품 입금';
+                } else {
+                    const mo = parseInt(currentCashflowMonth.split('-')[1] || '0', 10);
+                    lbl.innerText = `${mo}월 식품 입금 합계`;
+                }
+            }
 
             const depTotal = monthTx.reduce((s, t) => s + (Number(t.deposit_amount) || 0), 0);
             const wthTotal = monthTx.reduce((s, t) => s + (Number(t.withdrawal_amount) || 0), 0);
@@ -12392,6 +12831,21 @@ HTML_TEMPLATE = """
 
             const wthTotalEl = document.getElementById('cfWithdrawalTotal');
             if (wthTotalEl) wthTotalEl.innerText = fmtWon(wthTotal);
+
+            // 해외 원물 송금액 (카테고리 '수입원물'만 엄격 필터: OEM 제조비, 포워딩 물류비, 관세는 합치지 않음)
+            const importTx = monthTx.filter(t => String(t.category || '').startsWith('수입원물'));
+            const importOut = importTx.reduce((s, t) => s + (Number(t.withdrawal_amount) || 0), 0);
+            const importIn = importTx.reduce((s, t) => s + (Number(t.deposit_amount) || 0), 0);
+            const opNet = netTotal + importOut - importIn;
+
+            const importOutEl = document.getElementById('cfImportOutflow');
+            if (importOutEl) importOutEl.innerText = fmtWon(importOut);
+
+            const opNetEl = document.getElementById('cfOperatingNet');
+            if (opNetEl) {
+                opNetEl.innerText = (opNet >= 0 ? '+' : '') + fmtWon(opNet);
+                opNetEl.className = (opNet >= 0) ? 'font-mono text-slate-800' : 'font-mono text-rose-600 font-bold';
+            }
 
             const netTotalEl = document.getElementById('cfNetTotal');
             if (netTotalEl) {
@@ -12527,111 +12981,235 @@ HTML_TEMPLATE = """
             const monthly = sp.monthly || {};
             const meta = d.metadata || {};
 
-            // 1. monthly_series 데이터 확보 (백엔드 약속 필드)
-            const monthlySeries = d.monthly_series || (d.sales_profit && d.sales_profit.monthly_series) || [
-                { month: '2026-09', revenue: 21324660, cost: 8031224, fees: 12827484.4, profit: 465951.6, margin_pct: 2.19, b2b_deposit_total: 5941800, food_sga_withdrawal_total: 14877710 },
-                { month: '2026-10', revenue: 24281610, cost: 9320619, fees: 16402812, profit: -1441821, margin_pct: -5.94, b2b_deposit_total: 0, food_sga_withdrawal_total: 10015195 },
-                { month: '2026-11', revenue: monthly.revenue || 17890260, cost: monthly.matched_cost || 4638867, fees: monthly.fees || 2086003, profit: monthly.matched_contribution_profit || 11165390, margin_pct: 62.4, estimated_real_profit: 991415, estimated_real_margin_pct: 5.54, estimated_additional_fees: 10173975, food_sga_withdrawal_total: 4434952 }
-            ];
-
-            // 2. 월 선택 칩 금액 및 이익(흑자/적자) 업데이트
-            const sumAllRev = monthlySeries.reduce((s, m) => s + (m.revenue || 0), 0);
-            const sumAllProfit = monthlySeries.reduce((s, m) => s + (m.profit || 0), 0);
-            const m09 = monthlySeries.find(m => m.month === '2026-09') || {};
-            const m10 = monthlySeries.find(m => m.month === '2026-10') || {};
-            const m11 = monthlySeries.find(m => m.month === '2026-11') || {};
-
             const setElText = (id, txt) => {
                 const el = document.getElementById(id);
                 if (el) el.innerText = txt;
             };
 
-            setElText('pnlMonthPill_all', fmtWon(sumAllRev));
-            const subAllEl = document.getElementById('pnlMonthSub_all');
-            if (subAllEl) {
-                const isNegAll = sumAllProfit < 0;
-                subAllEl.innerText = '누적 이익 ' + (isNegAll ? '-' : '+') + fmtWon(Math.abs(sumAllProfit));
-                subAllEl.className = 'mt-0.5 text-[11px] font-mono font-medium ' + (isNegAll ? 'text-rose-600 font-bold' : 'text-slate-600');
+            // 1. monthly_series 데이터 확보 및 정렬
+            const rawMonthlySeries = d.monthly_series || (d.sales_profit && d.sales_profit.monthly_series) || [];
+            const sortedSeries = [...rawMonthlySeries].sort((a, b) => (a.month || '').localeCompare(b.month || ''));
+
+            // 현재 선택된 월 유효성 검증
+            if (currentPnlMonth !== 'all' && sortedSeries.length > 0 && !sortedSeries.some(m => m.month === currentPnlMonth)) {
+                currentPnlMonth = sortedSeries[sortedSeries.length - 1].month || 'all';
             }
 
-            setElText('pnlMonthPill_09', fmtWon(m09.revenue || 0));
-            setElText('pnlMonthSub_09', '이익 ' + ((m09.profit || 0) >= 0 ? '+' : '') + fmtWon(m09.profit || 0) + ' (' + (m09.margin_pct !== undefined ? m09.margin_pct : '2.2') + '%)');
+            // 기간 텍스트 산출 (예: 2026-09 ~ 2026-11)
+            const minMonth = sortedSeries[0]?.month || '';
+            const maxMonth = sortedSeries[sortedSeries.length - 1]?.month || '';
+            const periodStr = (minMonth && maxMonth && minMonth !== maxMonth) ? `${minMonth} ~ ${maxMonth}` : (maxMonth || '전체');
 
-            setElText('pnlMonthPill_10', fmtWon(m10.revenue || 0));
-            const sub10El = document.getElementById('pnlMonthSub_10');
-            if (sub10El) {
-                sub10El.innerText = '이익 ' + fmtWon(m10.profit || -1441821) + ' (-5.9%)';
-                sub10El.className = 'mt-0.5 text-[11px] font-mono font-bold text-rose-600';
+            // 2. 누적 금액 산출 및 미산출/확정 월 분리
+            const sumAllRev = sortedSeries.reduce((s, m) => s + (m.revenue || 0), 0);
+            const uncalcMonths = sortedSeries.filter(m => (m.profit == null || m.cost == null || m.fees == null) && (m.revenue || 0) > 0);
+            const confirmedMonths = sortedSeries.filter(m => m.profit != null && !m.provisional && m.data_status !== 'partial');
+            const hasUncalcProfit = uncalcMonths.length > 0;
+
+            const sumAllProfit = hasUncalcProfit ? null : sortedSeries.reduce((s, m) => s + m.profit, 0);
+            const hasNullCostInSeries = sortedSeries.some(m => m.cost == null && (m.revenue || 0) > 0);
+            const hasNullFeesInSeries = sortedSeries.some(m => m.fees == null && (m.revenue || 0) > 0);
+            const sumAllCost = hasNullCostInSeries ? null : sortedSeries.reduce((s, m) => s + (m.cost || 0), 0);
+            const sumAllFees = hasNullFeesInSeries ? null : sortedSeries.reduce((s, m) => s + (m.fees || 0), 0);
+
+            // 확정월 부분합 (3차 계약 profit_rollup 연동 지원)
+            const rollup = d.profit_rollup || sp.profit_rollup;
+            const confirmedPartialProfit = rollup?.confirmed_partial_profit !== undefined
+                ? rollup.confirmed_partial_profit
+                : (confirmedMonths.length > 0 ? confirmedMonths.reduce((s, m) => s + m.profit, 0) : null);
+            const confirmedPeriodStr = rollup?.confirmed_months?.length
+                ? (rollup.confirmed_months.length === 1 ? rollup.confirmed_months[0] : `${rollup.confirmed_months[0]} ~ ${rollup.confirmed_months[rollup.confirmed_months.length - 1]}`)
+                : (confirmedMonths.length > 0
+                    ? (confirmedMonths.length === 1 ? confirmedMonths[0].month : `${confirmedMonths[0].month} ~ ${confirmedMonths[confirmedMonths.length - 1].month}`)
+                    : '');
+            const confirmedRev = confirmedMonths.reduce((s, m) => s + (m.revenue || 0), 0);
+            const confirmedCost = confirmedMonths.reduce((s, m) => s + (m.cost || 0), 0);
+            const confirmedFees = confirmedMonths.reduce((s, m) => s + (m.fees || 0), 0);
+            const confirmedMarginPct = (confirmedRev > 0 && confirmedPartialProfit !== null)
+                ? ((confirmedPartialProfit / confirmedRev) * 100).toFixed(1) + '%'
+                : '-';
+
+            // 3. 상단 월 선택 칩 동적 렌더링
+            const chipsContainer = document.getElementById('pnlMonthChips');
+            if (chipsContainer) {
+                const isAllActive = currentPnlMonth === 'all';
+                let allProfitClass = 'text-slate-600';
+                let allProfitText = '';
+                if (sumAllProfit !== null) {
+                    const isNeg = sumAllProfit < 0;
+                    allProfitText = `누적 이익 ${(isNeg ? '-' : '+')}${fmtWon(Math.abs(sumAllProfit))}`;
+                    allProfitClass = isNeg ? 'text-rose-600 font-bold' : 'text-emerald-600 font-bold';
+                } else if (confirmedPartialProfit !== null && confirmedPeriodStr) {
+                    const isNeg = confirmedPartialProfit < 0;
+                    allProfitText = `확정(${confirmedPeriodStr}) ${(isNeg ? '-' : '+')}${fmtWon(Math.abs(confirmedPartialProfit))}`;
+                    allProfitClass = isNeg ? 'text-rose-600 font-bold' : 'text-slate-700 font-medium';
+                } else {
+                    allProfitText = '누적 이익 산출 불가';
+                    allProfitClass = 'text-slate-400 font-medium';
+                }
+
+                let chipsHtml = `
+                    <button type="button" id="pnlChip_all" data-m="all" onclick="setPnlMonth('all')" class="pnl-month-pill status-pill ${isAllActive ? 'bg-slate-100/80 border border-slate-900 ring-1 ring-slate-900' : 'bg-white hover:bg-slate-50 border border-slate-200'} rounded-xl px-3 py-2 text-left transition cursor-pointer">
+                        <div class="flex items-center justify-between text-xs text-slate-500">
+                            <span class="font-bold text-slate-800">전체 (${periodStr})</span>
+                            <span class="px-1.5 py-0.2 rounded text-[10px] bg-slate-100 text-slate-600 font-bold">누적</span>
+                        </div>
+                        <div id="pnlMonthPill_all" class="text-sm font-black font-mono text-slate-900 mt-1">${fmtWon(sumAllRev)}</div>
+                        <div id="pnlMonthSub_all" class="mt-0.5 text-[11px] font-mono ${allProfitClass}">${allProfitText}</div>
+                    </button>
+                `;
+
+                sortedSeries.forEach(m => {
+                    const isCurrent = currentPnlMonth === m.month;
+                    const isProv = m.provisional || m.data_status === 'partial';
+                    const hasRev = m.revenue !== undefined && m.revenue !== null;
+                    const hasProf = m.profit !== undefined && m.profit !== null;
+                    const hasData = m.has_data !== false && (hasRev || hasProf);
+                    
+                    let statusBadgeClass = 'bg-emerald-100 text-emerald-800';
+                    let statusText = '정산확정';
+                    if (isProv) {
+                        statusBadgeClass = 'bg-amber-100 text-amber-800';
+                        statusText = '임시집계';
+                    } else if (!hasData) {
+                        statusBadgeClass = 'bg-slate-100 text-slate-500';
+                        statusText = '자료없음';
+                    }
+
+                    let subText = '자료 없음';
+                    let subClass = 'text-slate-400';
+                    if (hasData) {
+                        if (m.profit != null) {
+                            const isNeg = m.profit < 0;
+                            const mMargin = m.margin_pct != null ? `${m.margin_pct}%` : '-';
+                            const provNote = isProv ? ' (정산전 임시)' : '';
+                            subText = `이익 ${(m.profit >= 0 ? '+' : '')}${fmtWon(m.profit)} (${mMargin})${provNote}`;
+                            subClass = isNeg ? 'text-rose-600 font-bold' : (isProv ? 'text-slate-700' : 'text-emerald-600 font-bold');
+                        } else {
+                            subText = isProv ? '이익 미산출 (정산전)' : '이익 미산출';
+                            subClass = 'text-slate-400 font-medium';
+                        }
+                    }
+
+                    const safeKey = (m.month || '').replace('-', '_');
+                    chipsHtml += `
+                        <button type="button" id="pnlChip_${safeKey}" data-m="${m.month}" onclick="setPnlMonth('${m.month}')" class="pnl-month-pill status-pill ${isCurrent ? 'bg-slate-100/80 border border-slate-900 ring-1 ring-slate-900' : 'bg-white hover:bg-slate-50 border border-slate-200'} rounded-xl px-3 py-2 text-left transition cursor-pointer">
+                            <div class="flex items-center justify-between text-xs text-slate-500">
+                                <span class="font-bold text-slate-800">${m.month} 실적</span>
+                                <span class="px-1.5 py-0.2 rounded text-[10px] ${statusBadgeClass} font-bold">${statusText}</span>
+                            </div>
+                            <div id="pnlMonthPill_${safeKey}" class="text-sm font-black font-mono text-slate-900 mt-1">${m.revenue != null ? fmtWon(m.revenue) : '미산출'}</div>
+                            <div id="pnlMonthSub_${safeKey}" class="mt-0.5 text-[11px] font-mono ${subClass}">${subText}</div>
+                        </button>
+                    `;
+                });
+
+                chipsContainer.innerHTML = chipsHtml;
             }
 
-            const r11 = m11.revenue || monthly.revenue || 17890260;
-            const p11 = m11.profit !== undefined ? m11.profit : (monthly.matched_contribution_profit || 11165390);
-            setElText('pnlMonthPill_11', fmtWon(r11));
-            setElText('pnlMonthSub_11', '이익 ' + (p11 >= 0 ? '+' : '') + fmtWon(p11) + ' (집계중)');
+            // 4. 현재 선택된 월 데이터 산출 (activeData)
+            let activeData = null;
+            if (currentPnlMonth === 'all') {
+                activeData = {
+                    month: 'all',
+                    revenue: sumAllRev,
+                    cost: sumAllCost,
+                    fees: sumAllFees,
+                    profit: sumAllProfit,
+                    row_count: sortedSeries.reduce((s, m) => s + (m.row_count || 0), 0),
+                    channels: [],
+                    fee_breakdown: {},
+                    confirmedPartialProfit: confirmedPartialProfit,
+                    confirmedPeriodStr: confirmedPeriodStr
+                };
+            } else {
+                activeData = sortedSeries.find(m => m.month === currentPnlMonth);
+                if (!activeData) {
+                    activeData = sortedSeries[sortedSeries.length - 1] || {
+                        month: currentPnlMonth,
+                        revenue: 0,
+                        cost: 0,
+                        fees: 0,
+                        profit: 0
+                    };
+                }
+            }
 
-            // 11월 흑자 착시 방지 안내 배너 표시 제어
+            const isProvisional = !!(activeData.provisional || activeData.data_status === 'partial');
+
+            // 11월/당월 흑자 착시 방지 안내 배너 제어
             const alertBanner = document.getElementById('pnlProvisionalAlert');
             if (alertBanner) {
-                if (currentPnlMonth === '2026-11') {
+                if (currentPnlMonth === 'all') {
+                    if (hasUncalcProfit || uncalcMonths.length > 0) {
+                        alertBanner.classList.remove('hidden');
+                        setElText('pnlProvisionalAlertTitle', '누적 손익 결산 시 필독 안내 (미산출월 포함)');
+                        const uncalcNames = uncalcMonths.map(m => m.month).join(', ');
+                        const confNote = confirmedPartialProfit !== null
+                            ? `확정월(${confirmedPeriodStr})의 부분합은 ${fmtWon(confirmedPartialProfit)}입니다.`
+                            : '';
+                        setElText('pnlProvisionalText', `전체 조회 기간 중 ${uncalcNames}은 정산 전 잠정 집계(원가·실제 수수료 미확정) 상태이므로, 전체 기간의 누적 기여이익은 산출 불가로 표시됩니다. ${confNote} 미확정 월의 최종 정산 완료 전까지는 전체 누적 이익을 단정할 수 없습니다.`);
+                    } else if (sortedSeries.some(m => m.provisional || m.data_status === 'partial')) {
+                        alertBanner.classList.remove('hidden');
+                        setElText('pnlProvisionalAlertTitle', '누적 손익 결산 시 필독 안내 (잠정 집계 포함)');
+                        setElText('pnlProvisionalText', '전체 조회 기간 중 일부 월에 정산 전 임시 기여이익이 포함되어 있습니다. 월말 최종 정산 후 확정 수치로 갱신됩니다.');
+                    } else {
+                        alertBanner.classList.add('hidden');
+                    }
+                } else if (isProvisional) {
                     alertBanner.classList.remove('hidden');
+                    setElText('pnlProvisionalAlertTitle', `${activeData.month} 손익 결산 시 필독 안내 (잠정 집계)`);
+
+                    const estProfit = activeData.estimated_real_profit;
+                    const estMargin = activeData.estimated_real_margin_pct;
+                    const rateText = activeData.estimation_basis?.additional_cost_rate_pct != null ? `${activeData.estimation_basis.additional_cost_rate_pct}%` : '과거 가중률';
+
+                    if (activeData.profit == null) {
+                        // 이익 자체가 미산출인 경우 (원가/수수료/실물수량 미확정)
+                        const estText = estProfit != null ? `${fmtWon(estProfit)} (${estMargin != null ? estMargin + '%' : '—'})` : null;
+                        const qtyUnitText = activeData.quantity_unit === 'option_sales' ? `옵션 판매수량 ${fmtNum(activeData.total_quantity || 0)}건` : `${fmtNum(activeData.total_quantity || 0)}건`;
+                        const basisLabel = activeData.basis === 'coupang_sales_analysis' ? '쿠팡 판매분석(할인쿠폰 적용 전·결제/취소 기준)' : '잠정 운영매출';
+
+                        let bannerMsg = `${activeData.month}은 ${basisLabel} 기준(${qtyUnitText})으로 집계되었으며, 원가·실제 수수료·실물환산 규격이 미확정되어 정산 전 기여이익이 산출 불가 (미산출) 상태입니다.`;
+                        if (estText) {
+                            bannerMsg += ` 과거 확정 정산의 비판매수수료율(${rateText})을 반영한 현실적 예상 기여이익은 ${estText} 수준입니다.`;
+                        } else {
+                            bannerMsg += ` 과거 확정 정산과의 기준 불일치(판매분석 vs 정산)로 인해 현실적 예상 기여이익 또한 산출할 수 없습니다.`;
+                        }
+                        bannerMsg += ` 이는 월말 정산 전 참고 자료이며, 확정 순이익이 아닙니다.`;
+                        setElText('pnlProvisionalText', bannerMsg);
+                    } else {
+                        // 기본 판매수수료만 차감된 임시 기여이익이 실제로 있는 경우
+                        const provProf = activeData.profit;
+                        const provMargin = activeData.margin_pct != null ? `${activeData.margin_pct}%` : ((activeData.revenue || 0) > 0 ? (((activeData.profit / activeData.revenue) * 100).toFixed(1) + '%') : '0.0%');
+                        const estText = estProfit != null ? `${fmtWon(estProfit)} (${estMargin != null ? estMargin + '%' : '—'})` : '산출 불가 (과거 근거 부족)';
+
+                        setElText('pnlProvisionalText', `${activeData.month}은 쿠팡 기본 판매수수료만 차감된 정산 전 임시 기여이익으로 ${fmtWon(provProf)} (${provMargin})이 집계되었습니다. 과거 확정 정산의 비판매수수료율(${rateText})을 반영한 현실적 예상 기여이익은 ${estText} 수준입니다. 이는 월말 정산 전 참고 추정치이며, 확정 순이익이 아닙니다.`);
+                    }
                 } else {
                     alertBanner.classList.add('hidden');
                 }
             }
 
-            // 3. 현재 선택된 월 데이터 산출
-            let activeData = {
-                revenue: r11,
-                cost: m11.cost || monthly.matched_cost || 0,
-                fees: m11.fees || monthly.fees || 0,
-                profit: p11,
-                month: '2026-11',
-                fee_breakdown: m11.fee_breakdown || {},
-                channels: m11.channels || monthly.channels || []
-            };
+            const rev = activeData.revenue;
+            const cost = activeData.cost !== undefined ? activeData.cost : (activeData.month === monthly.month ? monthly.matched_cost : null);
+            const fees = activeData.fees !== undefined ? activeData.fees : (activeData.month === monthly.month ? monthly.fees : null);
+            const profit = activeData.profit !== undefined ? activeData.profit : (activeData.month === monthly.month ? (monthly.matched_contribution_profit ?? monthly.profit) : null);
+            const isNegativeProfit = profit != null && profit < 0;
 
-            if (currentPnlMonth === 'all') {
-                activeData = {
-                    revenue: sumAllRev,
-                    cost: monthlySeries.reduce((s, m) => s + (m.cost || 0), 0),
-                    fees: monthlySeries.reduce((s, m) => s + (m.fees || 0), 0),
-                    profit: sumAllProfit,
-                    month: 'all',
-                    fee_breakdown: {}
-                };
-            } else if (currentPnlMonth === '2026-09') {
-                activeData = m09;
-            } else if (currentPnlMonth === '2026-10') {
-                activeData = m10;
-            } else if (currentPnlMonth === '2026-11') {
-                activeData = {
-                    ...m11,
-                    revenue: r11,
-                    cost: m11.cost || monthly.matched_cost || 0,
-                    fees: m11.fees || monthly.fees || 0,
-                    profit: p11
-                };
-            }
-
-            const rev = activeData.revenue || 0;
-            const cost = activeData.cost || 0;
-            const fees = activeData.fees || 0;
-            const profit = activeData.profit || 0;
-            const isNegativeProfit = profit < 0;
-
-            // 4. 핵심 손익 KPI 카드 5종 (적자일 때 빨간색 직관적 표시)
+            // 5. 핵심 손익 KPI 카드 5종 (0, 음수, null 엄격 구분)
             const revEl = document.getElementById('pnlRevenue');
-            if (revEl) revEl.innerText = fmtWon(rev);
+            if (revEl) revEl.innerText = rev != null ? fmtWon(rev) : '산출 불가';
 
             const costEl = document.getElementById('pnlCost');
-            if (costEl) costEl.innerText = fmtWon(cost);
-            const costRatio = rev > 0 ? ((cost / rev) * 100).toFixed(1) : '0.0';
-            setElText('pnlCostRatioBadge', costRatio + '%');
+            if (costEl) costEl.innerText = cost != null ? fmtWon(cost) : '산출 불가';
+            const costRatio = (cost != null && rev != null && rev > 0) ? ((cost / rev) * 100).toFixed(1) : (cost == null ? '미산출' : '0.0');
+            setElText('pnlCostRatioBadge', costRatio + (cost != null ? '%' : ''));
 
             const feesEl = document.getElementById('pnlFees');
-            if (feesEl) feesEl.innerText = fmtWon(fees);
-            const feeRatio = rev > 0 ? ((fees / rev) * 100).toFixed(1) : '0.0';
-            setElText('pnlFeeRatioBadge', feeRatio + '%');
+            if (feesEl) feesEl.innerText = fees != null ? fmtWon(fees) : '산출 불가';
+            const feeRatio = (fees != null && rev != null && rev > 0) ? ((fees / rev) * 100).toFixed(1) : (fees == null ? '미산출' : '0.0');
+            setElText('pnlFeeRatioBadge', feeRatio + (fees != null ? '%' : ''));
 
             const profEl = document.getElementById('pnlProfit');
             const profIconWrap = document.getElementById('pnlProfitIconWrap');
@@ -12640,18 +13218,28 @@ HTML_TEMPLATE = """
             const profDesc = document.getElementById('pnlProfitDesc');
 
             if (profEl) {
-                profEl.innerText = fmtWon(profit);
-                profEl.className = isNegativeProfit
-                    ? 'text-lg sm:text-xl font-black font-mono text-rose-600'
-                    : 'text-lg sm:text-xl font-black font-mono text-emerald-600';
+                if (profit != null) {
+                    profEl.innerText = fmtWon(profit);
+                    profEl.className = isNegativeProfit
+                        ? 'text-lg sm:text-xl font-black font-mono text-rose-600'
+                        : 'text-lg sm:text-xl font-black font-mono text-emerald-600';
+                } else {
+                    profEl.innerText = '산출 불가';
+                    profEl.className = 'text-lg sm:text-xl font-black font-mono text-slate-400';
+                }
             }
 
-            const marginPct = rev > 0 ? ((profit / rev) * 100).toFixed(1) + '%' : '0.0%';
+            const marginPct = (rev != null && rev > 0 && profit != null) ? ((profit / rev) * 100).toFixed(1) + '%' : (profit == null ? '미산출' : '0.0%');
             if (marginBadge) {
-                marginBadge.innerText = (profit > 0 ? '+' : '') + marginPct;
-                marginBadge.className = isNegativeProfit
-                    ? 'px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200'
-                    : 'px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200';
+                if (profit != null) {
+                    marginBadge.innerText = (profit > 0 ? '+' : '') + marginPct;
+                    marginBadge.className = isNegativeProfit
+                        ? 'px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200'
+                        : 'px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200';
+                } else {
+                    marginBadge.innerText = '미산출';
+                    marginBadge.className = 'px-1.5 py-0.2 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200';
+                }
             }
 
             if (profIconWrap) {
@@ -12663,63 +13251,104 @@ HTML_TEMPLATE = """
                 profIcon.className = isNegativeProfit ? 'fa-solid fa-arrow-trend-down text-xs' : 'fa-solid fa-arrow-trend-up text-xs';
             }
             if (profDesc) {
-                profDesc.innerText = isNegativeProfit ? '기여이익 적자 (비용초과)' : (currentPnlMonth === '2026-11' ? '임시 기여이익 (정산전)' : '기여이익 흑자');
-                profDesc.className = isNegativeProfit ? 'text-[11px] font-semibold text-rose-600 mt-0.5' : 'text-[11px] text-slate-400 mt-0.5';
+                if (currentPnlMonth === 'all') {
+                    if (profit == null) {
+                        profDesc.innerText = confirmedPartialProfit != null
+                            ? `확정월(${confirmedPeriodStr}) 부분합: ${fmtWon(confirmedPartialProfit)} · ${uncalcMonths.map(m=>m.month).join(',')} 미산출`
+                            : '미산출월 포함으로 전체 합산 불가';
+                        profDesc.className = 'text-[11px] text-slate-500 mt-0.5';
+                    } else {
+                        profDesc.innerText = `${periodStr} 누적 기여이익`;
+                        profDesc.className = 'text-[11px] text-slate-400 mt-0.5';
+                    }
+                } else if (profit == null) {
+                    profDesc.innerText = isProvisional ? '원가·실제수수료 미확정 (정산전)' : '원가 또는 수수료 미산출';
+                    profDesc.className = 'text-[11px] text-slate-400 mt-0.5';
+                } else if (isNegativeProfit) {
+                    profDesc.innerText = '기여이익 적자 (비용초과)';
+                    profDesc.className = 'text-[11px] font-semibold text-rose-600 mt-0.5';
+                } else {
+                    profDesc.innerText = isProvisional ? '임시 기여이익 (정산전)' : '기여이익 흑자';
+                    profDesc.className = 'text-[11px] text-slate-400 mt-0.5';
+                }
             }
 
-            // 카드 5: 9월/10월은 정산 확정 실적 표시, 11월은 현실 예상 기여이익(99만 원, 5.5%), 전체는 누적 실적 표시
+            // 카드 5: 확정 실적 / 현실 예상 기여이익 / 누적 실적 표시
             const forecastTitleEl = document.getElementById('pnlForecastTitle');
             const forecastBadgeEl = document.getElementById('pnlForecastBadge');
             const forecastProfEl = document.getElementById('pnlForecastProfit');
             const forecastDescEl = document.getElementById('pnlForecastDesc');
             const forecastIconWrap = document.getElementById('pnlForecastIconWrap');
 
-            if (currentPnlMonth === '2026-09' || currentPnlMonth === '2026-10') {
-                if (forecastTitleEl) forecastTitleEl.innerText = '정산 마감 실적';
+            if (currentPnlMonth === 'all') {
+                if (forecastTitleEl) forecastTitleEl.innerText = `${periodStr} 누적 기여이익`;
+                if (forecastBadgeEl) {
+                    forecastBadgeEl.innerText = sumAllProfit != null ? '누적' : '부분합';
+                    forecastBadgeEl.className = 'px-1.5 py-0.2 rounded text-[11px] font-bold bg-indigo-100 text-indigo-800';
+                }
+                if (forecastProfEl) {
+                    if (sumAllProfit != null) {
+                        forecastProfEl.innerText = fmtWon(sumAllProfit);
+                        forecastProfEl.className = sumAllProfit < 0
+                            ? 'text-lg sm:text-xl font-black font-mono text-rose-600'
+                            : 'text-lg sm:text-xl font-black font-mono text-emerald-700';
+                    } else if (confirmedPartialProfit != null) {
+                        forecastProfEl.innerText = `확정 부분합 ${fmtWon(confirmedPartialProfit)}`;
+                        forecastProfEl.className = confirmedPartialProfit < 0
+                            ? 'text-lg sm:text-xl font-black font-mono text-rose-600'
+                            : 'text-lg sm:text-xl font-black font-mono text-emerald-700';
+                    } else {
+                        forecastProfEl.innerText = '산출 불가';
+                        forecastProfEl.className = 'text-lg sm:text-xl font-black font-mono text-slate-400';
+                    }
+                }
+                if (forecastDescEl) {
+                    if (sumAllProfit != null) {
+                        forecastDescEl.innerText = `${sortedSeries.length}개월 합산 실적`;
+                    } else if (confirmedPartialProfit != null) {
+                        forecastDescEl.innerText = `확정 ${confirmedMonths.length}개월(${confirmedPeriodStr}) 부분합 (미확정 ${uncalcMonths.map(m=>m.month).join(', ')} 제외)`;
+                    } else {
+                        forecastDescEl.innerText = '미산출월 포함으로 누적 불가';
+                    }
+                }
+                if (forecastIconWrap) forecastIconWrap.className = 'w-6 h-6 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center';
+            } else if (isProvisional) {
+                if (forecastTitleEl) forecastTitleEl.innerText = `${activeData.month} 현실 예상 기여이익`;
+                if (forecastBadgeEl) {
+                    forecastBadgeEl.innerText = '실질 추정';
+                    forecastBadgeEl.className = 'px-1.5 py-0.2 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800';
+                }
+                const estProfit = activeData.estimated_real_profit;
+                const estMargin = activeData.estimated_real_margin_pct;
+                const estimateText = estProfit != null ? `${fmtWon(estProfit)} (${estMargin == null ? '—' : estMargin + '%'})` : '산출 불가';
+                if (forecastProfEl) {
+                    forecastProfEl.innerText = estimateText;
+                    forecastProfEl.className = estProfit != null ? 'text-lg sm:text-xl font-black font-mono text-emerald-700' : 'text-lg sm:text-xl font-black font-mono text-slate-400';
+                }
+                if (forecastDescEl) {
+                    forecastDescEl.innerText = activeData.estimation_basis?.additional_cost_rate_pct != null
+                        ? `최근 정산 비판매수수료율 ${activeData.estimation_basis.additional_cost_rate_pct}% 반영 추정치`
+                        : '추정 근거 부족 (과거 정산 데이터 없음)';
+                }
+                if (forecastIconWrap) forecastIconWrap.className = 'w-6 h-6 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center';
+            } else {
+                if (forecastTitleEl) forecastTitleEl.innerText = `${activeData.month} 정산 마감 실적`;
                 if (forecastBadgeEl) {
                     forecastBadgeEl.innerText = '확정';
                     forecastBadgeEl.className = 'px-1.5 py-0.2 rounded text-[11px] font-bold bg-slate-100 text-slate-700';
                 }
                 if (forecastProfEl) {
-                    forecastProfEl.innerText = fmtWon(profit);
+                    forecastProfEl.innerText = profit != null ? fmtWon(profit) : '산출 불가';
                     forecastProfEl.className = isNegativeProfit
                         ? 'text-lg sm:text-xl font-black font-mono text-rose-600'
                         : 'text-lg sm:text-xl font-black font-mono text-slate-900';
                 }
-                if (forecastDescEl) forecastDescEl.innerText = currentPnlMonth === '2026-09' ? '플랜디에이 9월 정산 완료' : '플랜디에이 10월 정산 확정';
+                if (forecastDescEl) forecastDescEl.innerText = `${activeData.month} 정산 완료`;
                 if (forecastIconWrap) {
                     forecastIconWrap.className = isNegativeProfit
                         ? 'w-6 h-6 rounded-md bg-rose-50 text-rose-600 flex items-center justify-center'
                         : 'w-6 h-6 rounded-md bg-slate-100 text-slate-700 flex items-center justify-center';
                 }
-            } else if (currentPnlMonth === '2026-11') {
-                if (forecastTitleEl) forecastTitleEl.innerText = '현실 예상 기여이익';
-                if (forecastBadgeEl) {
-                    forecastBadgeEl.innerText = '실질 추정';
-                    forecastBadgeEl.className = 'px-1.5 py-0.2 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800';
-                }
-                const estProfit = (m11 && m11.estimated_real_profit) || 991415;
-                const estMargin = (m11 && m11.estimated_real_margin_pct) || 5.54;
-                if (forecastProfEl) {
-                    forecastProfEl.innerText = `${fmtWon(estProfit)} (${estMargin}%)`;
-                    forecastProfEl.className = 'text-lg sm:text-xl font-black font-mono text-emerald-700';
-                }
-                if (forecastDescEl) forecastDescEl.innerText = '실질비용률 56.9% 반영 추정치';
-                if (forecastIconWrap) forecastIconWrap.className = 'w-6 h-6 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center';
-            } else {
-                if (forecastTitleEl) forecastTitleEl.innerText = '9~11월 누적 기여이익';
-                if (forecastBadgeEl) {
-                    forecastBadgeEl.innerText = '누적';
-                    forecastBadgeEl.className = 'px-1.5 py-0.2 rounded text-[11px] font-bold bg-indigo-100 text-indigo-800';
-                }
-                if (forecastProfEl) {
-                    forecastProfEl.innerText = fmtWon(sumAllProfit);
-                    forecastProfEl.className = sumAllProfit < 0
-                        ? 'text-lg sm:text-xl font-black font-mono text-rose-600'
-                        : 'text-lg sm:text-xl font-black font-mono text-emerald-700';
-                }
-                if (forecastDescEl) forecastDescEl.innerText = '9~11월 합산 실적';
-                if (forecastIconWrap) forecastIconWrap.className = 'w-6 h-6 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center';
             }
 
             // 원가 미매칭 배너
@@ -12735,35 +13364,40 @@ HTML_TEMPLATE = """
                 }
             }
 
-            // 5. 중단 비교 막대 차트 (9·10·11월 월별 매출 및 기여이익 비교, 10월 적자 빨간색 바)
+            // 6. 중단 비교 막대 차트 (월별 매출 및 기여이익 비교, 적자 빨간색 바)
             const compWrap = document.getElementById('pnlMonthlyComparisonChart');
             if (compWrap) {
-                const maxVal = Math.max(...monthlySeries.map(m => Math.max(m.revenue || 0, Math.abs(m.profit || 0))), 1);
-                compWrap.innerHTML = monthlySeries.map(m => {
+                const maxVal = Math.max(...sortedSeries.map(m => Math.max(m.revenue || 0, Math.abs(m.profit || 0))), 1);
+                compWrap.innerHTML = sortedSeries.map(m => {
                     const isNeg = (m.profit || 0) < 0;
                     const absProf = Math.abs(m.profit || 0);
-                    const revHeight = Math.max(16, Math.min(110, Math.round(((m.revenue || 0) / maxVal) * 110)));
-                    const profHeight = Math.max(12, Math.min(110, Math.round((absProf / maxVal) * 110)));
+                    const revVal = m.revenue || 0;
+                    const revHeight = revVal > 0 ? Math.max(16, Math.min(110, Math.round((revVal / maxVal) * 110))) : 4;
+                    const profHeight = absProf > 0 ? Math.max(12, Math.min(110, Math.round((absProf / maxVal) * 110))) : 4;
 
                     const barColor = isNeg ? 'bg-rose-500' : 'bg-emerald-500';
                     const textColor = isNeg ? 'text-rose-600' : 'text-emerald-700';
                     const profSign = isNeg ? '-' : '+';
-                    const profLabel = absProf >= 10000000
+                    const profLabel = m.profit == null ? '미산출' : (absProf >= 10000000
                         ? (profSign + Math.round(absProf / 10000) + '만')
-                        : (absProf >= 10000 ? (profSign + Math.round(absProf / 10000) + '만') : fmtWon(m.profit));
+                        : (absProf >= 10000 ? (profSign + Math.round(absProf / 10000) + '만') : fmtWon(m.profit)));
 
                     const isCurrentSelected = currentPnlMonth === m.month;
                     const ringStyle = isCurrentSelected ? 'ring-2 ring-slate-900 rounded-lg p-1 bg-slate-50' : 'p-1 hover:bg-slate-50 rounded-lg transition';
 
+                    const statusTag = (m.provisional || m.data_status === 'partial')
+                        ? '<span class="px-1 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-800">임시</span>'
+                        : (isNeg ? '<span class="px-1 py-0.2 rounded text-[10px] font-bold bg-rose-100 text-rose-700">적자</span>' : '<span class="px-1 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">흑자</span>');
+
                     return `
                         <div class="flex flex-col items-center gap-1 group relative cursor-pointer ${ringStyle}" onclick="setPnlMonth('${m.month}')">
                             <div class="hidden sm:block opacity-0 group-hover:opacity-100 transition absolute -top-12 px-2.5 py-1.5 bg-slate-900 text-white rounded text-[11px] font-mono whitespace-nowrap z-20 pointer-events-none shadow-md">
-                                <strong class="text-indigo-200">${m.month}</strong> | 매출: ${fmtWon(m.revenue)} · 기여이익: <span class="${isNeg ? 'text-rose-300 font-bold' : 'text-emerald-300 font-bold'}">${fmtWon(m.profit)}</span> (${m.margin_pct !== undefined ? m.margin_pct + '%' : ''})
+                                <strong class="text-indigo-200">${m.month}</strong> | 매출: ${fmtWon(m.revenue ?? 0)} · 기여이익: <span class="${isNeg ? 'text-rose-300 font-bold' : 'text-emerald-300 font-bold'}">${m.profit != null ? fmtWon(m.profit) : '미산출'}</span> (${m.margin_pct != null ? m.margin_pct + '%' : '—'})
                             </div>
                             <div class="flex items-end gap-1.5 h-[115px]">
                                 <!-- 매출 바 -->
                                 <div class="flex flex-col items-center">
-                                    <span class="text-[11px] font-mono font-bold text-slate-700">${m.revenue >= 10000000 ? Math.round(m.revenue / 10000) + '만' : fmtWon(m.revenue)}</span>
+                                    <span class="text-[11px] font-mono font-bold text-slate-700">${revVal >= 10000000 ? Math.round(revVal / 10000) + '만' : fmtWon(revVal)}</span>
                                     <div class="w-7 sm:w-9 bg-indigo-600 rounded-t-md transition-all group-hover:brightness-95" style="height: ${revHeight}px;"></div>
                                 </div>
                                 <!-- 기여이익 바 (적자 시 빨간색 표시) -->
@@ -12774,55 +13408,64 @@ HTML_TEMPLATE = """
                             </div>
                             <div class="flex items-center gap-1 mt-1">
                                 <span class="text-[11px] font-mono font-bold text-slate-700">${m.month}</span>
-                                ${isNeg ? '<span class="px-1 py-0.2 rounded text-[11px] font-bold bg-rose-100 text-rose-700">적자</span>' : '<span class="px-1 py-0.2 rounded text-[11px] font-bold bg-emerald-100 text-emerald-700">흑자</span>'}
+                                ${statusTag}
                             </div>
                         </div>
                     `;
                 }).join('');
             }
 
-            // 6. 매출 대비 비용 구조 스택 바
-            const marginRatio = rev > 0 ? ((profit / rev) * 100).toFixed(1) : '0.0';
+            // 7. 매출 대비 비용 구조 스택 바
+            const marginRatio = (rev != null && rev > 0 && profit != null) ? ((profit / rev) * 100).toFixed(1) : (profit == null ? '미산출' : '0.0');
             const barCost = document.getElementById('pnlBarCost');
-            if (barCost) {
-                barCost.style.width = Math.min(parseFloat(costRatio), 100) + '%';
-                barCost.innerText = costRatio + '%';
-            }
             const barFees = document.getElementById('pnlBarFees');
-            if (barFees) {
-                barFees.style.width = Math.min(parseFloat(feeRatio), 100) + '%';
-                barFees.innerText = feeRatio + '%';
-            }
             const barProfit = document.getElementById('pnlBarProfit');
-            if (barProfit) {
-                if (isNegativeProfit) {
-                    barProfit.style.width = '0%';
-                    barProfit.innerText = '';
-                } else {
-                    barProfit.style.width = Math.min(parseFloat(marginRatio), 100) + '%';
-                    barProfit.innerText = marginRatio + '%';
-                }
-            }
-
-            setElText('pnlStructureMonthBadge', currentPnlMonth === 'all' ? '전체 (9~11월)' : currentPnlMonth);
             const pnlStructSummary = document.getElementById('pnlStructureSummary');
-            if (pnlStructSummary) {
-                if (isNegativeProfit) {
-                    pnlStructSummary.innerHTML = `원가 ${costRatio}% · 수수료 ${feeRatio}% · <strong class="text-rose-600 font-bold">기여이익 ${marginRatio}% (적자)</strong>`;
-                } else {
-                    pnlStructSummary.innerHTML = `원가 ${costRatio}% · 수수료 ${feeRatio}% · <strong class="text-emerald-700 font-bold">기여이익 ${marginRatio}%</strong>`;
+
+            if (cost == null || fees == null || profit == null) {
+                if (barCost) { barCost.style.width = '0%'; barCost.innerText = ''; }
+                if (barFees) { barFees.style.width = '0%'; barFees.innerText = ''; }
+                if (barProfit) { barProfit.style.width = '0%'; barProfit.innerText = ''; }
+                if (pnlStructSummary) {
+                    pnlStructSummary.innerHTML = `<span class="text-slate-500 font-mono">원가 또는 수수료 데이터 미산출로 비용 구조를 계산할 수 없습니다.</span>`;
+                }
+            } else {
+                if (barCost) {
+                    barCost.style.width = Math.min(parseFloat(costRatio) || 0, 100) + '%';
+                    barCost.innerText = costRatio + '%';
+                }
+                if (barFees) {
+                    barFees.style.width = Math.min(parseFloat(feeRatio) || 0, 100) + '%';
+                    barFees.innerText = feeRatio + '%';
+                }
+                if (barProfit) {
+                    if (isNegativeProfit) {
+                        barProfit.style.width = '0%';
+                        barProfit.innerText = '';
+                    } else {
+                        barProfit.style.width = Math.min(parseFloat(marginRatio) || 0, 100) + '%';
+                        barProfit.innerText = marginRatio + '%';
+                    }
+                }
+                if (pnlStructSummary) {
+                    if (isNegativeProfit) {
+                        pnlStructSummary.innerHTML = `원가 ${costRatio}% · 수수료 ${feeRatio}% · <strong class="text-rose-600 font-bold">기여이익 ${marginRatio}% (적자)</strong>`;
+                    } else {
+                        pnlStructSummary.innerHTML = `원가 ${costRatio}% · 수수료 ${feeRatio}% · <strong class="text-emerald-700 font-bold">기여이익 ${marginRatio}%</strong>`;
+                    }
                 }
             }
 
-            setElText('pnlCostCard', fmtWon(cost));
-            setElText('pnlFeesCard', fmtWon(fees));
+            setElText('pnlStructureMonthBadge', currentPnlMonth === 'all' ? `전체 (${periodStr})` : currentPnlMonth);
+            setElText('pnlCostCard', cost != null ? fmtWon(cost) : '미산출');
+            setElText('pnlFeesCard', fees != null ? fmtWon(fees) : '미산출');
 
             const profCard = document.getElementById('pnlProfitCard');
             const profCardBox = document.getElementById('pnlProfitCardBox');
             const profCardHeader = document.getElementById('pnlProfitCardHeader');
             const profCardDot = document.getElementById('pnlProfitCardDot');
 
-            if (profCard) profCard.innerText = fmtWon(profit);
+            if (profCard) profCard.innerText = profit != null ? fmtWon(profit) : '미산출';
             if (profCardBox) {
                 profCardBox.className = isNegativeProfit ? 'bg-rose-50/60 rounded-lg p-2 border border-rose-200' : 'bg-emerald-50/60 rounded-lg p-2 border border-emerald-100';
             }
@@ -12836,20 +13479,72 @@ HTML_TEMPLATE = """
                 profCard.className = isNegativeProfit ? 'text-xs font-bold font-mono text-rose-600 mt-0.5' : 'text-xs font-bold font-mono text-emerald-700 mt-0.5';
             }
 
-            // 7. 하단 세부 손익 분석 표 (정산서 항목, B2B 매출, 식품 판관비 및 현실 예상치)
+            // 8. 하단 세부 손익 분석 표 (정산서 항목, B2B 매출, 판관비 및 현실 예상치)
             const chDetailBody = document.getElementById('pnlChannelDetailBody');
             const chBadge = document.getElementById('pnlChannelCountBadge');
             const tableTitle = document.getElementById('pnlDetailTableTitle');
 
             if (tableTitle) {
                 tableTitle.innerText = currentPnlMonth === 'all'
-                    ? '9~11월 누적 세부 손익 및 비용 분석'
-                    : currentPnlMonth + ' 세부 손익 및 정산 내역';
+                    ? `${periodStr} 누적 세부 손익 및 비용 분석`
+                    : `${currentPnlMonth} 세부 손익 및 정산 내역`;
             }
 
             if (chDetailBody) {
-                // fee_breakdown이 있는 경우 (9월, 10월)
-                if (activeData.fee_breakdown && Object.keys(activeData.fee_breakdown).length > 0) {
+                if (currentPnlMonth === 'all') {
+                    // all (전체 누적 비교)
+                    let rowsHtml = sortedSeries.map(m => {
+                        const isNeg = (m.profit || 0) < 0;
+                        const mMargin = (m.revenue != null && m.revenue > 0 && m.profit != null) ? ((m.profit / m.revenue) * 100).toFixed(1) + '%' : '-';
+                        const mTag = (m.provisional || m.data_status === 'partial') ? '(임시집계)' : (m.has_data === false ? '(자료없음)' : '(정산확정)');
+                        return `
+                            <tr class="hover:bg-slate-50/80 transition">
+                                <td class="py-2.5 px-3 font-semibold text-slate-800">${m.month} 실적 ${mTag}</td>
+                                <td class="py-2.5 px-2 text-center text-slate-500 font-mono text-[11px]">${m.active_sku_count || m.row_count || '-'}개 품목</td>
+                                <td class="py-2.5 px-2.5 text-right font-bold text-slate-900 font-mono">${m.revenue != null ? fmtWon(m.revenue) : '미산출'}</td>
+                                <td class="py-2.5 px-2.5 text-right text-slate-600 font-mono">${m.cost != null ? fmtWon(m.cost) : '미산출'}</td>
+                                <td class="py-2.5 px-2.5 text-right text-slate-600 font-mono">${m.fees != null ? fmtWon(m.fees) : '미산출'}</td>
+                                <td class="py-2.5 px-2.5 text-right font-bold font-mono ${isNeg ? 'text-rose-600' : 'text-emerald-600'}">${m.profit != null ? fmtWon(m.profit) : '미산출'}</td>
+                                <td class="py-2.5 px-3 text-right font-bold font-mono ${isNeg ? 'text-rose-600' : 'text-slate-700'}">${mMargin}</td>
+                            </tr>
+                        `;
+                    }).join('');
+
+                    if (confirmedPartialProfit !== null && hasUncalcProfit) {
+                        const isConfNeg = confirmedPartialProfit < 0;
+                        rowsHtml += `
+                            <tr class="bg-indigo-50/70 font-bold border-t border-indigo-200">
+                                <td class="py-2.5 px-3 text-indigo-950 font-semibold">확정월(${confirmedPeriodStr}) 부분합</td>
+                                <td class="py-2.5 px-2 text-center text-indigo-700 font-mono text-[11px]">${confirmedMonths.length}개월 확정</td>
+                                <td class="py-2.5 px-2.5 text-right text-indigo-950 font-mono">${fmtWon(confirmedRev)}</td>
+                                <td class="py-2.5 px-2.5 text-right text-slate-700 font-mono">${fmtWon(confirmedCost)}</td>
+                                <td class="py-2.5 px-2.5 text-right text-slate-700 font-mono">${fmtWon(confirmedFees)}</td>
+                                <td class="py-2.5 px-2.5 text-right font-bold font-mono ${isConfNeg ? 'text-rose-600' : 'text-emerald-700'}">${fmtWon(confirmedPartialProfit)}</td>
+                                <td class="py-2.5 px-3 text-right font-bold font-mono ${isConfNeg ? 'text-rose-600' : 'text-emerald-700'}">${confirmedMarginPct}</td>
+                            </tr>
+                        `;
+                    }
+
+                    rowsHtml += `
+                        <tr class="bg-slate-100/90 font-bold border-t-2 border-slate-300">
+                            <td class="py-3 px-3 text-slate-900">${periodStr} 전체 누적 합계</td>
+                            <td class="py-3 px-2 text-center text-slate-600 font-mono text-[11px]">${sortedSeries.length}개월 누적</td>
+                            <td class="py-3 px-2.5 text-right text-slate-900 font-mono">${fmtWon(sumAllRev)}</td>
+                            <td class="py-3 px-2.5 text-right text-rose-700 font-mono">${sumAllCost != null ? fmtWon(sumAllCost) : '미산출'}</td>
+                            <td class="py-3 px-2.5 text-right text-amber-700 font-mono">${sumAllFees != null ? fmtWon(sumAllFees) : '미산출'}</td>
+                            <td class="py-3 px-2.5 text-right font-black font-mono ${sumAllProfit !== null ? (sumAllProfit < 0 ? 'text-rose-600' : 'text-emerald-600') : 'text-slate-400'}">
+                                ${sumAllProfit !== null ? fmtWon(sumAllProfit) : '미산출 (미확정월 포함)'}
+                            </td>
+                            <td class="py-3 px-3 text-right font-black font-mono ${sumAllProfit !== null ? (sumAllProfit < 0 ? 'text-rose-600' : 'text-emerald-700') : 'text-slate-500'}">
+                                ${sumAllProfit !== null ? marginPct : '미산출'}
+                            </td>
+                        </tr>
+                    `;
+
+                    if (chBadge) chBadge.innerText = `${sortedSeries.length}개월 누적 비교`;
+                    chDetailBody.innerHTML = rowsHtml;
+                } else if (activeData.fee_breakdown && Object.keys(activeData.fee_breakdown).length > 0) {
+                    // Case A: fee_breakdown 정산 상세 항목
                     const fb = activeData.fee_breakdown;
                     const feeItems = [
                         { name: '쿠팡 마켓플레이스 판매수수료', code: '쿠팡윙', cost: 0, fee: fb.marketplace || 0 },
@@ -12874,7 +13569,6 @@ HTML_TEMPLATE = """
                         </tr>
                     `).join('');
 
-                    // B2B 현금매출 행 추가 (9월 등)
                     if (activeData.b2b_deposit_total && activeData.b2b_deposit_total > 0) {
                         rowsHtml += `
                             <tr class="hover:bg-slate-50/80 transition bg-teal-50/40">
@@ -12891,7 +13585,6 @@ HTML_TEMPLATE = """
                         `;
                     }
 
-                    // 식품 외주·판관비 행 추가
                     if (activeData.food_sga_withdrawal_total && activeData.food_sga_withdrawal_total > 0) {
                         rowsHtml += `
                             <tr class="hover:bg-slate-50/80 transition bg-rose-50/30">
@@ -12908,24 +13601,29 @@ HTML_TEMPLATE = """
                         `;
                     }
 
-                    // 총계 행 (기여이익 적자 시 빨간색 강조)
                     rowsHtml += `
                         <tr class="bg-slate-100/90 font-bold border-t-2 border-slate-300">
                             <td class="py-3 px-3 text-slate-900">${currentPnlMonth} 합계 (정산 확정 실적)</td>
                             <td class="py-3 px-2 text-center text-slate-600 font-mono text-[11px]">${activeData.row_count || 1}개 품목</td>
-                            <td class="py-3 px-2.5 text-right text-slate-900 font-mono">${fmtWon(rev)}</td>
-                            <td class="py-3 px-2.5 text-right text-rose-700 font-mono">${fmtWon(cost)}</td>
-                            <td class="py-3 px-2.5 text-right text-amber-700 font-mono">${fmtWon(fees)}</td>
-                            <td class="py-3 px-2.5 text-right font-black font-mono ${isNegativeProfit ? 'text-rose-600' : 'text-emerald-600'}">${fmtWon(profit)}</td>
+                            <td class="py-3 px-2.5 text-right text-slate-900 font-mono">${fmtWon(rev || 0)}</td>
+                            <td class="py-3 px-2.5 text-right text-rose-700 font-mono">${cost != null ? fmtWon(cost) : '미산출'}</td>
+                            <td class="py-3 px-2.5 text-right text-amber-700 font-mono">${fees != null ? fmtWon(fees) : '미산출'}</td>
+                            <td class="py-3 px-2.5 text-right font-black font-mono ${isNegativeProfit ? 'text-rose-600' : 'text-emerald-600'}">${profit != null ? fmtWon(profit) : '미산출'}</td>
                             <td class="py-3 px-3 text-right font-black font-mono ${isNegativeProfit ? 'text-rose-600' : 'text-emerald-700'}">${marginPct}</td>
                         </tr>
                     `;
 
-                    if (chBadge) chBadge.innerText = (feeItems.length + 2) + '개 정산·비용항목';
+                    let totalItemCount = feeItems.length;
+                    if (activeData.b2b_deposit_total > 0) totalItemCount++;
+                    if (activeData.food_sga_withdrawal_total > 0) totalItemCount++;
+                    if (chBadge) chBadge.innerText = totalItemCount + '개 정산·비용항목';
                     chDetailBody.innerHTML = rowsHtml;
-                } else if (currentPnlMonth === '2026-11') {
-                    // 11월: 채널 실적 + 추정 수수료 차감 + 현실 예상 기여이익 하이라이트
-                    const channels = monthly.channels || [];
+                } else {
+                    // Case B: channels 또는 실적 및 실질 추정 행
+                    const channels = (activeData.channels && activeData.channels.length > 0)
+                        ? activeData.channels
+                        : (activeData.month === (monthly.month || '2026-11') ? (monthly.channels || []) : []);
+                    
                     const channelNames = {
                         'coupang': '쿠팡 윙 일반 셀러',
                         'coupang_growth': '쿠팡 로켓그로스 (임시 집계)',
@@ -12933,119 +13631,102 @@ HTML_TEMPLATE = """
                         'cafe24': '카페24 자사몰'
                     };
 
-                    let rowsHtml = channels.map(ch => {
-                        const label = channelNames[ch.channel] || ch.channel;
-                        const cRev = ch.revenue || 0;
-                        const cCost = ch.matched_cost || 0;
-                        const cFees = ch.fees || 0;
-                        const cProfit = ch.matched_contribution_profit || 0;
-                        const cMargin = cRev > 0 ? ((cProfit / cRev) * 100).toFixed(1) + '%' : '-';
-                        return `
-                            <tr class="hover:bg-slate-50/80 transition">
-                                <td class="py-2.5 px-3 font-semibold text-slate-800">${label}</td>
-                                <td class="py-2.5 px-2 text-center text-slate-500 font-mono">${fmtNum(ch.row_count || 1)}건</td>
-                                <td class="py-2.5 px-2.5 text-right font-bold text-slate-900 font-mono">${fmtWon(cRev)}</td>
-                                <td class="py-2.5 px-2.5 text-right text-slate-600 font-mono">${fmtWon(cCost)}</td>
-                                <td class="py-2.5 px-2.5 text-right text-slate-600 font-mono">${fmtWon(cFees)}</td>
-                                <td class="py-2.5 px-2.5 text-right font-bold font-mono text-emerald-600">${fmtWon(cProfit)}</td>
-                                <td class="py-2.5 px-3 text-right font-bold font-mono text-slate-700">${cMargin}</td>
-                            </tr>
-                        `;
-                    }).join('');
+                    let rowsHtml = '';
+                    if (channels.length > 0) {
+                        rowsHtml = channels.map(ch => {
+                            const label = channelNames[ch.channel] || ch.channel;
+                            const cRev = ch.revenue;
+                            const cCost = ch.matched_cost ?? ch.cost;
+                            const cFees = ch.fees;
+                            const cProfit = ch.matched_contribution_profit ?? ch.profit;
+                            const cMargin = (cRev != null && cRev > 0 && cProfit != null) ? ((cProfit / cRev) * 100).toFixed(1) + '%' : '-';
+                            return `
+                                <tr class="hover:bg-slate-50/80 transition">
+                                    <td class="py-2.5 px-3 font-semibold text-slate-800">${label}</td>
+                                    <td class="py-2.5 px-2 text-center text-slate-500 font-mono">${fmtNum(ch.row_count || 1)}건</td>
+                                    <td class="py-2.5 px-2.5 text-right font-bold text-slate-900 font-mono">${cRev != null ? fmtWon(cRev) : '미산출'}</td>
+                                    <td class="py-2.5 px-2.5 text-right text-slate-600 font-mono">${cCost != null ? fmtWon(cCost) : '미산출'}</td>
+                                    <td class="py-2.5 px-2.5 text-right text-slate-600 font-mono">${cFees != null ? fmtWon(cFees) : '미산출'}</td>
+                                    <td class="py-2.5 px-2.5 text-right font-bold font-mono ${cProfit != null && cProfit < 0 ? 'text-rose-600' : 'text-emerald-600'}">${cProfit != null ? fmtWon(cProfit) : '미산출'}</td>
+                                    <td class="py-2.5 px-3 text-right font-bold font-mono text-slate-700">${cMargin}</td>
+                                </tr>
+                            `;
+                        }).join('');
+                    }
 
-                    // 11월 임시 집계 합계 행
+                    const subtotalLabel = isProvisional
+                        ? (activeData.profit == null ? `${activeData.month} 잠정 운영매출 소계 (원가·수수료 미확정)` : `${activeData.month} 임시 소계 (기본 판매수수료만 차감)`)
+                        : `${activeData.month} 실적 소계`;
                     rowsHtml += `
                         <tr class="bg-slate-100 font-bold border-t border-slate-300">
-                            <td class="py-2.5 px-3 text-slate-900">11월 임시 소계 (기본 판매수수료 11.6%만 차감)</td>
-                            <td class="py-2.5 px-2 text-center text-slate-600 font-mono text-[11px]">${monthly.row_count || 36}건</td>
-                            <td class="py-2.5 px-2.5 text-right text-slate-900 font-mono">${fmtWon(rev)}</td>
-                            <td class="py-2.5 px-2.5 text-right text-rose-700 font-mono">${fmtWon(cost)}</td>
-                            <td class="py-2.5 px-2.5 text-right text-amber-700 font-mono">${fmtWon(fees)}</td>
-                            <td class="py-2.5 px-2.5 text-right font-black font-mono text-emerald-600">${fmtWon(profit)}</td>
-                            <td class="py-2.5 px-3 text-right font-black font-mono text-emerald-700">${marginPct}</td>
+                            <td class="py-2.5 px-3 text-slate-900 font-bold">${subtotalLabel}</td>
+                            <td class="py-2.5 px-2 text-center text-slate-600 font-mono text-[11px]">${activeData.row_count || activeData.active_sku_count || monthly.row_count || '-'}건</td>
+                            <td class="py-2.5 px-2.5 text-right text-slate-900 font-mono">${rev != null ? fmtWon(rev) : '미산출'}</td>
+                            <td class="py-2.5 px-2.5 text-right text-rose-700 font-mono">${cost != null ? fmtWon(cost) : '미산출'}</td>
+                            <td class="py-2.5 px-2.5 text-right text-amber-700 font-mono">${fees != null ? fmtWon(fees) : '미산출'}</td>
+                            <td class="py-2.5 px-2.5 text-right font-black font-mono ${isNegativeProfit ? 'text-rose-600' : 'text-emerald-600'}">${profit != null ? fmtWon(profit) : '미산출'}</td>
+                            <td class="py-2.5 px-3 text-right font-black font-mono ${isNegativeProfit ? 'text-rose-600' : 'text-emerald-700'}">${marginPct}</td>
                         </tr>
                     `;
 
-                    // 실질 비판매수수료(56.9%) 미반영 추정치 차감 행
-                    const estAddFees = (m11 && m11.estimated_additional_fees) || 10173975;
-                    const estRealProf = (m11 && m11.estimated_real_profit) || 991415;
-                    const estRealMargin = (m11 && m11.estimated_real_margin_pct) || 5.54;
+                    if (activeData.estimated_additional_fees != null && activeData.estimated_real_profit != null) {
+                        const estAddFees = activeData.estimated_additional_fees;
+                        const estRealProf = activeData.estimated_real_profit;
+                        const estRealMargin = activeData.estimated_real_margin_pct != null ? activeData.estimated_real_margin_pct : '—';
+                        const basisMonths = (activeData.estimation_basis && activeData.estimation_basis.months) ? activeData.estimation_basis.months.map(m => m.slice(5) + '월').join('·') : '과거 확정월';
+                        const basisRate = (activeData.estimation_basis && activeData.estimation_basis.additional_cost_rate_pct != null) ? activeData.estimation_basis.additional_cost_rate_pct + '%' : '—';
 
-                    rowsHtml += `
-                        <tr class="hover:bg-slate-50/80 transition bg-amber-50/50">
-                            <td class="py-2.5 px-3 font-bold text-amber-900 flex items-center gap-1.5">
-                                <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>[추정] 미반영 실질수수료·물류대행비 (9~10월 가중 56.9%)
-                            </td>
-                            <td class="py-2.5 px-2 text-center text-amber-800 font-mono text-[11px]">월말정산예상</td>
-                            <td class="py-2.5 px-2.5 text-right text-slate-400 font-mono">-</td>
-                            <td class="py-2.5 px-2.5 text-right text-slate-400 font-mono">-</td>
-                            <td class="py-2.5 px-2.5 text-right text-amber-800 font-mono">${fmtWon(estAddFees)}</td>
-                            <td class="py-2.5 px-2.5 text-right text-amber-800 font-mono font-bold">-${fmtWon(estAddFees)}</td>
-                            <td class="py-2.5 px-3 text-right text-amber-800 font-mono font-semibold">-56.9%</td>
-                        </tr>
-                        <tr class="bg-emerald-50/80 font-bold border-t-2 border-emerald-300">
-                            <td class="py-3 px-3 text-emerald-950 flex items-center gap-1.5">
-                                <i class="fa-solid fa-calculator text-emerald-700"></i><strong>11월 현실적 예상 기여이익 (최종 추정)</strong>
-                            </td>
-                            <td class="py-3 px-2 text-center text-emerald-800 font-mono text-[11px]">실질추정</td>
-                            <td class="py-3 px-2.5 text-right text-emerald-900 font-mono">${fmtWon(rev)}</td>
-                            <td class="py-3 px-2.5 text-right text-rose-700 font-mono">${fmtWon(cost)}</td>
-                            <td class="py-3 px-2.5 text-right text-amber-800 font-mono">${fmtWon(fees + estAddFees)}</td>
-                            <td class="py-3 px-2.5 text-right font-black font-mono text-emerald-700 text-sm">${fmtWon(estRealProf)}</td>
-                            <td class="py-3 px-3 text-right font-black font-mono text-emerald-700 text-sm">+${estRealMargin}%</td>
-                        </tr>
-                    `;
+                        rowsHtml += `
+                            <tr class="hover:bg-slate-50/80 transition bg-amber-50/50">
+                                <td class="py-2.5 px-3 font-bold text-amber-900 flex items-center gap-1.5">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>[추정] 미반영 실질수수료·물류대행비 (${basisMonths} 가중 ${basisRate})
+                                </td>
+                                <td class="py-2.5 px-2 text-center text-amber-800 font-mono text-[11px]">월말정산예상</td>
+                                <td class="py-2.5 px-2.5 text-right text-slate-400 font-mono">-</td>
+                                <td class="py-2.5 px-2.5 text-right text-slate-400 font-mono">-</td>
+                                <td class="py-2.5 px-2.5 text-right text-amber-800 font-mono">${fmtWon(estAddFees)}</td>
+                                <td class="py-2.5 px-2.5 text-right text-amber-800 font-mono font-bold">-${fmtWon(estAddFees)}</td>
+                                <td class="py-2.5 px-3 text-right text-amber-800 font-mono font-semibold">-${basisRate}</td>
+                            </tr>
+                            <tr class="bg-emerald-50/80 font-bold border-t-2 border-emerald-300">
+                                <td class="py-3 px-3 text-emerald-950 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-calculator text-emerald-700"></i><strong>${activeData.month} 현실적 예상 기여이익 (최종 추정)</strong>
+                                </td>
+                                <td class="py-3 px-2 text-center text-emerald-800 font-mono text-[11px]">실질추정</td>
+                                <td class="py-3 px-2.5 text-right text-emerald-900 font-mono">${rev != null ? fmtWon(rev) : '미산출'}</td>
+                                <td class="py-3 px-2.5 text-right text-rose-700 font-mono">${cost != null ? fmtWon(cost) : '미산출'}</td>
+                                <td class="py-3 px-2.5 text-right text-amber-800 font-mono">${fees != null ? fmtWon(fees + estAddFees) : '미산출'}</td>
+                                <td class="py-3 px-2.5 text-right font-black font-mono text-emerald-700 text-sm">${fmtWon(estRealProf)}</td>
+                                <td class="py-3 px-3 text-right font-black font-mono text-emerald-700 text-sm">+${estRealMargin}%</td>
+                            </tr>
+                        `;
+                    } else if (isProvisional) {
+                        rowsHtml += `
+                            <tr class="hover:bg-slate-50/80 transition bg-slate-50">
+                                <td colspan="7" class="py-3 px-3 text-center text-xs text-slate-500 font-mono">
+                                    과거 확정 정산 데이터 부족으로 ${activeData.month} 현실적 예상 기여이익 산출 불가 (정산 마감 후 확정 반영)
+                                </td>
+                            </tr>
+                        `;
+                    }
 
-                    // 식품 외주·판관비
-                    if (m11 && m11.food_sga_withdrawal_total) {
+                    if (activeData.food_sga_withdrawal_total && activeData.food_sga_withdrawal_total > 0) {
                         rowsHtml += `
                             <tr class="hover:bg-slate-50/80 transition bg-rose-50/20">
                                 <td class="py-2.5 px-3 font-semibold text-rose-950 flex items-center gap-1.5">
-                                    <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>식품 외주·판관비 (11월 현재 통관·용차비 출금)
+                                    <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>식품 외주·판관비 (${activeData.month} 현재 통관·용차비 출금)
                                 </td>
                                 <td class="py-2.5 px-2 text-center text-rose-700 font-mono text-[11px]">판관비출금</td>
                                 <td class="py-2.5 px-2.5 text-right text-slate-400 font-mono">-</td>
                                 <td class="py-2.5 px-2.5 text-right text-slate-400 font-mono">-</td>
-                                <td class="py-2.5 px-2.5 text-right text-rose-700 font-mono">${fmtWon(m11.food_sga_withdrawal_total)}</td>
-                                <td class="py-2.5 px-2.5 text-right text-rose-700 font-mono font-bold">-${fmtWon(m11.food_sga_withdrawal_total)}</td>
+                                <td class="py-2.5 px-2.5 text-right text-rose-700 font-mono">${fmtWon(activeData.food_sga_withdrawal_total)}</td>
+                                <td class="py-2.5 px-2.5 text-right text-rose-700 font-mono font-bold">-${fmtWon(activeData.food_sga_withdrawal_total)}</td>
                                 <td class="py-2.5 px-3 text-right text-slate-400 font-mono">-</td>
                             </tr>
                         `;
                     }
 
-                    if (chBadge) chBadge.innerText = '채널 및 실질 추정';
-                    chDetailBody.innerHTML = rowsHtml;
-                } else {
-                    // all (전체 9~11월 누적 비교)
-                    let rowsHtml = monthlySeries.map(m => {
-                        const isNeg = (m.profit || 0) < 0;
-                        const mMargin = m.revenue > 0 ? ((m.profit / m.revenue) * 100).toFixed(1) + '%' : '-';
-                        return `
-                            <tr class="hover:bg-slate-50/80 transition">
-                                <td class="py-2.5 px-3 font-semibold text-slate-800">${m.month} 실적 ${m.month === '2026-11' ? '(임시집계)' : '(정산확정)'}</td>
-                                <td class="py-2.5 px-2 text-center text-slate-500 font-mono text-[11px]">${m.active_sku_count || m.row_count || '-'}개 품목</td>
-                                <td class="py-2.5 px-2.5 text-right font-bold text-slate-900 font-mono">${fmtWon(m.revenue)}</td>
-                                <td class="py-2.5 px-2.5 text-right text-slate-600 font-mono">${fmtWon(m.cost)}</td>
-                                <td class="py-2.5 px-2.5 text-right text-slate-600 font-mono">${fmtWon(m.fees)}</td>
-                                <td class="py-2.5 px-2.5 text-right font-bold font-mono ${isNeg ? 'text-rose-600' : 'text-emerald-600'}">${fmtWon(m.profit)}</td>
-                                <td class="py-2.5 px-3 text-right font-bold font-mono ${isNeg ? 'text-rose-600' : 'text-slate-700'}">${mMargin}</td>
-                            </tr>
-                        `;
-                    }).join('');
-
-                    rowsHtml += `
-                        <tr class="bg-slate-100/90 font-bold border-t-2 border-slate-300">
-                            <td class="py-3 px-3 text-slate-900">9~11월 전체 누적 합계</td>
-                            <td class="py-3 px-2 text-center text-slate-600 font-mono text-[11px]">3개월 누적</td>
-                            <td class="py-3 px-2.5 text-right text-slate-900 font-mono">${fmtWon(rev)}</td>
-                            <td class="py-3 px-2.5 text-right text-rose-700 font-mono">${fmtWon(cost)}</td>
-                            <td class="py-3 px-2.5 text-right text-amber-700 font-mono">${fmtWon(fees)}</td>
-                            <td class="py-3 px-2.5 text-right font-black font-mono ${isNegativeProfit ? 'text-rose-600' : 'text-emerald-600'}">${fmtWon(profit)}</td>
-                            <td class="py-3 px-3 text-right font-black font-mono ${isNegativeProfit ? 'text-rose-600' : 'text-emerald-700'}">${marginPct}</td>
-                        </tr>
-                    `;
-
-                    if (chBadge) chBadge.innerText = '3개월 누적 비교';
+                    if (chBadge) chBadge.innerText = isProvisional ? '채널 및 실질 추정' : `${channels.length || 1}개 채널·실적`;
                     chDetailBody.innerHTML = rowsHtml;
                 }
             }
@@ -13150,7 +13831,7 @@ HTML_TEMPLATE = """
         setInterval(() => {
             loadDashboardData(false);
         }, 30000);
-    </script>
+</script>
 </body>
 </html>
 """
