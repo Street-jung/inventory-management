@@ -4395,12 +4395,12 @@ HTML_TEMPLATE = r"""
             <div class="bg-white rounded-xl border border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600">
                     <div class="flex items-center space-x-1.5">
-                        <span class="text-slate-500">이달 누적 매출</span>
+                        <span id="salesMonthlyRevenueLabel" class="text-slate-500">이달 누적 매출</span>
                         <span id="salesMonthlyRevenue" class="whitespace-nowrap font-bold font-mono text-indigo-600 text-sm">0원</span>
                     </div>
                     <span class="text-slate-200 hidden sm:inline">|</span>
                     <div class="flex items-center space-x-1.5">
-                        <span class="text-slate-500">월말 예상 매출(Forecast)</span>
+                        <span id="salesForecastRevenueLabel" class="text-slate-500">월말 예상 매출(Forecast)</span>
                         <span id="salesForecastRevenue" class="whitespace-nowrap font-bold font-mono text-indigo-700 text-sm">0원</span>
                         <span class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">예측</span>
                     </div>
@@ -4411,7 +4411,7 @@ HTML_TEMPLATE = r"""
                     </div>
                     <span class="text-slate-200 hidden sm:inline">|</span>
                     <div class="flex items-center space-x-1.5">
-                        <span class="text-slate-500">총 판매수량</span>
+                        <span id="salesTotalQtyLabel" class="text-slate-500">총 판매수량</span>
                         <span id="salesTotalQty" class="font-bold font-mono text-slate-900 text-sm">0개</span>
                         <span id="salesSkuCountBadge" class="text-slate-500 font-semibold text-[11px]">(판매 품목 36종)</span>
                         <span class="text-slate-300">·</span>
@@ -4426,9 +4426,10 @@ HTML_TEMPLATE = r"""
                 <button type="button" onclick="setSalesChannelFilter('all')" data-ch="all" class="sales-ch-pill status-pill bg-slate-100/80 border border-slate-900 ring-1 ring-slate-900 rounded-xl px-3 py-2 text-left transition cursor-pointer">
                     <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
                         <span class="w-1.5 h-1.5 rounded-full bg-slate-900 shrink-0"></span>
-                        <span class="truncate">전체 채널</span>
+                        <span id="salesChipAllLabel" class="truncate">전체 채널</span>
                     </div>
                     <div class="mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight" id="salesChipAllRev">0원</div>
+                    <div class="mt-0.5 text-[10px] text-slate-500 leading-snug truncate hidden" id="salesChipAllSub"></div>
                 </button>
                 <button type="button" onclick="setSalesChannelFilter('coupang_growth')" data-ch="coupang_growth" class="sales-ch-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
                     <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
@@ -4436,6 +4437,7 @@ HTML_TEMPLATE = r"""
                         <span class="truncate">쿠팡 그로스</span>
                     </div>
                     <div class="mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight" id="salesChipCoupangGrowthRev">0원</div>
+                    <div class="mt-0.5 text-[10px] text-slate-500 leading-snug truncate hidden" id="salesChipCoupangGrowthSub"></div>
                 </button>
                 <button type="button" onclick="setSalesChannelFilter('smartstore')" data-ch="smartstore" class="sales-ch-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
                     <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
@@ -4443,6 +4445,7 @@ HTML_TEMPLATE = r"""
                         <span class="truncate">스마트스토어</span>
                     </div>
                     <div class="mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight" id="salesChipSmartstoreRev">0원</div>
+                    <div class="mt-0.5 text-[10px] text-slate-500 leading-snug truncate hidden" id="salesChipSmartstoreSub"></div>
                 </button>
                 <button type="button" onclick="setSalesChannelFilter('cafe24')" data-ch="cafe24" class="sales-ch-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
                     <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
@@ -4450,6 +4453,7 @@ HTML_TEMPLATE = r"""
                         <span class="truncate">카페24</span>
                     </div>
                     <div class="mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight" id="salesChipCafe24Rev">0원</div>
+                    <div class="mt-0.5 text-[10px] text-slate-500 leading-snug truncate hidden" id="salesChipCafe24Sub"></div>
                 </button>
                 <button type="button" onclick="setSalesChannelFilter('b2b')" data-ch="b2b" class="sales-ch-pill status-pill bg-white hover:bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-left transition cursor-pointer">
                     <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
@@ -4457,6 +4461,7 @@ HTML_TEMPLATE = r"""
                         <span class="truncate">B2B</span>
                     </div>
                     <div class="mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight" id="salesChipB2bRev">0원</div>
+                    <div class="mt-0.5 text-[10px] text-slate-500 leading-snug truncate hidden" id="salesChipB2bSub"></div>
                 </button>
             </div>
 
@@ -4466,7 +4471,7 @@ HTML_TEMPLATE = r"""
                 <div class="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-xs">
                     <div class="flex flex-wrap gap-2 items-center justify-between">
                         <div class="flex flex-wrap items-center gap-2">
-                            <span class="font-bold text-xs text-slate-900">일별 매출 추이</span>
+                            <span id="salesTrendTitle" class="font-bold text-xs text-slate-900">일별 매출 추이</span>
                             <span id="salesTrendBasisBadge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">기준</span>
                             <span class="text-[11px] text-slate-400" id="salesTrendSubtitle">최근 일자별 실적</span>
                         </div>
@@ -4483,7 +4488,7 @@ HTML_TEMPLATE = r"""
                 <div class="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-xs flex flex-col justify-between">
                     <div class="flex flex-wrap gap-2 items-center justify-between border-b border-slate-100 pb-2">
                         <div class="flex flex-wrap items-center gap-2">
-                            <span class="font-bold text-xs text-slate-900">TOP 10 베스트셀러 상품</span>
+                            <span id="salesTopProductsTitle" class="font-bold text-xs text-slate-900">TOP 10 베스트셀러 상품</span>
                             <span class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700">판매량순</span>
                         </div>
                         <span class="text-[10px] text-slate-400">당월 누적</span>
@@ -4498,7 +4503,7 @@ HTML_TEMPLATE = r"""
             <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
                 <div class="p-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
                     <div class="flex flex-wrap items-center gap-2">
-                        <span class="font-bold text-xs text-slate-900">상품별 상세 매출 및 판매 실적</span>
+                        <span id="salesDetailTableTitle" class="font-bold text-xs text-slate-900">상품별 상세 매출 및 판매 실적</span>
                         <span id="salesDetailCountBadge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600">0건</span>
                         <span id="salesActiveFilterBadge" class="hidden px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">전체 채널</span>
                     </div>
@@ -4526,9 +4531,9 @@ HTML_TEMPLATE = r"""
                                 <th class="py-2.5 px-2 w-20 font-mono text-center">상품코드</th>
                                 <th class="py-2.5 px-3 min-w-[220px]">마스터 상품명</th>
                                 <th class="py-2.5 px-2 w-24 text-center">채널</th>
-                                <th class="py-2.5 px-2 text-center font-mono w-20">판매수량</th>
-                                <th class="py-2.5 px-2.5 text-right font-mono w-28">순매출액</th>
-                                <th class="py-2.5 px-2.5 text-right font-mono w-24">평균단가(ASP)</th>
+                                <th id="salesColQtyHeader" class="py-2.5 px-2 text-center font-mono w-20">판매수량</th>
+                                <th id="salesColRevHeader" class="py-2.5 px-2.5 text-right font-mono w-28">순매출액</th>
+                                <th id="salesColAspHeader" class="py-2.5 px-2.5 text-right font-mono w-24">평균단가(ASP)</th>
                                 <th class="py-2.5 px-2.5 text-right font-mono w-24">매출원가</th>
                                 <th class="py-2.5 px-2.5 text-right font-mono w-24">수수료·물류비</th>
                                 <th class="py-2.5 px-3 text-right font-mono w-32">기여이익 (이익률%)</th>
@@ -5058,17 +5063,17 @@ HTML_TEMPLATE = r"""
 
             <!-- 2. 핵심 손익 KPI 카드 5종 (기여이익 적자 시 빨간색 강조) -->
             <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
-                <!-- 카드 1: 순매출액 -->
+                <!-- 카드 1: 순매출액 / 채널 기준 매출 -->
                 <div class="bg-white border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between shadow-xs">
                     <div class="flex flex-wrap gap-2 items-center justify-between text-slate-500 text-[11px] font-semibold">
-                        <span>순매출액</span>
+                        <span id="pnlRevenueTitle">순매출액</span>
                         <div class="w-6 h-6 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center">
                             <i class="fa-solid fa-sack-dollar text-xs"></i>
                         </div>
                     </div>
                     <div class="mt-1">
                         <div id="pnlRevenue" class="text-lg sm:text-xl font-black font-mono text-slate-900">0원</div>
-                        <div class="text-[11px] text-slate-400 mt-0.5">매출 총계 (VAT포함)</div>
+                        <div id="pnlRevenueDesc" class="text-[11px] text-slate-400 mt-0.5">매출 총계 (VAT포함)</div>
                     </div>
                 </div>
 
@@ -11973,6 +11978,366 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
         // 탭 2: 일일 상품 매출 & 추이 렌더러
         // -------------------------------------------------------------
 
+        // 다채널 1단계 계약(multichannel_sales) 전용 한국어 요약·진단 헬퍼 (원문 API/필드명·개인정보 비노출)
+        function describeMultichannelChannel(chKey, mc) {
+            if (!mc || !mc.channels || !mc.channels[chKey]) return null;
+            const ch = mc.channels[chKey];
+            const cov = String(ch.coverage_status || '');
+            const sub = ch.recognized_subtotal;
+            const inc = Number(ch.included_count || 0);
+            const exc = Number(ch.excluded_count || 0);
+            const unv = Number(ch.amount_unverified_count || 0);
+            const totalCollected = ch.collected_count != null ? Number(ch.collected_count) : (inc + exc + unv);
+            const qty = ch.order_quantity;
+            const prop = ch.current_catalog_exact_proposal;
+            const label = ch.subtotal_label || '검증된 부분합';
+            const revBasis = String(ch.revenue_basis || '');
+
+            const shipRows = Array.isArray(mc.shipping_ledger)
+                ? mc.shipping_ledger.filter(r => r.channel === chKey)
+                : [];
+            const shipAmt = shipRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+            const refRows = Array.isArray(mc.refund_ledger)
+                ? mc.refund_ledger.filter(r => r.channel === chKey)
+                : [];
+            const refGoodsAmt = ch.refund_goods_amount != null
+                ? Number(ch.refund_goods_amount)
+                : refRows.reduce((s, r) => s + (r.goods_amount != null ? Number(r.goods_amount) : 0), 0);
+            const refDeductRef = ch.refund_completion_deduction_reference != null
+                ? Number(ch.refund_completion_deduction_reference)
+                : (sub != null && refGoodsAmt > 0 ? Number(sub) - refGoodsAmt : null);
+
+            // 제외(미반영) 참고 금액 및 사유 분해 — 이미 included된 행은 절대 재합산하지 않음
+            const chRows = Array.isArray(mc.rows) ? mc.rows.filter(r => r.channel === chKey) : [];
+            const excludedRows = chRows.filter(r => !r.included_in_channel_subtotal);
+            let cancelExcCount = 0;
+            let caseVariantCount = 0;
+            let caseVariantAmt = 0;
+            let scopeReviewCount = 0;
+            let scopeReviewAmt = 0;
+            let otherNonCancelCount = 0;
+            let otherNonCancelAmt = 0;
+            excludedRows.forEach(r => {
+                const mapStat = String(r.mapping_status || '').toLowerCase();
+                const reasonsStr = Array.isArray(r.reasons) ? r.reasons.join(' ').toLowerCase() : '';
+                const reason = `${r.exclusion_reason || ''} ${r.status || ''} ${mapStat} ${reasonsStr}`.toLowerCase();
+                const amt = r.amount != null ? Number(r.amount) : 0;
+                if (r.cancelled === true || reason.includes('cancel') || reason.includes('refund') || reason.includes('취소') || reason.includes('환불') || String(r.order_status || '').includes('취소')) {
+                    cancelExcCount += 1;
+                } else if (mapStat.includes('case') || reason.includes('case') || reason.includes('대소문자')) {
+                    caseVariantCount += 1;
+                    caseVariantAmt += amt;
+                } else if (mapStat.includes('scope') || reason.includes('scope') || String(r.product_code || '').toUpperCase() === '80CN08') {
+                    scopeReviewCount += 1;
+                    scopeReviewAmt += amt;
+                } else {
+                    otherNonCancelCount += 1;
+                    otherNonCancelAmt += amt;
+                }
+            });
+            if (ch.excluded_cancelled_count != null) cancelExcCount = Number(ch.excluded_cancelled_count);
+            const nonCancelExcCount = ch.excluded_non_cancelled_count != null
+                ? Number(ch.excluded_non_cancelled_count)
+                : (caseVariantCount + scopeReviewCount + otherNonCancelCount);
+            const nonCancelExcAmt = (ch.excluded_reference_amount != null && inc > 0)
+                ? Number(ch.excluded_reference_amount)
+                : (caseVariantAmt + scopeReviewAmt + otherNonCancelAmt);
+            const proposalPending = !!(prop && prop.amount != null && prop.row_count > 0 && prop.effective_in_subtotal === false && prop.is_additive !== false && inc === 0);
+
+            const amountBasisTitle = revBasis === 'cafe24_goods_payment'
+                ? '상품결제금액'
+                : (revBasis === 'smartstore_final_product_display' ? '최종 상품금액' : '결제 상품금액');
+
+            if (cov === 'collected_zero' || (sub === 0 && inc === 0 && exc === 0 && unv === 0)) {
+                return {
+                    state: 'collected_zero',
+                    recognizedSubtotal: 0,
+                    shortBadge: '0원',
+                    chipText: '0원 (주문 0건)',
+                    subText: '정상 조회 0건 · 매출 없음',
+                    summaryTag: '0건 확인',
+                    basisLabel: `${amountBasisTitle} (정상 조회 0건)`,
+                    amountBasisTitle,
+                    subtotalLabel: label,
+                    totalCollected: 0,
+                    includedCount: 0,
+                    excludedCount: 0,
+                    cancelExcCount: 0,
+                    nonCancelExcCount: 0,
+                    nonCancelExcAmt: 0,
+                    caseVariantCount: 0,
+                    caseVariantAmt: 0,
+                    scopeReviewCount: 0,
+                    scopeReviewAmt: 0,
+                    proposalPending: false,
+                    shipAmt,
+                    refRows,
+                    refGoodsAmt,
+                    raw: ch
+                };
+            }
+            if (cov === 'not_collected' || cov === 'collection_failed') {
+                return {
+                    state: 'not_collected',
+                    recognizedSubtotal: null,
+                    shortBadge: '미수집',
+                    chipText: '미수집',
+                    subText: cov === 'collection_failed' ? '수집 실패 · 데이터 미확보' : '해당 기간 미수집',
+                    summaryTag: '미수집',
+                    basisLabel: `${amountBasisTitle} (미수집)`,
+                    amountBasisTitle,
+                    subtotalLabel: label,
+                    totalCollected: 0,
+                    includedCount: 0,
+                    excludedCount: 0,
+                    cancelExcCount: 0,
+                    nonCancelExcCount: 0,
+                    nonCancelExcAmt: 0,
+                    caseVariantCount: 0,
+                    caseVariantAmt: 0,
+                    scopeReviewCount: 0,
+                    scopeReviewAmt: 0,
+                    proposalPending: false,
+                    shipAmt,
+                    refRows,
+                    refGoodsAmt,
+                    raw: ch
+                };
+            }
+            if (sub !== null && sub !== undefined && inc > 0) {
+                const isFull = cov === 'complete_verified' || (exc === 0 && unv === 0 && ch.provisional === false);
+                const qtyPart = qty != null ? `·수량 ${fmtNum(qty)}` : '';
+                const hasRefundLabel = label.includes('환불');
+                const extraNote = (shipAmt > 0 || refRows.length > 0)
+                    ? (hasRefundLabel ? ' · 배송 별도' : ' · 배송/환불 별도')
+                    : '';
+                let subText = '';
+                let summaryTag = isFull ? '전건반영' : '부분합';
+                if (isFull) {
+                    subText = `전건 반영 (${fmtNum(inc)}건${qtyPart}${extraNote})`;
+                } else if (exc > 0 || unv > 0) {
+                    subText = `${label} (수집 ${fmtNum(totalCollected)}·반영 ${fmtNum(inc)}·제외 ${fmtNum(exc + unv)})`;
+                    summaryTag = label.includes('현재코드') ? '현재코드 잠정부분합' : `부분합(${fmtNum(inc)}/${fmtNum(totalCollected)})`;
+                } else {
+                    subText = `${label} (${fmtNum(inc)}건${qtyPart}${extraNote})`;
+                }
+                return {
+                    state: isFull ? 'full_verified' : 'partial_verified',
+                    recognizedSubtotal: Number(sub),
+                    shortBadge: isFull ? '전건반영' : (label.includes('현재코드') ? '잠정부분합' : '부분합'),
+                    chipText: sub < 0 ? `-${fmtWon(Math.abs(sub))}` : fmtWon(sub),
+                    subText,
+                    summaryTag,
+                    basisLabel: isFull
+                        ? `${amountBasisTitle} (전건 반영 · 원가 미확정)`
+                        : (label.startsWith(amountBasisTitle) ? label : `${amountBasisTitle} (${label})`),
+                    amountBasisTitle,
+                    subtotalLabel: label,
+                    totalCollected,
+                    includedCount: inc,
+                    excludedCount: exc + unv,
+                    cancelExcCount,
+                    nonCancelExcCount,
+                    nonCancelExcAmt,
+                    caseVariantCount,
+                    caseVariantAmt,
+                    scopeReviewCount,
+                    scopeReviewAmt,
+                    proposalPending: false,
+                    shipAmt,
+                    refRows,
+                    refGoodsAmt,
+                    refDeductRef,
+                    raw: ch
+                };
+            }
+            // 수집은 되었으나 정책/근거 대기로 매출 미반영 (null 유지)
+            let subText = `브라우저 ${fmtNum(exc + unv)}건 수집 · 매출 미반영`;
+            if (proposalPending) {
+                subText = `품목코드 대기 · 참고 ${fmtWon(prop.amount)} (${fmtNum(prop.row_count)}건 미반영)`;
+            } else if (unv > 0 && exc === 0) {
+                subText = `금액 확인 대기 (${fmtNum(unv)}건)`;
+            }
+            return {
+                state: 'unrecognized',
+                recognizedSubtotal: null,
+                shortBadge: '미반영',
+                chipText: '미반영 (수집 완료)',
+                subText,
+                summaryTag: '미반영(수집완료)',
+                basisLabel: `${amountBasisTitle} (수집 완료 · 매출 미반영)`,
+                amountBasisTitle,
+                subtotalLabel: label,
+                totalCollected,
+                includedCount: 0,
+                excludedCount: exc + unv,
+                cancelExcCount,
+                nonCancelExcCount,
+                nonCancelExcAmt,
+                caseVariantCount,
+                caseVariantAmt,
+                scopeReviewCount,
+                scopeReviewAmt,
+                proposalPending,
+                shipAmt,
+                refRows,
+                refGoodsAmt,
+                raw: ch
+            };
+        }
+
+        function getSalesChannelMetricMeta(chFilter, activeMcChannel, isProvisional, isOptionQty, isUncombinedMc) {
+            if (chFilter === 'cafe24') {
+                const subLbl = activeMcChannel ? activeMcChannel.subtotalLabel : '검증된 부분합';
+                const isFull = activeMcChannel && activeMcChannel.state === 'full_verified';
+                return {
+                    amountLabel: '상품결제금액',
+                    qtyLabel: '주문수량',
+                    aspLabel: '평균 상품단가',
+                    sortNote: '상품결제금액 내림차순',
+                    tableTitle: '카페24 상품별 결제 내역 (배송·환불 별도)',
+                    trendTitle: '카페24 일별 상품결제 추이',
+                    footLabel: (skuCnt, orderCnt) => isFull
+                        ? `전건 소계 (${skuCnt}종 · ${orderCnt}건 · 배송/환불 별도)`
+                        : `${subLbl} (${skuCnt}종 · ${orderCnt}건 · 배송/환불 별도)`
+                };
+            }
+            if (chFilter === 'smartstore') {
+                const subLbl = activeMcChannel ? activeMcChannel.subtotalLabel : '잠정 부분합';
+                const isFull = activeMcChannel && activeMcChannel.state === 'full_verified';
+                const excCnt = activeMcChannel ? activeMcChannel.excludedCount : 0;
+                const incCnt = activeMcChannel ? activeMcChannel.includedCount : 0;
+                return {
+                    amountLabel: '최종 상품금액',
+                    qtyLabel: '주문수량',
+                    aspLabel: '평균 상품단가',
+                    sortNote: '최종 상품금액 내림차순',
+                    tableTitle: incCnt > 0
+                        ? `스마트스토어 상품별 내역 (${subLbl} · 반영 ${incCnt}건 / 제외 ${excCnt}건)`
+                        : '스마트스토어 상품별 내역',
+                    trendTitle: '스마트스토어 일별 최종 상품금액 추이',
+                    footLabel: (skuCnt, orderCnt) => isFull
+                        ? `전건 소계 (${skuCnt}종 · 반영 ${orderCnt}건)`
+                        : `${subLbl} (${skuCnt}종 · 반영 ${orderCnt}건 · 제외 ${excCnt}건 별도)`
+                };
+            }
+            if (chFilter === 'b2b') {
+                return {
+                    amountLabel: 'B2B 매출액',
+                    qtyLabel: '판매수량',
+                    aspLabel: '평균단가',
+                    sortNote: '매출액 내림차순',
+                    tableTitle: 'B2B 상품별 매출 내역',
+                    trendTitle: 'B2B 일별 매출 추이',
+                    footLabel: (skuCnt) => `B2B 합계 (조회 ${skuCnt}건)`
+                };
+            }
+            if (isProvisional || isUncombinedMc) {
+                const isAllUncombined = chFilter === 'all' && isUncombinedMc;
+                return {
+                    amountLabel: '잠정매출액 (쿠폰 전)',
+                    qtyLabel: isOptionQty ? '옵션 판매수량' : '판매수량',
+                    aspLabel: isOptionQty ? '평균 옵션단가' : '평균단가(ASP)',
+                    sortNote: '잠정매출액 내림차순',
+                    tableTitle: isAllUncombined
+                        ? '쿠팡 상품별 상세 실적 (타채널 별도)'
+                        : '쿠팡 그로스 상품별 상세 실적',
+                    trendTitle: isAllUncombined
+                        ? '쿠팡 일별 매출 추이 (타채널 별도)'
+                        : '쿠팡 그로스 일별 매출 추이',
+                    footLabel: (skuCnt) => isAllUncombined
+                        ? `쿠팡 소계 (조회 ${skuCnt}건 · 타채널 별도)`
+                        : `쿠팡 그로스 합계 (조회 ${skuCnt}건)`
+                };
+            }
+            return {
+                amountLabel: '순매출액',
+                qtyLabel: '판매수량',
+                aspLabel: '평균단가(ASP)',
+                sortNote: '순매출액 내림차순',
+                tableTitle: '상품별 상세 매출 및 판매 실적',
+                trendTitle: '일별 매출 추이',
+                footLabel: (skuCnt) => `합계 (조회 ${skuCnt}건)`
+            };
+        }
+
+        function buildMultichannelDiagnosisLines(mc) {
+            if (!mc) return [];
+            const lines = [];
+            const periodStr = (mc.period && mc.period.start && mc.period.end)
+                ? `${mc.period.start.slice(5)}~${mc.period.end.slice(5)}`
+                : '당월';
+
+            if (mc.legacy_coupang_revenue != null) {
+                lines.push(`<strong>쿠팡</strong>: 판매분석 잠정 집계(${periodStr}, 할인쿠폰 적용 전·결제/취소 기준) ${fmtWon(mc.legacy_coupang_revenue)} · 원가·수수료 미확정(이익 미산출).`);
+            }
+
+            const c24 = describeMultichannelChannel('cafe24', mc);
+            if (c24) {
+                const extras = [];
+                if (c24.shipAmt > 0) extras.push(`배송비 ${fmtWon(c24.shipAmt)} 별도`);
+                if (c24.refGoodsAmt > 0) {
+                    const prevRef = c24.refRows.find(r => r.original_payment_date && r.event_date);
+                    const refDateDesc = prevRef ? `${prevRef.original_payment_date.slice(5)} 주문의 ${prevRef.event_date.slice(5)} 상품 환불` : '이전 주문 상품 환불';
+                    const refNetHint = c24.recognizedSubtotal != null
+                        ? ` · 환불완료일 차감 참고 ${c24.recognizedSubtotal - c24.refGoodsAmt < 0 ? '-' + fmtWon(Math.abs(c24.recognizedSubtotal - c24.refGoodsAmt)) : fmtWon(c24.recognizedSubtotal - c24.refGoodsAmt)} 미반영`
+                        : '';
+                    extras.push(`${refDateDesc} ${fmtWon(c24.refGoodsAmt)} 별도(귀속 미결정${refNetHint})`);
+                }
+                const extraStr = extras.length > 0 ? ` · ${extras.join(' · ')}` : '';
+                if (c24.state === 'partial_verified' || c24.state === 'full_verified') {
+                    const c24SubPrefix = c24.subText.startsWith('상품결제금액') ? '' : '상품결제금액 ';
+                    lines.push(`<strong>카페24</strong>: 브라우저 수집 확보(${periodStr}, 최근 조회 0건 포함) · ${c24SubPrefix}${c24.subText} = <strong>${c24.chipText}</strong> (월 순매출 미결정 · 원가·세트 규격 미확정)${extraStr}.`);
+                } else {
+                    lines.push(`<strong>카페24</strong>: ${c24.chipText} (${c24.subText})${extraStr}.`);
+                }
+            }
+
+            const ss = describeMultichannelChannel('smartstore', mc);
+            if (ss) {
+                const apiDiag = mc.api_diagnostic || {};
+                const apiNote = apiDiag.http_status === 403
+                    ? (apiDiag.caller_ip_matches === false
+                        ? '자동 API 인증 제한(허용 IP 불일치 403)과 별개로 '
+                        : '자동 API 인증 제한(403)과 별개로 ')
+                    : '';
+                const prop = ss.raw && ss.raw.current_catalog_exact_proposal;
+                const propNote = ss.proposalPending
+                    ? ` · 현재 상품코드 정확 연결 시 참고 ${fmtWon(prop.amount)}(${fmtNum(prop.row_count)}건, 미반영·승인 대기)`
+                    : '';
+                const cancelCnt = ss.cancelExcCount || ss.refRows.length || 0;
+                const cancelNote = cancelCnt > 0
+                    ? ` · 취소 완료 ${fmtNum(cancelCnt)}건 매출 제외(별도 보관·실환불액 미확인)`
+                    : '';
+                const physList = Array.isArray(mc.physical_evidence) ? mc.physical_evidence : [];
+                const physNote = physList.length > 0
+                    ? ` · 실물 출고 관측 ${fmtNum(physList.length)}건만 확인(일반 배수 환산 미적용)`
+                    : '';
+                if (ss.state === 'unrecognized') {
+                    lines.push(`<strong>스마트스토어</strong>: ${apiNote}브라우저 원천 ${fmtNum(ss.totalCollected)}건 수집 완료 · 과거 품목코드 근거 대기로 매출 미반영(원가·수수료 미확정)${propNote}${cancelNote}${physNote}.`);
+                } else if (ss.state === 'partial_verified' || ss.state === 'full_verified') {
+                    const remParts = [];
+                    if (ss.caseVariantCount > 0) remParts.push(`대소문자 ${fmtNum(ss.caseVariantCount)}건 ${fmtWon(ss.caseVariantAmt)}`);
+                    if (ss.scopeReviewCount > 0) remParts.push(`범위검토 ${fmtNum(ss.scopeReviewCount)}건 ${fmtWon(ss.scopeReviewAmt)}`);
+                    const remDetail = remParts.length > 0 ? `(${remParts.join(' · ')})` : '';
+                    const remNote = (ss.excludedCount > 0 && ss.nonCancelExcAmt > 0)
+                        ? ` · 미반영 비취소 참고 ${fmtWon(ss.nonCancelExcAmt)}${remDetail} 별도(부분합 미포함)`
+                        : '';
+                    const caveat = ss.subtotalLabel.includes('현재코드')
+                        ? '현재 상품코드 연결 기준 잠정치 · 주문 당시코드/회계확정 아님 · 원가·BOM·손익 미산출'
+                        : '원가·BOM·손익 미산출';
+                    lines.push(`<strong>스마트스토어</strong>: ${apiNote}브라우저 원천 수집 ${fmtNum(ss.totalCollected)}건 중 반영 ${fmtNum(ss.includedCount)}건 · 제외 ${fmtNum(ss.excludedCount)}건 · 최종 상품금액 ${ss.subtotalLabel} = <strong>${ss.chipText}</strong> (${caveat})${remNote}${cancelNote}${physNote}.`);
+                } else {
+                    lines.push(`<strong>스마트스토어</strong>: ${apiNote}${ss.chipText} (${ss.subText})${propNote}${cancelNote}${physNote}.`);
+                }
+            }
+
+            if (mc.combined_revenue === null || mc.combined_revenue === undefined || mc.combined_status === 'not_comparable') {
+                lines.push(`<strong>기준 분리 안내</strong>: 쿠팡(쿠폰 전 판매분석)과 카페24(상품결제금액)·스마트스토어(최종 상품금액)는 매출 기준이 달라 통합 확정 총매출을 산출하지 않고 채널별로 분리 표기합니다.`);
+            }
+            return lines;
+        }
+
         function cleanSettlementNote(note) {
             return /raw_data[\/]|[.]xlsx:/i.test(String(note || ''))
                 ? '홈택스 전자세금계산서 대조 내역' : String(note || '');
@@ -11999,6 +12364,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const safe = cell => escapeHtml(text(cell));
             const badge = value => `<span class="card-badge">${value}</span>`;
             const metric = (label, value, color='') => `<div><dt>${label}</dt><dd class="${color}">${value}</dd></div>`;
+            const salesRevLabel = document.getElementById('salesColRevHeader')?.textContent?.trim() || '순매출액';
+            const salesQtyLabel = document.getElementById('salesColQtyHeader')?.textContent?.trim() || '판매수량';
+            const salesAspLabel = document.getElementById('salesColAspHeader')?.textContent?.trim() || '평균단가(ASP)';
             list.innerHTML = rows.map(row => {
                 const c = [...row.cells];
                 if (tab === 'sales') {
@@ -12006,7 +12374,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     const profit = text(c[9]);
                     return `<article><div class="card-meta">${badge(safe(c[0]) + ' · ' + safe(c[1]))}${badge(safe(c[3]))}</div>
                         <h3>${escapeHtml(name ? text(name) : text(c[2]))}</h3>
-                        <dl class="card-metrics">${metric('순매출액', safe(c[5]), 'text-indigo-600')}${metric('판매수량 / 평균단가(ASP)', safe(c[4]) + '개 / ' + safe(c[6]))}
+                        <dl class="card-metrics">${metric(escapeHtml(salesRevLabel), safe(c[5]), 'text-indigo-600')}${metric(`${escapeHtml(salesQtyLabel)} / ${escapeHtml(salesAspLabel)}`, safe(c[4]) + '개 / ' + safe(c[6]))}
                         ${metric('기여이익 (이익률)', escapeHtml(profit), profit.startsWith('-') ? 'text-rose-600' : 'text-emerald-700')}${metric('현재 가용재고 (런웨이)', safe(c[10]))}</dl></article>`;
                 }
                 if (tab === 'cashflow') {
@@ -12109,33 +12477,50 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 if (ssStatusText) uncollected.push(ssStatusText);
                 if (c24StatusText) uncollected.push(c24StatusText);
 
-                // 간결한 요약 배지 생성 (모바일 및 20년 차 MD 첫인상 개선)
-                const conciseSummaryParts = [];
-                const cpAgg = srcStatus.coupang?.aggregation?.status;
-                const ssAgg = srcStatus.smartstore?.aggregation?.status;
-                const c24Agg = srcStatus.cafe24?.aggregation?.status;
+                // 간결한 요약 배지 및 상세 진단 생성 (다채널 1단계 계약 우선 소비, 원문 필드명/개인정보 비노출)
+                const mc = d.multichannel_sales || null;
+                let conciseSummary = '';
+                let detailDiagHtml = '';
 
-                if (cpAgg === 'included') conciseSummaryParts.push('쿠팡 반영');
-                else if (cpAgg === 'included_provisional') conciseSummaryParts.push('쿠팡 잠정반영');
+                if (mc && mc.channels) {
+                    const mcParts = [];
+                    if (mc.legacy_coupang_revenue != null) mcParts.push('쿠팡 잠정');
+                    const mcC24 = describeMultichannelChannel('cafe24', mc);
+                    const mcSS = describeMultichannelChannel('smartstore', mc);
+                    if (mcC24) mcParts.push(`카페24 ${mcC24.summaryTag}`);
+                    if (mcSS) mcParts.push(`스토어 ${mcSS.summaryTag}`);
+                    conciseSummary = mcParts.join(' · ');
+                    const diagLines = buildMultichannelDiagnosisLines(mc);
+                    detailDiagHtml = diagLines.map(line => `<div class="py-0.5">• ${line}</div>`).join('');
+                } else {
+                    const conciseSummaryParts = [];
+                    const cpAgg = srcStatus.coupang?.aggregation?.status;
+                    const ssAgg = srcStatus.smartstore?.aggregation?.status;
+                    const c24Agg = srcStatus.cafe24?.aggregation?.status;
 
-                if (ssAgg === 'included' && c24Agg === 'included') conciseSummaryParts.push('스토어/카페24 반영');
-                else if (ssAgg === 'review_only' && c24Agg === 'review_only') conciseSummaryParts.push('스토어/카페24 검토중');
-                else {
-                    if (ssAgg === 'included') conciseSummaryParts.push('스토어 반영');
-                    else if (ssAgg === 'review_only') conciseSummaryParts.push('스토어 미반영');
-                    if (c24Agg === 'included') conciseSummaryParts.push('카페24 반영');
-                    else if (c24Agg === 'review_only') conciseSummaryParts.push('카페24 미반영');
+                    if (cpAgg === 'included') conciseSummaryParts.push('쿠팡 반영');
+                    else if (cpAgg === 'included_provisional') conciseSummaryParts.push('쿠팡 잠정반영');
+
+                    if (ssAgg === 'included' && c24Agg === 'included') conciseSummaryParts.push('스토어/카페24 반영');
+                    else if (ssAgg === 'review_only' && c24Agg === 'review_only') conciseSummaryParts.push('스토어/카페24 검토중');
+                    else {
+                        if (ssAgg === 'included') conciseSummaryParts.push('스토어 반영');
+                        else if (ssAgg === 'review_only') conciseSummaryParts.push('스토어 미반영');
+                        if (c24Agg === 'included') conciseSummaryParts.push('카페24 반영');
+                        else if (c24Agg === 'review_only') conciseSummaryParts.push('카페24 미반영');
+                    }
+                    conciseSummary = conciseSummaryParts.join(' · ');
+                    detailDiagHtml = uncollected.join(' · ');
                 }
-                const conciseSummary = conciseSummaryParts.join(' · ');
 
-                if (uncollected.length > 0) {
-                    coverageNote = ` · <span class="text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px] whitespace-nowrap">${conciseSummary || '채널 검토중'}</span>
-                    <details class="inline-block align-middle ml-1">
+                if (detailDiagHtml) {
+                    coverageNote = ` · <span id="salesMultichannelSummaryBadge" class="text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px] whitespace-nowrap">${conciseSummary || '채널 검토중'}</span>
+                    <details id="salesDetailDiagnosisBox" class="inline-block align-middle ml-1">
                         <summary class="cursor-pointer text-slate-500 hover:text-slate-800 underline text-[11px] font-normal select-none">
                             상세 진단 ▾
                         </summary>
-                        <div class="mt-1.5 p-2 bg-amber-50/95 rounded-lg border border-amber-200 text-[11px] text-amber-900 leading-relaxed font-normal shadow-2xs">
-                            ${uncollected.join(' · ')}
+                        <div class="mt-1.5 p-2.5 bg-amber-50/95 rounded-lg border border-amber-200 text-[11px] text-amber-950 leading-relaxed font-normal shadow-2xs text-left max-w-2xl">
+                            ${detailDiagHtml}
                         </div>
                     </details>`;
                 }
@@ -12325,13 +12710,59 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
             const srcStatus = sp.source_status || d.source_status || {};
             const collStatus = d.collection_status || sp.collection_status || {};
+            const mcSales = d.multichannel_sales || null;
+            const mcC24Info = describeMultichannelChannel('cafe24', mcSales);
+            const mcSSInfo = describeMultichannelChannel('smartstore', mcSales);
+            const mcB2bInfo = describeMultichannelChannel('b2b', mcSales);
+            const isUncombinedMc = !!(mcSales && (mcSales.combined_revenue === null || mcSales.combined_revenue === undefined || mcSales.combined_status === 'not_comparable'));
+            const isProvisionalSales = !!(sp.provisional || monthly.data_status === 'partial');
 
-            // 전체 칩
+            // 상단 월 KPI 라벨 범위 명확화 (통합 미산출 시 쿠팡 판매분석 기준임을 제목에 명시)
+            const mRevLabelEl = document.getElementById('salesMonthlyRevenueLabel');
+            const fRevLabelEl = document.getElementById('salesForecastRevenueLabel');
+            const tQtyLabelEl = document.getElementById('salesTotalQtyLabel');
+            const topTitleEl = document.getElementById('salesTopProductsTitle');
+            if (mRevLabelEl) mRevLabelEl.innerText = isUncombinedMc ? '쿠팡 누적 매출 (판매분석)' : '이달 누적 매출';
+            if (fRevLabelEl) fRevLabelEl.innerText = isUncombinedMc ? '쿠팡 월말 예상 (참고)' : '월말 예상 매출(Forecast)';
+            if (tQtyLabelEl) tQtyLabelEl.innerText = isUncombinedMc ? '쿠팡 판매수량' : '총 판매수량';
+            if (topTitleEl) topTitleEl.innerText = isUncombinedMc ? '쿠팡 TOP 10 베스트셀러' : 'TOP 10 베스트셀러 상품';
+
+            const setChipSub = (id, text, cls = 'text-slate-500') => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                if (text) {
+                    el.innerText = text;
+                    el.title = text;
+                    el.className = `mt-0.5 text-[10px] leading-snug truncate ${cls}`;
+                    el.classList.remove('hidden');
+                } else {
+                    el.innerText = '';
+                    el.classList.add('hidden');
+                }
+            };
+
+            // 전체 칩 (combined=null일 때 쿠팡 금액을 전체 채널 아래 표기하지 않고 '통합 미산출' 명시)
+            const allChipLabelEl = document.getElementById('salesChipAllLabel');
             const allChipEl = document.getElementById('salesChipAllRev');
             if (allChipEl) {
-                if (chRevs.all === null) allChipEl.innerText = '미산출';
-                else if (chRevs.all < 0) allChipEl.innerText = `-${fmtWon(Math.abs(chRevs.all))}`;
-                else allChipEl.innerText = fmtWon(chRevs.all);
+                if (mcSales && !isUncombinedMc) {
+                    if (allChipLabelEl) allChipLabelEl.innerText = '전체 통합';
+                    allChipEl.innerText = fmtWon(mcSales.combined_revenue);
+                    allChipEl.className = 'mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight';
+                    setChipSub('salesChipAllSub', '통합 검증 합계', 'text-emerald-700');
+                } else if (isUncombinedMc) {
+                    if (allChipLabelEl) allChipLabelEl.innerText = '전체 통합';
+                    allChipEl.innerText = '통합 미산출';
+                    allChipEl.className = 'mt-0.5 text-sm sm:text-base font-bold text-slate-700 leading-snug tracking-tight';
+                    setChipSub('salesChipAllSub', '매출 기준 상이 · 채널별 확인', 'text-slate-500');
+                } else {
+                    if (allChipLabelEl) allChipLabelEl.innerText = '전체 채널';
+                    if (chRevs.all === null) allChipEl.innerText = '미산출';
+                    else if (chRevs.all < 0) allChipEl.innerText = `-${fmtWon(Math.abs(chRevs.all))}`;
+                    else allChipEl.innerText = fmtWon(chRevs.all);
+                    allChipEl.className = 'mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight';
+                    setChipSub('salesChipAllSub', '');
+                }
             }
 
             // 쿠팡 칩
@@ -12339,59 +12770,155 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             if (cpChipEl) {
                 const cpSrc = { api: collStatus.coupang, ...srcStatus.coupang };
                 cpChipEl.innerText = formatChannelChip(chRevs.coupang_growth, cpSrc, '미산출');
+                setChipSub('salesChipCoupangGrowthSub', mcSales ? '판매분석 잠정 (쿠폰 전 · 원가 미확정)' : '', 'text-indigo-700');
             }
 
-            // 스마트스토어 칩
+            // 스마트스토어 칩 (multichannel_sales 우선 소비 — 기존 과거 참고값 대체 금지)
             const ssChipEl = document.getElementById('salesChipSmartstoreRev');
             if (ssChipEl) {
-                const ssSrc = { api: collStatus.smartstore, ...srcStatus.smartstore };
-                ssChipEl.innerText = formatChannelChip(chRevs.smartstore, ssSrc, '미수집');
-            }
-
-            // 카페24 칩
-            const c24ChipEl = document.getElementById('salesChipCafe24Rev');
-            if (c24ChipEl) {
-                const c24Src = { api: collStatus.cafe24, ...srcStatus.cafe24 };
-                if (c24Src.aggregation?.status === 'included') {
-                    c24ChipEl.innerText = formatChannelChip(chRevs.cafe24, c24Src, '0원');
-                } else if (c24Src.aggregation?.status === 'review_only') {
-                    c24ChipEl.innerText = '검토 중 (미반영)';
-                } else if (c24Src.api?.status === 'partial' && c24Src.api?.collected_days === 0 && (c24Src.api?.available_file_days || 0) > 0) {
-                    c24ChipEl.innerText = `미검증 (파일 ${c24Src.api.available_file_days}일)`;
+                if (mcSSInfo) {
+                    ssChipEl.innerText = mcSSInfo.chipText;
+                    ssChipEl.className = mcSSInfo.recognizedSubtotal === null
+                        ? 'mt-0.5 text-sm sm:text-base font-bold text-slate-900 leading-snug tracking-tight'
+                        : 'mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight';
+                    const ssSubCls = mcSSInfo.state === 'partial_verified' || mcSSInfo.state === 'full_verified'
+                        ? 'text-emerald-700'
+                        : (mcSSInfo.state === 'unrecognized' ? 'text-amber-700' : 'text-slate-500');
+                    setChipSub('salesChipSmartstoreSub', mcSSInfo.subText, ssSubCls);
                 } else {
-                    c24ChipEl.innerText = formatChannelChip(chRevs.cafe24, c24Src, '미수집');
+                    const ssSrc = { api: collStatus.smartstore, ...srcStatus.smartstore };
+                    ssChipEl.innerText = formatChannelChip(chRevs.smartstore, ssSrc, '미수집');
+                    ssChipEl.className = 'mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight';
+                    setChipSub('salesChipSmartstoreSub', '');
                 }
             }
 
-            // B2B 칩
-            const b2bChipEl = document.getElementById('salesChipB2bRev');
-            if (b2bChipEl) {
-                if (chRevs.b2b === null) b2bChipEl.innerText = '0원';
-                else if (chRevs.b2b < 0) b2bChipEl.innerText = `-${fmtWon(Math.abs(chRevs.b2b))}`;
-                else b2bChipEl.innerText = fmtWon(chRevs.b2b);
+            // 카페24 칩 (multichannel_sales 우선 소비)
+            const c24ChipEl = document.getElementById('salesChipCafe24Rev');
+            if (c24ChipEl) {
+                if (mcC24Info) {
+                    c24ChipEl.innerText = mcC24Info.chipText;
+                    c24ChipEl.className = mcC24Info.recognizedSubtotal === null
+                        ? 'mt-0.5 text-sm sm:text-base font-bold text-slate-900 leading-snug tracking-tight'
+                        : 'mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight';
+                    const c24SubCls = mcC24Info.state === 'partial_verified' || mcC24Info.state === 'full_verified'
+                        ? 'text-amber-800'
+                        : 'text-slate-500';
+                    setChipSub('salesChipCafe24Sub', mcC24Info.subText, c24SubCls);
+                } else {
+                    const c24Src = { api: collStatus.cafe24, ...srcStatus.cafe24 };
+                    c24ChipEl.className = 'mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight';
+                    if (c24Src.aggregation?.status === 'included') {
+                        c24ChipEl.innerText = formatChannelChip(chRevs.cafe24, c24Src, '0원');
+                    } else if (c24Src.aggregation?.status === 'review_only') {
+                        c24ChipEl.innerText = '검토 중 (미반영)';
+                    } else if (c24Src.api?.status === 'partial' && c24Src.api?.collected_days === 0 && (c24Src.api?.available_file_days || 0) > 0) {
+                        c24ChipEl.innerText = `미검증 (파일 ${c24Src.api.available_file_days}일)`;
+                    } else {
+                        c24ChipEl.innerText = formatChannelChip(chRevs.cafe24, c24Src, '미수집');
+                    }
+                    setChipSub('salesChipCafe24Sub', '');
+                }
             }
 
-            // 4. 일별 매출 추이 그래프 (daily_series)
+            // B2B 칩 (미수집 null을 0원으로 바꾸거나 은행 입금을 매출 근거로 표기하지 않음 — 실제 0건 증거 시에만 0원)
+            const b2bChipEl = document.getElementById('salesChipB2bRev');
+            const b2bVerifiedZero = !!(mcB2bInfo ? mcB2bInfo.state === 'collected_zero' : (collStatus.b2b?.status === 'success_empty' || srcStatus.b2b?.api?.status === 'success_empty'));
+            let b2bUncollected = false;
+            if (b2bChipEl) {
+                if (mcB2bInfo) {
+                    b2bChipEl.innerText = mcB2bInfo.chipText;
+                    b2bChipEl.className = mcB2bInfo.recognizedSubtotal === null
+                        ? 'mt-0.5 text-sm sm:text-base font-bold text-slate-700 leading-snug tracking-tight'
+                        : 'mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight';
+                    setChipSub('salesChipB2bSub', mcB2bInfo.subText, 'text-slate-500');
+                    b2bUncollected = mcB2bInfo.recognizedSubtotal === null;
+                } else if (b2bVerifiedZero) {
+                    b2bChipEl.innerText = '0원 (주문 0건)';
+                    b2bChipEl.className = 'mt-0.5 text-sm sm:text-base font-bold font-mono text-slate-900 leading-snug';
+                    setChipSub('salesChipB2bSub', '정상 조회 0건 · 매출 없음', 'text-slate-500');
+                } else if (chRevs.b2b === null || chRevs.b2b === undefined) {
+                    b2bUncollected = true;
+                    const b2bReviewOnly = srcStatus.b2b?.aggregation?.status === 'review_only';
+                    b2bChipEl.innerText = b2bReviewOnly ? '미반영' : '미수집';
+                    b2bChipEl.className = 'mt-0.5 text-sm sm:text-base font-bold text-slate-700 leading-snug tracking-tight';
+                    setChipSub('salesChipB2bSub', '매출 원장 미연동', 'text-slate-400');
+                } else {
+                    b2bChipEl.innerText = chRevs.b2b < 0 ? `-${fmtWon(Math.abs(chRevs.b2b))}` : fmtWon(chRevs.b2b);
+                    b2bChipEl.className = 'mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight';
+                    setChipSub('salesChipB2bSub', 'B2B 매출 원장 기준', 'text-slate-500');
+                }
+            }
+
+            // 4. 일별 매출 추이 그래프 (daily_series / 다채널 필터 분리 반영)
             const trendWrap = document.getElementById('salesTrendChartContainer');
             let rawTrend = Array.isArray(sp.daily_series) ? sp.daily_series : [];
             rawTrend = [...rawTrend].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
 
-            const trendList = rawTrend.map(t => {
-                if (currentSalesChannelFilter === 'all') {
+            const activeMcChannel = (currentSalesChannelFilter === 'cafe24') ? mcC24Info
+                : (currentSalesChannelFilter === 'smartstore' ? mcSSInfo
+                : (currentSalesChannelFilter === 'b2b' ? mcB2bInfo : null));
+            const metricMeta = getSalesChannelMetricMeta(currentSalesChannelFilter, activeMcChannel, isProvisionalSales, isOptionQty, isUncombinedMc);
+
+            const trendTitleEl = document.getElementById('salesTrendTitle');
+            if (trendTitleEl) trendTitleEl.innerText = metricMeta.trendTitle;
+            const detailTableTitleEl = document.getElementById('salesDetailTableTitle');
+            if (detailTableTitleEl) detailTableTitleEl.innerText = metricMeta.tableTitle;
+            const colQtyHdr = document.getElementById('salesColQtyHeader');
+            const colRevHdr = document.getElementById('salesColRevHeader');
+            const colAspHdr = document.getElementById('salesColAspHeader');
+            if (colQtyHdr) colQtyHdr.innerText = metricMeta.qtyLabel;
+            if (colRevHdr) colRevHdr.innerText = metricMeta.amountLabel;
+            if (colAspHdr) colAspHdr.innerText = metricMeta.aspLabel;
+
+            let trendList = [];
+            let mcTrendEmptyMsg = '';
+            if (currentSalesChannelFilter === 'b2b' && b2bUncollected && !activeMcChannel) {
+                trendList = [];
+                mcTrendEmptyMsg = 'B2B 매출 원장이 아직 연동되지 않았습니다. (은행 입금은 매출로 자동 집계하지 않음)';
+            } else if (activeMcChannel) {
+                const mcDaily = Array.isArray(activeMcChannel.raw?.daily_series) ? activeMcChannel.raw.daily_series : [];
+                if (mcDaily.length > 0) {
+                    const mcByDate = {};
+                    mcDaily.forEach(item => {
+                        if (item.date) mcByDate[item.date] = item.amount;
+                    });
+                    const baseDates = rawTrend.length > 0
+                        ? rawTrend.map(t => t.date)
+                        : mcDaily.map(item => item.date).sort();
+                    trendList = baseDates.map(dt => ({
+                        date: dt,
+                        revenue: Object.prototype.hasOwnProperty.call(mcByDate, dt) ? mcByDate[dt] : null,
+                        isConfirmed: Object.prototype.hasOwnProperty.call(mcByDate, dt)
+                    }));
+                } else {
+                    trendList = [];
+                    if (activeMcChannel.state === 'collected_zero') {
+                        mcTrendEmptyMsg = '해당 기간 정상 조회 결과 주문 0건입니다.';
+                    } else if (activeMcChannel.state === 'not_collected') {
+                        mcTrendEmptyMsg = '해당 채널의 일별 매출 원천이 아직 수집되지 않았습니다.';
+                    } else {
+                        mcTrendEmptyMsg = `${activeMcChannel.chipText} — ${activeMcChannel.subText}`;
+                    }
+                }
+            } else {
+                trendList = rawTrend.map(t => {
+                    if (currentSalesChannelFilter === 'all') {
+                        return {
+                            ...t,
+                            revenue: t.revenue !== undefined ? t.revenue : null,
+                            isConfirmed: t.revenue !== undefined && t.revenue !== null
+                        };
+                    }
+                    const selected = (t.channels || []).find(c => c.channel === currentSalesChannelFilter ||
+                        (currentSalesChannelFilter === 'coupang_growth' && (c.channel === 'coupang' || c.channel === 'rocket_growth')));
                     return {
                         ...t,
-                        revenue: t.revenue !== undefined ? t.revenue : null,
-                        isConfirmed: t.revenue !== undefined && t.revenue !== null
+                        revenue: selected ? selected.revenue : null,
+                        isConfirmed: !!selected
                     };
-                }
-                const selected = (t.channels || []).find(c => c.channel === currentSalesChannelFilter ||
-                    (currentSalesChannelFilter === 'coupang_growth' && (c.channel === 'coupang' || c.channel === 'rocket_growth')));
-                return {
-                    ...t,
-                    revenue: selected ? selected.revenue : null,
-                    isConfirmed: !!selected
-                };
-            });
+                });
+            }
 
             // 필터 채널별 그래프 바 색상 지정 (전체는 중립 슬레이트)
             let chartBarColor = 'bg-slate-700';
@@ -12403,7 +12930,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const legendWrap = document.getElementById('salesTrendLegend');
             if (legendWrap) {
                 legendWrap.innerHTML = `
-                    <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-slate-700"></span>전체(합산)</span>
+                    <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-slate-700"></span>${mcSales ? '쿠팡 기준' : '전체(합산)'}</span>
                     <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-indigo-500"></span>로켓그로스</span>
                     <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>스마트스토어</span>
                     <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-amber-500"></span>카페24</span>
@@ -12411,28 +12938,37 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 `;
             }
 
-            // 기준 배지 업데이트 (판매분석 잠정 / 결제일 / 정산인식일)
+            // 기준 배지 업데이트 (판매분석 잠정 / 결제 상품금액 / 정산인식일)
             const basisBadge = document.getElementById('salesTrendBasisBadge');
             if (basisBadge) {
-                const basis = sp.daily_basis || sp.basis || (rawTrend[0] && rawTrend[0].basis) || '';
-                if (basis.includes('settlement') || basis.includes('정산')) {
-                    basisBadge.innerText = '정산인식일 기준';
-                    basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300';
-                } else if (basis.includes('payment') || basis.includes('결제')) {
-                    basisBadge.innerText = '결제일 기준 (잠정)';
-                    basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200';
-                } else if (basis.includes('analysis') || basis.includes('판매분석') || sp.provisional) {
-                    basisBadge.innerText = '판매분석 기준 (잠정)';
-                    basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200';
+                if (activeMcChannel) {
+                    basisBadge.innerText = activeMcChannel.basisLabel;
+                    basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200';
                 } else {
-                    basisBadge.innerText = '일별 실적 (잠정)';
-                    basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200';
+                    const basis = sp.daily_basis || sp.basis || (rawTrend[0] && rawTrend[0].basis) || '';
+                    if (basis.includes('settlement') || basis.includes('정산')) {
+                        basisBadge.innerText = '정산인식일 기준';
+                        basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300';
+                    } else if (basis.includes('payment') || basis.includes('결제')) {
+                        basisBadge.innerText = '결제일 기준 (잠정)';
+                        basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200';
+                    } else if (basis.includes('analysis') || basis.includes('판매분석') || sp.provisional) {
+                        basisBadge.innerText = '판매분석 기준 (잠정)';
+                        basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200';
+                    } else {
+                        basisBadge.innerText = '일별 실적 (잠정)';
+                        basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200';
+                    }
                 }
             }
 
             const subTitleEl = document.getElementById('salesTrendSubtitle');
             if (subTitleEl) {
-                if (trendList.length > 0) {
+                if (activeMcChannel) {
+                    const p = activeMcChannel.raw?.period;
+                    const pLabel = (p && p.start && p.end) ? `${p.start} ~ ${p.end}` : '조회 기간';
+                    subTitleEl.innerText = `${pLabel} (${activeMcChannel.subText})`;
+                } else if (trendList.length > 0) {
                     const startD = trendList[0].date || '';
                     const endD = trendList[trendList.length - 1].date || '';
                     subTitleEl.innerText = `${startD} ~ ${endD} (${trendList.length}일간, 당월 누적과 구분)`;
@@ -12443,7 +12979,8 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
             if (trendWrap) {
                 if (trendList.length === 0) {
-                    trendWrap.innerHTML = '<div class="text-center text-xs text-slate-400 py-10 w-full flex flex-col items-center justify-center gap-1.5"><i class="fa-regular fa-chart-bar text-slate-300 text-lg"></i><span>일별 시계열 데이터가 없습니다. (누적 스냅샷은 일별 그래프에서 제외)</span></div>';
+                    const emptyTxt = mcTrendEmptyMsg || '일별 시계열 데이터가 없습니다. (누적 스냅샷은 일별 그래프에서 제외)';
+                    trendWrap.innerHTML = `<div class="text-center text-xs text-slate-500 py-10 px-4 w-full flex flex-col items-center justify-center gap-1.5"><i class="fa-regular fa-chart-bar text-slate-300 text-lg"></i><span>${escapeHtml(emptyTxt)}</span></div>`;
                 } else {
                     // 양수 및 음수 최댓값 산출
                     const maxPosRev = Math.max(...trendList.filter(t => t.revenue != null && t.revenue > 0).map(t => t.revenue), 1);
@@ -12580,6 +13117,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 if (currentSalesChannelFilter !== 'all') {
                     filterBadge.innerText = channelLabels[currentSalesChannelFilter] || currentSalesChannelFilter;
                     filterBadge.classList.remove('hidden');
+                } else if (isUncombinedMc) {
+                    filterBadge.innerText = '쿠팡 기준 (타채널 별도)';
+                    filterBadge.classList.remove('hidden');
                 } else {
                     filterBadge.classList.add('hidden');
                 }
@@ -12682,24 +13222,65 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 });
             }
 
-            // 채널 필터 적용
+            // 채널 필터 적용 (다채널 1단계 검증 포함행 분리 표시 — 전체/쿠팡 표와 기준 혼합 금지)
+            let mcIncludedOrderCount = 0;
             if (currentSalesChannelFilter === 'coupang_growth') {
                 detailRows = detailRows.filter(r => r.rawChannel === 'coupang_growth' || r.channel.includes('그로스') || r.channel.includes('쿠팡'));
-            } else if (currentSalesChannelFilter === 'smartstore') {
-                detailRows = detailRows.filter(r => r.rawChannel === 'smartstore' || r.channel.includes('스마트스토어'));
-            } else if (currentSalesChannelFilter === 'cafe24') {
-                detailRows = detailRows.filter(r => r.rawChannel === 'cafe24' || r.channel.includes('카페24'));
+            } else if (currentSalesChannelFilter === 'smartstore' || currentSalesChannelFilter === 'cafe24') {
+                if (mcSales && Array.isArray(mcSales.rows)) {
+                    const mcMap = {};
+                    const chLabel = currentSalesChannelFilter === 'cafe24' ? '자사몰(카페24)' : '스마트스토어';
+                    mcSales.rows.forEach(r => {
+                        if (r.channel !== currentSalesChannelFilter || !r.included_in_channel_subtotal) return;
+                        mcIncludedOrderCount += 1;
+                        const code = r.product_code || '-';
+                        if (!mcMap[code]) {
+                            const matched = findMasterByCode(code);
+                            mcMap[code] = {
+                                code: code,
+                                name: matched?.name || matched?.seller_name || (code === 'S100011' ? '카페24 검증 세트상품 (S100011)' : code),
+                                channel: chLabel,
+                                rawChannel: currentSalesChannelFilter,
+                                qty: 0,
+                                rev: 0,
+                                orderCount: 0,
+                                cost: null,
+                                fees: null,
+                                profit: null,
+                                master: matched || null
+                            };
+                        }
+                        mcMap[code].qty += (Number(r.order_quantity) || 0);
+                        mcMap[code].rev += (Number(r.amount) || 0);
+                        mcMap[code].orderCount += 1;
+                    });
+                    detailRows = Object.values(mcMap);
+                } else if (currentSalesChannelFilter === 'smartstore') {
+                    detailRows = detailRows.filter(r => r.rawChannel === 'smartstore' || r.channel.includes('스마트스토어'));
+                } else {
+                    detailRows = detailRows.filter(r => r.rawChannel === 'cafe24' || r.channel.includes('카페24'));
+                }
             } else if (currentSalesChannelFilter === 'b2b') {
                 detailRows = detailRows.filter(r => r.rawChannel === 'b2b' || r.channel.includes('B2B'));
             }
 
-            // 정렬 (순매출액 내림차순, 동일 시 판매수량 내림차순)
+            // 정렬 (선택 채널 금액 기준 내림차순, 동일 시 수량 내림차순)
             detailRows.sort((a, b) => (b.rev - a.rev) || (b.qty - a.qty));
 
-            if (dtCountBadge) dtCountBadge.innerText = detailRows.length + '건';
+            if (dtCountBadge) {
+                dtCountBadge.innerText = (activeMcChannel && mcIncludedOrderCount > 0)
+                    ? `${detailRows.length}종 (${mcIncludedOrderCount}건)`
+                    : (detailRows.length + '건');
+                dtCountBadge.title = metricMeta.sortNote;
+            }
             if (dtTbody) {
                 if (detailRows.length === 0) {
-                    dtTbody.innerHTML = '<tr><td colspan="11" class="py-6 text-center text-slate-400 text-xs">해당 조건에 부합하는 상품별 매출 데이터가 없습니다.</td></tr>';
+                    const emptyRowMsg = (currentSalesChannelFilter === 'b2b' && b2bUncollected && !activeMcChannel)
+                        ? '미수집 — B2B 매출 원장 미연동 (은행 입금은 매출로 자동 집계하지 않음)'
+                        : (activeMcChannel
+                            ? `${activeMcChannel.chipText} — ${activeMcChannel.subText} (상세 내역은 상단 '상세 진단'에서 확인)`
+                            : '해당 조건에 부합하는 상품별 매출 데이터가 없습니다.');
+                    dtTbody.innerHTML = `<tr><td colspan="11" class="py-6 text-center text-slate-500 text-xs">${escapeHtml(emptyRowMsg)}</td></tr>`;
                 } else {
                     dtTbody.innerHTML = detailRows.map((r, idx) => {
                         const m = r.master || findMasterByCode(r.code);
@@ -12788,43 +13369,66 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 }
             }
 
-            // 테이블 요약 footer (합계 행 - 미산출, 0원, 음수 엄격 분리)
+            // 테이블 요약 footer (합계 행 - 미산출, 미반영, 미수집, 0원, 음수 엄격 분리)
             if (dtTfoot) {
-                const sumQty = detailRows.reduce((s, r) => s + (r.qty || 0), 0);
-                const sumRev = detailRows.reduce((s, r) => s + (r.rev || 0), 0);
-                const activeRows = detailRows.filter(r => (r.rev || 0) > 0 || (r.qty || 0) > 0);
-                const hasNullCostInActive = activeRows.some(r => r.cost === null || r.cost === undefined);
-                const hasNullFeesInActive = activeRows.some(r => r.fees === null || r.fees === undefined);
-                const hasNullProfitInActive = activeRows.some(r => r.profit === null || r.profit === undefined);
+                if ((currentSalesChannelFilter === 'b2b' && b2bUncollected && !activeMcChannel) || (activeMcChannel && detailRows.length === 0)) {
+                    const isNullRev = activeMcChannel ? (activeMcChannel.recognizedSubtotal === null) : true;
+                    const badgeTxt = activeMcChannel ? activeMcChannel.shortBadge : '미수집';
+                    const qtyFoot = isNullRev ? '<span class="text-slate-400">-</span>' : '0';
+                    const revFoot = isNullRev
+                        ? `<span class="text-amber-700">${escapeHtml(badgeTxt)}</span>`
+                        : fmtWon(0);
+                    const zeroLabel = activeMcChannel ? `합계 (반영 0건)` : 'B2B 합계 (미수집)';
+                    dtTfoot.innerHTML = `
+                        <tr class="bg-slate-50/90 font-bold border-t-2 border-slate-200">
+                            <td colspan="4" class="py-3 px-3 text-slate-900 font-bold text-left">${zeroLabel}</td>
+                            <td class="py-3 px-2.5 text-center font-mono font-bold text-slate-900">${qtyFoot}</td>
+                            <td class="py-3 px-2.5 text-right font-mono font-bold text-indigo-700">${revFoot}</td>
+                            <td class="py-3 px-2.5 text-right font-mono text-slate-400">-</td>
+                            <td class="py-3 px-2.5 text-right font-mono text-slate-400">미산출</td>
+                            <td class="py-3 px-2.5 text-right font-mono text-slate-400">미산출</td>
+                            <td class="py-3 px-3 text-right font-mono font-bold text-slate-400">미산출</td>
+                            <td class="py-3 px-3 text-right text-slate-500 font-normal text-[11px]">-</td>
+                        </tr>
+                    `;
+                } else {
+                    const sumQty = detailRows.reduce((s, r) => s + (r.qty || 0), 0);
+                    const sumRev = detailRows.reduce((s, r) => s + (r.rev || 0), 0);
+                    const activeRows = detailRows.filter(r => (r.rev || 0) > 0 || (r.qty || 0) > 0);
+                    const hasNullCostInActive = activeRows.some(r => r.cost === null || r.cost === undefined);
+                    const hasNullFeesInActive = activeRows.some(r => r.fees === null || r.fees === undefined);
+                    const hasNullProfitInActive = activeRows.some(r => r.profit === null || r.profit === undefined);
 
-                const sumCost = hasNullCostInActive ? null : activeRows.reduce((s, r) => s + r.cost, 0);
-                const sumFees = hasNullFeesInActive ? null : activeRows.reduce((s, r) => s + r.fees, 0);
-                const sumProfit = hasNullProfitInActive ? null : activeRows.reduce((s, r) => s + r.profit, 0);
-                const avgMarginPct = (sumRev > 0 && sumProfit !== null) ? ((sumProfit / sumRev) * 100).toFixed(1) : '-';
-                const avgAsp = sumQty > 0 ? Math.round(sumRev / sumQty) : 0;
+                    const sumCost = hasNullCostInActive ? null : activeRows.reduce((s, r) => s + r.cost, 0);
+                    const sumFees = hasNullFeesInActive ? null : activeRows.reduce((s, r) => s + r.fees, 0);
+                    const sumProfit = hasNullProfitInActive ? null : activeRows.reduce((s, r) => s + r.profit, 0);
+                    const avgMarginPct = (sumRev > 0 && sumProfit !== null) ? ((sumProfit / sumRev) * 100).toFixed(1) : '-';
+                    const avgAsp = sumQty > 0 ? Math.round(sumRev / sumQty) : 0;
 
-                const costCellText = sumCost !== null ? fmtWon(sumCost) : '<span class="text-slate-400">미산출</span>';
-                const feesCellText = sumFees !== null ? fmtWon(sumFees) : '<span class="text-slate-400">미산출</span>';
-                let profitCellHtml = '<span class="text-slate-400">미산출</span>';
-                if (sumProfit !== null) {
-                    const profColor = sumProfit < 0 ? 'text-rose-600' : 'text-emerald-700';
-                    profitCellHtml = `<span class="${profColor}">${fmtWon(sumProfit)} ${avgMarginPct !== '-' ? `(${avgMarginPct}%)` : ''}</span>`;
+                    const costCellText = sumCost !== null ? fmtWon(sumCost) : '<span class="text-slate-400">미산출</span>';
+                    const feesCellText = sumFees !== null ? fmtWon(sumFees) : '<span class="text-slate-400">미산출</span>';
+                    let profitCellHtml = '<span class="text-slate-400">미산출</span>';
+                    if (sumProfit !== null) {
+                        const profColor = sumProfit < 0 ? 'text-rose-600' : 'text-emerald-700';
+                        profitCellHtml = `<span class="${profColor}">${fmtWon(sumProfit)} ${avgMarginPct !== '-' ? `(${avgMarginPct}%)` : ''}</span>`;
+                    }
+                    const footLabelText = metricMeta.footLabel(detailRows.length, mcIncludedOrderCount || detailRows.length);
+
+                    dtTfoot.innerHTML = `
+                        <tr class="bg-slate-50/90 font-bold border-t-2 border-slate-200">
+                            <td colspan="4" class="py-3 px-3 text-slate-900 font-bold text-left">${escapeHtml(footLabelText)}</td>
+                            <td class="py-3 px-2.5 text-center font-mono font-bold text-slate-900">${fmtNum(sumQty)}</td>
+                            <td class="py-3 px-2.5 text-right font-mono font-bold text-indigo-700">${fmtWon(sumRev)}</td>
+                            <td class="py-3 px-2.5 text-right font-mono text-slate-700">${fmtWon(avgAsp)}</td>
+                            <td class="py-3 px-2.5 text-right font-mono text-slate-700">${costCellText}</td>
+                            <td class="py-3 px-2.5 text-right font-mono text-slate-700">${feesCellText}</td>
+                            <td class="py-3 px-3 text-right font-mono font-bold">
+                                ${profitCellHtml}
+                            </td>
+                            <td class="py-3 px-3 text-right text-slate-500 font-normal text-[11px]">-</td>
+                        </tr>
+                    `;
                 }
-
-                dtTfoot.innerHTML = `
-                    <tr class="bg-slate-50/90 font-bold border-t-2 border-slate-200">
-                        <td colspan="4" class="py-3 px-3 text-slate-900 font-bold text-left">합계 (조회 ${detailRows.length}건)</td>
-                        <td class="py-3 px-2.5 text-center font-mono font-bold text-slate-900">${fmtNum(sumQty)}</td>
-                        <td class="py-3 px-2.5 text-right font-mono font-bold text-indigo-700">${fmtWon(sumRev)}</td>
-                        <td class="py-3 px-2.5 text-right font-mono text-slate-700">${fmtWon(avgAsp)}</td>
-                        <td class="py-3 px-2.5 text-right font-mono text-slate-700">${costCellText}</td>
-                        <td class="py-3 px-2.5 text-right font-mono text-slate-700">${feesCellText}</td>
-                        <td class="py-3 px-3 text-right font-mono font-bold">
-                            ${profitCellHtml}
-                        </td>
-                        <td class="py-3 px-3 text-right text-slate-500 font-normal text-[11px]">-</td>
-                    </tr>
-                `;
             }
             renderMobileDetailList('sales');
         }
@@ -13216,6 +13820,10 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 : '-';
 
             // 3. 상단 월 선택 칩 동적 렌더링
+            const mcPnlTop = d.multichannel_sales || null;
+            const mcPnlMonth = (mcPnlTop && mcPnlTop.period && mcPnlTop.period.start) ? mcPnlTop.period.start.slice(0, 7) : '';
+            const isUncombinedPnlMc = !!(mcPnlTop && (mcPnlTop.combined_revenue === null || mcPnlTop.combined_revenue === undefined || mcPnlTop.combined_status === 'not_comparable'));
+
             const chipsContainer = document.getElementById('pnlMonthChips');
             if (chipsContainer) {
                 const isAllActive = currentPnlMonth === 'all';
@@ -13234,10 +13842,11 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     allProfitClass = 'text-slate-400 font-medium';
                 }
 
+                const allChipTitle = isUncombinedPnlMc ? `쿠팡 누적 (${periodStr})` : `전체 (${periodStr})`;
                 let chipsHtml = `
                     <button type="button" id="pnlChip_all" data-m="all" onclick="setPnlMonth('all')" class="pnl-month-pill status-pill ${isAllActive ? 'bg-slate-100/80 border border-slate-900 ring-1 ring-slate-900' : 'bg-white hover:bg-slate-50 border border-slate-200'} rounded-xl px-3 py-2 text-left transition cursor-pointer">
                         <div class="flex items-center justify-between text-xs text-slate-500">
-                            <span class="font-bold text-slate-800">전체 (${periodStr})</span>
+                            <span class="font-bold text-slate-800">${allChipTitle}</span>
                             <span class="px-1.5 py-0.2 rounded text-[10px] bg-slate-100 text-slate-600 font-bold">누적</span>
                         </div>
                         <div id="pnlMonthPill_all" class="text-sm font-black font-mono text-slate-900 mt-1">${fmtWon(sumAllRev)}</div>
@@ -13278,10 +13887,13 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     }
 
                     const safeKey = (m.month || '').replace('-', '_');
+                    const monthChipTitle = (isUncombinedPnlMc && (!mcPnlMonth || m.month === mcPnlMonth) && isProv)
+                        ? `${m.month} 쿠팡 잠정`
+                        : `${m.month} 실적`;
                     chipsHtml += `
                         <button type="button" id="pnlChip_${safeKey}" data-m="${m.month}" onclick="setPnlMonth('${m.month}')" class="pnl-month-pill status-pill ${isCurrent ? 'bg-slate-100/80 border border-slate-900 ring-1 ring-slate-900' : 'bg-white hover:bg-slate-50 border border-slate-200'} rounded-xl px-3 py-2 text-left transition cursor-pointer">
                             <div class="flex items-center justify-between text-xs text-slate-500">
-                                <span class="font-bold text-slate-800">${m.month} 실적</span>
+                                <span class="font-bold text-slate-800">${monthChipTitle}</span>
                                 <span class="px-1.5 py-0.2 rounded text-[10px] ${statusBadgeClass} font-bold">${statusText}</span>
                             </div>
                             <div id="pnlMonthPill_${safeKey}" class="text-sm font-black font-mono text-slate-900 mt-1">${m.revenue != null ? fmtWon(m.revenue) : '미산출'}</div>
@@ -13383,9 +13995,26 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const profit = (activeData.contribution_profit !== undefined && activeData.contribution_profit !== null) ? activeData.contribution_profit : ((activeData.profit !== undefined && activeData.profit !== null) ? activeData.profit : (activeData.month === monthly.month ? (monthly.contribution_profit !== undefined ? monthly.contribution_profit : monthly.profit) : null));
             const isNegativeProfit = profit != null && profit < 0;
 
-            // 5. 핵심 손익 KPI 카드 5종 (0, 음수, null 엄격 구분)
+            // 5. 핵심 손익 KPI 카드 5종 (0, 음수, null 및 쿠팡 잠정 vs 확정 순매출 범위 엄격 구분)
+            const revTitleEl = document.getElementById('pnlRevenueTitle');
+            const revDescEl = document.getElementById('pnlRevenueDesc');
             const revEl = document.getElementById('pnlRevenue');
             if (revEl) revEl.innerText = rev != null ? fmtWon(rev) : '산출 불가';
+            if (revTitleEl && revDescEl) {
+                if (currentPnlMonth === 'all' && isUncombinedPnlMc) {
+                    revTitleEl.innerText = '쿠팡 누적매출';
+                    revDescEl.innerText = `${periodStr} 쿠팡 기준 (미확정월 잠정 · 타채널 별도)`;
+                } else if (isProvisional && isUncombinedPnlMc && (!mcPnlMonth || activeData.month === mcPnlMonth)) {
+                    revTitleEl.innerText = '쿠팡 잠정매출 (쿠폰 전)';
+                    revDescEl.innerText = '쿠팡 판매분석 기준 · 타채널 하단 별도';
+                } else if (isProvisional) {
+                    revTitleEl.innerText = '잠정매출액 (쿠폰 전)';
+                    revDescEl.innerText = '판매분석 임시집계 기준';
+                } else {
+                    revTitleEl.innerText = '순매출액';
+                    revDescEl.innerText = '정산 확정 순매출 (VAT포함)';
+                }
+            }
 
             const costEl = document.getElementById('pnlCost');
             if (costEl) costEl.innerText = cost != null ? fmtWon(cost) : '산출 불가';
@@ -13841,7 +14470,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     }
 
                     const subtotalLabel = isProvisional
-                        ? (activeData.profit == null ? `${activeData.month} 잠정 운영매출 소계 (원가·수수료 미확정)` : `${activeData.month} 임시 소계 (기본 판매수수료만 차감)`)
+                        ? (activeData.profit == null
+                            ? (isUncombinedPnlMc ? `${activeData.month} 쿠팡 잠정매출 소계 (원가·수수료 미확정 · 타채널 별도)` : `${activeData.month} 잠정 운영매출 소계 (원가·수수료 미확정)`)
+                            : `${activeData.month} 임시 소계 (기본 판매수수료만 차감)`)
                         : `${activeData.month} 실적 소계`;
                     rowsHtml += `
                         <tr class="bg-slate-100 font-bold border-t border-slate-300">
@@ -13910,6 +14541,97 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                 <td class="py-2.5 px-3 text-right text-slate-400 font-mono">-</td>
                             </tr>
                         `;
+                    }
+
+                    // 다채널 1단계 별도 검토 내역 (11월 엑셀 '채널검토/환불검토' 시트 일치 · 기준 상이로 쿠팡 소계 미합산)
+                    const mcPnl = d.multichannel_sales || null;
+                    const mcMonth = (mcPnl && mcPnl.period && mcPnl.period.start) ? mcPnl.period.start.slice(0, 7) : '';
+                    if (mcPnl && mcPnl.channels && (!mcMonth || activeData.month === mcMonth)) {
+                        const mcC24 = describeMultichannelChannel('cafe24', mcPnl);
+                        const mcSS = describeMultichannelChannel('smartstore', mcPnl);
+                        rowsHtml += `
+                            <tr class="bg-amber-50/70 border-t-2 border-amber-200">
+                                <td colspan="7" class="py-2 px-3 text-[11px] font-bold text-amber-900">
+                                    다채널 별도 검토 내역 (상품결제·최종 상품금액 기준 · 쿠팡 판매분석 소계 미합산 · 11월 엑셀 '채널검토' 시트 일치)
+                                </td>
+                            </tr>
+                        `;
+                        if (mcC24) {
+                            const c24CountLabel = (mcC24.state === 'partial_verified' || mcC24.state === 'full_verified')
+                                ? `${fmtNum(mcC24.raw.included_count || 0)}건${mcC24.raw.order_quantity != null ? ' (수량 ' + fmtNum(mcC24.raw.order_quantity) + ')' : ''}`
+                                : (mcC24.state === 'collected_zero' ? '0건' : '-');
+                            const c24NetSub = mcC24.refGoodsAmt > 0 && mcC24.recognizedSubtotal != null
+                                ? `<div class="text-[10px] text-amber-800 font-normal mt-0.5">상품결제금액 기준 · 월 순매출 미결정 (배송비 ${fmtWon(mcC24.shipAmt)} · 이전월 11/04 상품환불 ${fmtWon(mcC24.refGoodsAmt)} 별도 · 환불완료일 차감 참고 ${mcC24.recognizedSubtotal - mcC24.refGoodsAmt < 0 ? '-' + fmtWon(Math.abs(mcC24.recognizedSubtotal - mcC24.refGoodsAmt)) : fmtWon(mcC24.recognizedSubtotal - mcC24.refGoodsAmt)} 미반영)</div>`
+                                : `<div class="text-[10px] text-amber-800 font-normal mt-0.5">상품결제금액 기준 · 월 순매출 미결정</div>`;
+                            const c24ValLabel = mcC24.recognizedSubtotal != null ? `상품결제 ${mcC24.chipText}` : mcC24.chipText;
+                            rowsHtml += `
+                                <tr id="pnlMultichannelCafe24Row" class="hover:bg-amber-50/40 transition bg-amber-50/20">
+                                    <td class="py-2.5 px-3 font-semibold text-slate-800">
+                                        카페24 자사몰 <span class="text-[11px] font-normal text-amber-800">(${escapeHtml(mcC24.subText)})</span>
+                                        ${c24NetSub}
+                                    </td>
+                                    <td class="py-2.5 px-2 text-center text-slate-600 font-mono text-[11px]">${c24CountLabel}</td>
+                                    <td class="py-2.5 px-2.5 text-right font-bold text-slate-900 font-mono whitespace-nowrap">${escapeHtml(c24ValLabel)}</td>
+                                    <td class="py-2.5 px-2.5 text-right text-slate-500 font-mono">미산출</td>
+                                    <td class="py-2.5 px-2.5 text-right text-slate-500 font-mono">미산출</td>
+                                    <td class="py-2.5 px-2.5 text-right text-slate-500 font-mono">미산출</td>
+                                    <td class="py-2.5 px-3 text-right text-slate-400 font-mono">-</td>
+                                </tr>
+                            `;
+                        }
+                        if (mcSS) {
+                            const ssInc = mcSS.includedCount;
+                            const ssExc = mcSS.excludedCount;
+                            const ssTot = mcSS.totalCollected;
+                            const ssCountLabel = ssInc > 0
+                                ? `수집 ${fmtNum(ssTot)}건 (반영 ${fmtNum(ssInc)} · 제외 ${fmtNum(ssExc)})`
+                                : (ssExc > 0 ? `${fmtNum(ssExc)}건 수집 (0건 반영)` : (mcSS.state === 'collected_zero' ? '0건' : '-'));
+                            const ssProp = mcSS.raw.current_catalog_exact_proposal;
+                            let ssDetailSub = '';
+                            if (mcSS.proposalPending) {
+                                ssDetailSub = `<div class="text-[10px] text-amber-800 font-normal mt-0.5">현재 코드 정확 연결 참고 ${fmtWon(ssProp.amount)} (${fmtNum(ssProp.row_count)}건 · 미반영/승인 대기)</div>`;
+                            } else if (ssInc > 0) {
+                                const remParts = [];
+                                if (mcSS.caseVariantCount > 0) remParts.push(`대소문자 ${fmtNum(mcSS.caseVariantCount)}건 ${fmtWon(mcSS.caseVariantAmt)}`);
+                                if (mcSS.scopeReviewCount > 0) remParts.push(`범위검토 ${fmtNum(mcSS.scopeReviewCount)}건 ${fmtWon(mcSS.scopeReviewAmt)}`);
+                                const remStr = (mcSS.nonCancelExcAmt > 0)
+                                    ? ` · 미반영 참고 ${fmtWon(mcSS.nonCancelExcAmt)}${remParts.length ? '(' + remParts.join(' · ') + ')' : ''} 별도`
+                                    : '';
+                                const cancelStr = (mcSS.cancelExcCount || mcSS.refRows.length) > 0
+                                    ? ` · 취소 ${fmtNum(mcSS.cancelExcCount || mcSS.refRows.length)}건 제외`
+                                    : '';
+                                ssDetailSub = `<div class="text-[10px] text-emerald-800 font-normal mt-0.5">최종 상품금액 ${escapeHtml(mcSS.subtotalLabel)} · 현재 상품코드 기준 잠정치(주문 당시코드·회계확정 아님)${remStr}${cancelStr}</div>`;
+                            }
+                            const ssValLabel = mcSS.recognizedSubtotal != null ? `상품금액 ${mcSS.chipText}` : mcSS.chipText;
+                            rowsHtml += `
+                                <tr id="pnlMultichannelSmartstoreRow" class="hover:bg-amber-50/40 transition bg-amber-50/20">
+                                    <td class="py-2.5 px-3 font-semibold text-slate-800">
+                                        네이버 스마트스토어 <span class="text-[11px] font-normal text-amber-800">(${escapeHtml(mcSS.summaryTag)})</span>
+                                        ${ssDetailSub}
+                                    </td>
+                                    <td class="py-2.5 px-2 text-center text-slate-600 font-mono text-[11px]">${ssCountLabel}</td>
+                                    <td class="py-2.5 px-2.5 text-right font-bold text-slate-900 font-mono whitespace-nowrap">${escapeHtml(ssValLabel)}</td>
+                                    <td class="py-2.5 px-2.5 text-right text-slate-500 font-mono">미산출</td>
+                                    <td class="py-2.5 px-2.5 text-right text-slate-500 font-mono">미산출</td>
+                                    <td class="py-2.5 px-2.5 text-right text-slate-500 font-mono">미산출</td>
+                                    <td class="py-2.5 px-3 text-right text-slate-400 font-mono">-</td>
+                                </tr>
+                            `;
+                        }
+                        const ledgerNotes = [];
+                        if (mcC24 && mcC24.shipAmt > 0) ledgerNotes.push(`카페24 배송비 ${fmtWon(mcC24.shipAmt)} 별도`);
+                        if (mcC24 && mcC24.refGoodsAmt > 0) ledgerNotes.push(`이전월 주문 11/04 상품 환불 ${fmtWon(mcC24.refGoodsAmt)} 별도(귀속 미결정)`);
+                        if (mcSS && (mcSS.cancelExcCount || mcSS.refRows.length) > 0) ledgerNotes.push(`스마트스토어 취소 완료 ${fmtNum(mcSS.cancelExcCount || mcSS.refRows.length)}건 매출 제외(실환불액 미확인)`);
+                        if (Array.isArray(mcPnl.settlement_ledger) && mcPnl.settlement_ledger.length > 0) ledgerNotes.push(`정산 원장 ${fmtNum(mcPnl.settlement_ledger.length)}건 별도 관리`);
+                        if (ledgerNotes.length > 0) {
+                            rowsHtml += `
+                                <tr id="pnlMultichannelLedgerRow" class="bg-slate-50/80 text-[11px] text-slate-600">
+                                    <td colspan="7" class="py-2 px-3">
+                                        <strong>별도 원장 참고 (매출 미합산)</strong>: ${ledgerNotes.join(' · ')}
+                                    </td>
+                                </tr>
+                            `;
+                        }
                     }
 
                     if (chBadge) chBadge.innerText = isProvisional ? '채널 및 실질 추정' : `${channels.length || 1}개 채널·실적`;

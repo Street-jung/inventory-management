@@ -296,3 +296,11 @@
 3. 설계: 보호대상716개 SHA-256 기록·최종불변 확인. 현재 로그인은 config 프로필이므로 scripts 테스트 프로필만 삭제. 재사용 unittest는 README에서 실행하는 회귀검증이므로 일회성 테스트와 구분하여 보존. cloud cache 폴더는 기존에 없었음. manual_transactions.json도 원래 없었으며 검증에서는 TEMP에만 생성.
 4. 실제 검증: app.py+scripts/*.py23개 및 웹검증4파일 py_compile/SyntaxWarning 검사 성공. 파이프라인62개 전부통과, 오프라인 실제 파이프라인 TEMP 출력 성공. 웹46개 중44개통과/기존2개 실패(v1/v2 저장키 기대값, CSV옵션명 기대값). 주요5GET API200, 수기거래 TEMP등록·무인증차단 확인. 기존 웹검증의 스냅샷시각 쓰기 부작용을 감지해 원래 SHA-256과 정확히 일치하도록 복구한 뒤 테스트를 격리하고 재검증, 보호716개 모두 원본일치. 최종 ui_preview 비움 및 검증 생성 캐시도 삭제.
 5. 결과/주의: 고유2518개 파일경로 삭제, 최초정리197.64MiB(207240552 bytes) 회수. 미사용소스/패치1867줄 및 scratch코드2706줄 제거, 테스트격리11줄 추가 반영 순4562줄감소(백업소스 제외). 운영 데이터/로그인 선택자/핵심 실행 도구는 유지. 기존 테스트 기대값2건은 그대로 남음. Git 추적 캐시/임시파일은 없어 git rm --cached 적용대상 없음.
+
+
+## 2026-11-18 Multichannel reviewed release
+1. Change: channel-specific provisional sales UI; explicit unavailable combined total and B2B.
+2. Files: app.py, test_multichannel_phase1_ui.py. Python routes/auth/generation readers unchanged.
+3. Basis: 45 Naver rows 1,452,680 KRW; Cafe24 goods payments 126,000 KRW with refunds separate; do not mix with Coupang basis.
+4. Validation: identical workspace code py_compile passed and full web 93 tests passed (16.211s); candidate payload hashes and frontend evidence verified.
+5. Next: deploy code before generation 66c09a0f; preserve source/cost/refund limitations. Manual sales remains separate future work.
