@@ -207,6 +207,136 @@ def serve_dashboard_data():
     return response
 
 
+def get_effective_automation_status_path():
+    """
+    Resolve automation collection status JSON file path for 20-year veteran food MD.
+    Prioritizes explicit AUTOMATION_STATUS_PATH environment variable or app.config,
+    then standard flat/bundled BASE_DIR/automation_status.json only.
+    Arbitrary scratch candidate exploration is strictly forbidden.
+    """
+    env_path = os.environ.get('AUTOMATION_STATUS_PATH') or app.config.get('AUTOMATION_STATUS_PATH')
+    if env_path:
+        return env_path if os.path.isfile(env_path) else None
+
+    prod_path = os.path.join(BASE_DIR, 'automation_status.json')
+    if os.path.isfile(prod_path):
+        return prod_path
+    return None
+
+
+@app.route('/api/automation-status')
+def serve_automation_status():
+    """
+    Serve public machine-readable channel collection status for 20-year veteran food MD.
+    Strictly sanitizes and never exposes raw tokens, passwords, full bank accounts, or private Drive URLs.
+    Validates field types, lengths, and state enums.
+    """
+    path = get_effective_automation_status_path()
+    if not path or not os.path.isfile(path):
+        return jsonify({
+            'version': 1,
+            'available': False,
+            'requested_date': None,
+            'attempted_at': None,
+            'run_status': 'not_configured',
+            'publication_status': 'not_attempted',
+            'channels': {}
+        }), 200
+
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            raw_data = json.load(f)
+    except Exception:
+        return jsonify({
+            'version': 1,
+            'available': False,
+            'error': '상태 파일을 불러올 수 없습니다.',
+            'channels': {}
+        }), 500
+
+    VALID_CHANNEL_STATUSES = {
+        'success', 'partial', 'auth_required', 'failed', 'not_collected',
+        'retained', 'collected', 'collected_zero', 'unknown'
+    }
+    VALID_RUN_STATUSES = {
+        'not_configured', 'not_attempted', 'awaiting_sources', 'candidate_ready',
+        'published_verified', 'published_render', 'already_completed', 'failed',
+        'partial', 'retry_exhausted'
+    }
+
+    def _clean_str(v, max_len=64):
+        if not isinstance(v, str):
+            return None
+        s = v.strip()
+        return s[:max_len] if s else None
+
+    def _clean_int(v):
+        if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 10_000_000:
+            return v
+        return None
+
+    def _clean_bool(v):
+        return v is True
+
+    clean_channels = {}
+    for ch_name, ch_info in raw_data.get('channels', {}).items():
+        if not isinstance(ch_info, dict) or not isinstance(ch_name, str) or len(ch_name) > 32:
+            continue
+        raw_st = str(ch_info.get('status') or '').lower().strip()
+        clean_st = raw_st if raw_st in VALID_CHANNEL_STATUSES else 'unknown'
+
+        clean_channels[ch_name] = {
+            'status': clean_st,
+            'source_as_of': _clean_str(ch_info.get('source_as_of'), 16),
+            'attempted_at': _clean_str(ch_info.get('attempted_at'), 35),
+            'success_at': _clean_str(ch_info.get('success_at'), 35),
+            'requested_period': ch_info.get('requested_period') if isinstance(ch_info.get('requested_period'), dict) else None,
+            'confirmed_period': ch_info.get('confirmed_period') if isinstance(ch_info.get('confirmed_period'), dict) else None,
+            'processed_count': _clean_int(ch_info.get('processed_count')),
+            'included_count': _clean_int(ch_info.get('included_count')),
+            'excluded_count': _clean_int(ch_info.get('excluded_count')),
+            'pending_count': _clean_int(ch_info.get('pending_count')),
+            'count_reason': _clean_str(ch_info.get('count_reason'), 64),
+            'error_code': _clean_str(ch_info.get('error_code'), 64),
+            'api_error_code': _clean_str(ch_info.get('api_error_code'), 64),
+            'is_business_zero_verified': _clean_bool(ch_info.get('is_business_zero_verified')) or _clean_bool(ch_info.get('business_zero_verified')),
+            'account_scope_verified': _clean_bool(ch_info.get('account_scope_verified')),
+            'completion_verified': _clean_bool(ch_info.get('completion_verified')),
+        }
+
+    run_st = str(raw_data.get('run_status') or '').lower().strip()
+    clean_run_st = run_st if run_st in VALID_RUN_STATUSES else 'not_attempted'
+    pub_st = str(raw_data.get('publication_status') or '').lower().strip()
+    clean_pub_st = pub_st if pub_st in VALID_RUN_STATUSES else 'not_attempted'
+
+    last_success = raw_data.get('last_success')
+    clean_last_success = None
+    if isinstance(last_success, dict):
+        clean_last_success = {
+            'revision': _clean_str(last_success.get('revision'), 64),
+            'requested_date': _clean_str(last_success.get('requested_date'), 16),
+            'source_as_of': _clean_str(last_success.get('source_as_of'), 16),
+            'verified_at': _clean_str(last_success.get('verified_at'), 35),
+            'external_status_verified': _clean_bool(last_success.get('external_status_verified')),
+        }
+
+    resp_data = {
+        'version': 1,
+        'available': True,
+        'requested_date': _clean_str(raw_data.get('requested_date'), 16),
+        'attempted_at': _clean_str(raw_data.get('attempted_at'), 35),
+        'run_status': clean_run_st,
+        'publication_status': clean_pub_st,
+        'network_attempted': _clean_bool(raw_data.get('network_attempted', False)),
+        'last_success': clean_last_success,
+        'channels': clean_channels,
+        'observation_only': _clean_bool(raw_data.get('observation_only', False)),
+    }
+    resp = Response(json.dumps(resp_data, ensure_ascii=False), mimetype='application/json')
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 def get_pnl_search_context():
     """
     Resolve Excel PnL directory context.
@@ -966,6 +1096,47 @@ def require_admin(fn):
             }), 401
         return fn(*args, **kwargs)
     return wrapper
+
+
+def _manual_sales_readonly_product_provider():
+    """Read-only snapshot of active master products for manual sales lookup."""
+    with data_lock:
+        masters = list(app_state.get("master_products") or [])
+    catalog = {}
+    for item in masters:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("seller_code") or "").strip()
+        name = str(item.get("name") or item.get("seller_name") or "").strip()
+        if code and name:
+            catalog[code] = name
+    return catalog
+
+
+def _resolve_manual_sales_env_config():
+    """
+    Read only non-secret opt-in switch env vars for Manual Sales.
+    Default is strictly OFF (MANUAL_SALES_ENABLED=False, MANUAL_SALES_STORAGE_MODE='off').
+    Never reads DSN/credentials into app.config and never auto-enables sqlite_local.
+    """
+    raw_enabled = os.environ.get("MANUAL_SALES_ENABLED", "").strip().lower() in ("true", "1", "yes")
+    raw_mode = os.environ.get("MANUAL_SALES_STORAGE_MODE", "").strip().lower()
+    mode = "postgres" if raw_mode == "postgres" else "off"
+    return raw_enabled, mode
+
+
+_ms_env_enabled, _ms_env_mode = _resolve_manual_sales_env_config()
+app.config.setdefault("MANUAL_SALES_ENABLED", _ms_env_enabled)
+app.config.setdefault("MANUAL_SALES_DEVELOPMENT_MODE", False)
+app.config.setdefault("MANUAL_SALES_STORAGE_MODE", _ms_env_mode)
+app.config.setdefault("MANUAL_SALES_SQLITE_TIMEOUT", 5)
+app.config.setdefault("MANUAL_SALES_PRODUCT_PROVIDER", _manual_sales_readonly_product_provider)
+
+try:
+    from .manual_sales_routes import register_manual_sales
+except ImportError:
+    from manual_sales_routes import register_manual_sales
+register_manual_sales(app, require_admin)
 
 
 @app.before_request
@@ -1824,6 +1995,22 @@ def parse_gaemi_rows(rows):
 # 파서 2: 쿠팡 윙 재고 건강도 CSV 파서
 # -------------------------------------------------------------
 
+def _inventory_metric(value):
+    if value is None or str(value).strip() in ("", "-"):
+        return None
+    if not re.fullmatch(r"-?\d+(?:\.\d+)?", str(value).replace(",", "").strip()):
+        return None
+    return _clean_int_cell(value)
+
+
+def _inventory_add(a, b):
+    return None if a is None or b is None else a + b
+
+
+def _inventory_scale(value, multiplier):
+    return None if value is None else value * multiplier
+
+
 def parse_coupang_rows(rows):
     """
     쿠팡 파일: 등록상품 ID, 옵션 ID, 등록상품명, 옵션명, 상품등급(G열: NEW / 반품...), 판매가능재고 (실시간 기준), 입고예정재고, 최근 판매수량(지난 7일, 지난 30일), 예상 소진일(DOC)
@@ -1958,10 +2145,12 @@ def parse_coupang_rows(rows):
         is_return = ("반품" in grade) or ("return" in grade.lower())
         stock = _clean_int_cell(r[col_stock]) if len(r) > col_stock else 0
         inbound = _clean_int_cell(r[col_inbound]) if len(r) > col_inbound else 0
-        sales7 = _clean_int_cell(r[col_sales7]) if len(r) > col_sales7 else 0
-        sales30 = _clean_int_cell(r[col_sales30]) if len(r) > col_sales30 else 0
-        doc = _clean_int_cell(r[col_doc]) if len(r) > col_doc else 0
+        sales7 = _inventory_metric(r[col_sales7]) if len(r) > col_sales7 else None
+        sales30 = _inventory_metric(r[col_sales30]) if len(r) > col_sales30 else None
+        doc = _inventory_metric(r[col_doc]) if len(r) > col_doc else None
 
+        if sales7 is None or sales30 is None:
+            doc = None
         coupang_dict[oid] = {
             "product_id": pid,
             "product_name": pname,
@@ -2362,9 +2551,11 @@ def get_summary():
             c_data = coupang.get(oid)
             c_stock = int(c_data.get("stock", 0) or 0) if c_data else 0
             c_inbound = int(c_data.get("inbound", 0) or 0) if c_data else 0
-            c_sales7 = int(c_data.get("sales_7d", 0) or 0) if c_data else 0
-            c_sales30 = int(c_data.get("sales_30d", 0) or 0) if c_data else 0
-            doc = int(c_data.get("doc", 0) or 0) if c_data else 0
+            c_sales7 = _inventory_metric(c_data.get("sales_7d")) if c_data else 0
+            c_sales30 = _inventory_metric(c_data.get("sales_30d")) if c_data else 0
+            doc = _inventory_metric(c_data.get("doc")) if c_data else 0
+            if c_sales7 is None or c_sales30 is None:
+                doc = None
             c_grade = str(c_data.get("grade", "") or "").strip() if c_data else ""
             c_pid = str(c_data.get("product_id", "") or "").strip() if c_data else ""
             csv_is_return = bool(c_data and (c_data.get("is_return") or ("반품" in c_grade) or ("return" in c_grade.lower())))
@@ -2372,19 +2563,19 @@ def get_summary():
             eff_is_return = bool(opt.get("is_return") or csv_is_return)
 
             phys_stock = c_stock * bundle
-            phys_sales7 = c_sales7 * bundle
-            phys_sales30 = c_sales30 * bundle
+            phys_sales7 = _inventory_scale(c_sales7, bundle)
+            phys_sales30 = _inventory_scale(c_sales30, bundle)
 
             if eff_is_return:
                 c_return_package_total += c_stock
                 c_return_physical_total += phys_stock
-                c_return_sales_7d_total += phys_sales7
-                c_return_sales_30d_total += phys_sales30
+                c_return_sales_7d_total = _inventory_add(c_return_sales_7d_total, phys_sales7)
+                c_return_sales_30d_total = _inventory_add(c_return_sales_30d_total, phys_sales30)
             else:
                 c_package_total += c_stock
                 c_physical_total += phys_stock
-                c_sales_7d_total += phys_sales7
-                c_sales_30d_total += phys_sales30
+                c_sales_7d_total = _inventory_add(c_sales_7d_total, phys_sales7)
+                c_sales_30d_total = _inventory_add(c_sales_30d_total, phys_sales30)
 
             opt_detail = {
                 "id": oid,
@@ -2427,12 +2618,12 @@ def get_summary():
                 grp["return_options"].append(opt_detail)
                 grp["return_package_stock"] += c_stock
                 grp["return_physical_stock"] += phys_stock
-                grp["return_sales_7d_physical"] += phys_sales7
+                grp["return_sales_7d_physical"] = _inventory_add(grp["return_sales_7d_physical"], phys_sales7)
             else:
                 grp["normal_options"].append(opt_detail)
                 grp["normal_package_stock"] += c_stock
                 grp["normal_physical_stock"] += phys_stock
-                grp["normal_sales_7d_physical"] += phys_sales7
+                grp["normal_sales_7d_physical"] = _inventory_add(grp["normal_sales_7d_physical"], phys_sales7)
                 grp["normal_inbound"] += c_inbound
 
         coupang_bundle_groups = [bundle_group_map[b] for b in sorted(bundle_group_map.keys())]
@@ -2523,11 +2714,11 @@ def get_summary():
             if "b2b_shared_sales" not in target:
                 target["b2b_shared_sales"] = []
 
-            if s_7d > 0 or s_30d > 0 or s_orders or s_c_7d > 0 or s_c_30d > 0:
+            if s_7d > 0 or s_30d > 0 or s_orders or s_c_7d is None or s_c_30d is None or s_c_7d > 0 or s_c_30d > 0:
                 target["other_sales_7d"] += (s_7d * mult)
                 target["other_sales_30d"] += (s_30d * mult)
-                target["coupang_sales_7d"] += (s_c_7d * mult)
-                target["coupang_sales_30d"] += (s_c_30d * mult)
+                target["coupang_sales_7d"] = _inventory_add(target["coupang_sales_7d"], _inventory_scale(s_c_7d, mult))
+                target["coupang_sales_30d"] = _inventory_add(target["coupang_sales_30d"], _inventory_scale(s_c_30d, mult))
 
                 for ord_item in s_orders[:5]:
                     target["recent_orders"].append({
@@ -2642,217 +2833,247 @@ def get_summary():
         b2b_linked_codes = base_to_shared_map.get(norm_code, [])
 
         # 3. 7일 및 30일 총 출고량 합산
-        m_sales_7d = c_sales_7d + other_sales_7d
-        m_sales_30d = c_sales_30d + other_sales_30d
+        m_sales_7d = _inventory_add(c_sales_7d, other_sales_7d)
+        m_sales_30d = _inventory_add(c_sales_30d, other_sales_30d)
 
-        # 4. 채널별 가중 일평균 출고량 산출 (최근 7일 60% : 30일 40% 노이즈 보정)
-        c_daily_7 = c_sales_7d / 7.0
-        c_daily_30 = c_sales_30d / 30.0 if c_sales_30d > 0 else c_daily_7
-        if c_sales_7d > 0 and c_sales_30d > 0:
-            coupang_daily = round((c_daily_7 * 0.6) + (c_daily_30 * 0.4), 2)
-        elif c_sales_7d > 0:
-            coupang_daily = round(c_daily_7, 2)
-        else:
-            coupang_daily = round(c_daily_30, 2)
-
-        o_daily_7 = other_sales_7d / 7.0
-        o_daily_30 = other_sales_30d / 30.0 if other_sales_30d > 0 else o_daily_7
-        if other_sales_7d > 0 and other_sales_30d > 0:
-            other_daily = round((o_daily_7 * 0.6) + (o_daily_30 * 0.4), 2)
-        elif other_sales_7d > 0:
-            other_daily = round(o_daily_7, 2)
-        else:
-            other_daily = round(o_daily_30, 2)
-
-        daily_sales = round(coupang_daily + other_daily, 2)
-
-        total_gaemi_stock += g_total
-        total_coupang_stock += c_physical_total
-        total_coupang_return_stock += c_return_physical_total
-        total_physical_stock += master_physical_total
-
-        total_coupang_7d += c_sales_7d
-        total_coupang_30d += c_sales_30d
-        total_other_7d += other_sales_7d
-        total_other_30d += other_sales_30d
-        total_sales_7d += m_sales_7d
-        total_sales_30d += m_sales_30d
-
-        if daily_sales > 0:
-            total_runway = round(master_physical_total / daily_sales, 1)
-            total_runway_str = f"{total_runway}일"
-            gaemi_runway = round(g_total / daily_sales, 1)
-            gaemi_runway_str = f"{gaemi_runway}일"
-        else:
-            total_runway = 999
-            total_runway_str = "소진무" if master_physical_total > 0 else "재고없음"
-            gaemi_runway = 999
-            gaemi_runway_str = "소진무" if g_total > 0 else "재고없음"
-
-        if coupang_daily > 0:
-            coupang_runway = round(c_physical_total / coupang_daily, 1)
-            coupang_runway_str = f"{coupang_runway}일"
-        else:
-            coupang_runway = 999
-            coupang_runway_str = "소진무" if c_physical_total > 0 else "재고없음"
-
-        # 5. 소비기한 vs 판매속도 소진 시뮬레이션
-        expiry_risk = False
-        expiry_risk_qty = 0
-        expiry_note = ""
-        projected_sales_to_exp = 0
-
-        if nearest_days_left is not None:
-            if daily_sales > 0:
-                projected_sales_to_exp = int(daily_sales * nearest_days_left)
-                if nearest_lot_stock > projected_sales_to_exp:
-                    expiry_risk = True
-                    expiry_risk_qty = nearest_lot_stock - projected_sales_to_exp
-                    expiry_note = f"기한내 {expiry_risk_qty}개 미소진 위험"
-                elif nearest_days_left <= eff_exp_warn:
-                    expiry_risk = True
-                    expiry_note = f"기한 잔여 {nearest_days_left}일 주의"
+        metrics_available = c_sales_7d is not None and c_sales_30d is not None
+        if metrics_available:
+            # 4. 채널별 가중 일평균 출고량 산출 (최근 7일 60% : 30일 40% 노이즈 보정)
+            c_daily_7 = c_sales_7d / 7.0
+            c_daily_30 = c_sales_30d / 30.0 if c_sales_30d > 0 else c_daily_7
+            if c_sales_7d > 0 and c_sales_30d > 0:
+                coupang_daily = round((c_daily_7 * 0.6) + (c_daily_30 * 0.4), 2)
+            elif c_sales_7d > 0:
+                coupang_daily = round(c_daily_7, 2)
             else:
-                if nearest_days_left <= eff_exp_warn and nearest_lot_stock > 0:
-                    expiry_risk = True
-                    expiry_risk_qty = nearest_lot_stock
-                    expiry_note = f"잔여 {nearest_days_left}일 (판매 정체)"
+                coupang_daily = round(c_daily_30, 2)
 
-        # 6. 결품 방지 및 발주 의사결정 액션(Action) 판정 트리 (품목별/관리자 설정 리드타임 + 입고예정 반영)
-        has_in_transit = in_transit_qty > 0
-        norm_arrival_date = normalize_date_str(expected_arrival_date)
-        arr_short = norm_arrival_date[5:] if len(norm_arrival_date) >= 10 else norm_arrival_date
-        days_to_arrival = None
-        if norm_arrival_date and len(norm_arrival_date) >= 10:
-            try:
-                arr_dt = datetime.strptime(norm_arrival_date[:10], "%Y-%m-%d")
-                today_dt = now_kst().replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
-                days_to_arrival = (arr_dt - today_dt).days
-            except Exception:
-                days_to_arrival = None
+            o_daily_7 = other_sales_7d / 7.0
+            o_daily_30 = other_sales_30d / 30.0 if other_sales_30d > 0 else o_daily_7
+            if other_sales_7d > 0 and other_sales_30d > 0:
+                other_daily = round((o_daily_7 * 0.6) + (o_daily_30 * 0.4), 2)
+            elif other_sales_7d > 0:
+                other_daily = round(o_daily_7, 2)
+            else:
+                other_daily = round(o_daily_30, 2)
 
-        effective_total_stock = master_physical_total + in_transit_qty
-        if daily_sales > 0:
-            effective_runway = round(effective_total_stock / daily_sales, 1)
-            effective_runway_str = f"{effective_runway}일"
-        else:
-            effective_runway = 999
-            effective_runway_str = "소진무" if effective_total_stock > 0 else "재고없음"
+            daily_sales = round(coupang_daily + other_daily, 2)
 
-        pre_arrival_gap = (
-            has_in_transit
-            and daily_sales > 0
-            and days_to_arrival is not None
-            and days_to_arrival > 0
-            and total_runway < days_to_arrival
-        )
+            total_gaemi_stock += g_total
+            total_coupang_stock += c_physical_total
+            total_coupang_return_stock += c_return_physical_total
+            total_physical_stock += master_physical_total
 
-        is_urgent = False
-        is_order_prepare = False
-        is_coupang_transfer = False
-        is_exp_warn = False
-        is_in_transit_wait = False
-        is_no_sales = False
-        is_safe = False
+            total_coupang_7d = _inventory_add(total_coupang_7d, c_sales_7d)
+            total_coupang_30d = _inventory_add(total_coupang_30d, c_sales_30d)
+            total_other_7d += other_sales_7d
+            total_other_30d += other_sales_30d
+            total_sales_7d = _inventory_add(total_sales_7d, m_sales_7d)
+            total_sales_30d = _inventory_add(total_sales_30d, m_sales_30d)
 
-        if master_physical_total == 0:
-            if has_in_transit:
-                if daily_sales > 0 and effective_runway < eff_lead_time:
+            if daily_sales > 0:
+                total_runway = round(master_physical_total / daily_sales, 1)
+                total_runway_str = f"{total_runway}일"
+                gaemi_runway = round(g_total / daily_sales, 1)
+                gaemi_runway_str = f"{gaemi_runway}일"
+            else:
+                total_runway = 999
+                total_runway_str = "소진무" if master_physical_total > 0 else "재고없음"
+                gaemi_runway = 999
+                gaemi_runway_str = "소진무" if g_total > 0 else "재고없음"
+
+            if coupang_daily > 0:
+                coupang_runway = round(c_physical_total / coupang_daily, 1)
+                coupang_runway_str = f"{coupang_runway}일"
+            else:
+                coupang_runway = 999
+                coupang_runway_str = "소진무" if c_physical_total > 0 else "재고없음"
+
+            # 5. 소비기한 vs 판매속도 소진 시뮬레이션
+            expiry_risk = False
+            expiry_risk_qty = 0
+            expiry_note = ""
+            projected_sales_to_exp = 0
+
+            if nearest_days_left is not None:
+                if daily_sales > 0:
+                    projected_sales_to_exp = int(daily_sales * nearest_days_left)
+                    if nearest_lot_stock > projected_sales_to_exp:
+                        expiry_risk = True
+                        expiry_risk_qty = nearest_lot_stock - projected_sales_to_exp
+                        expiry_note = f"기한내 {expiry_risk_qty}개 미소진 위험"
+                    elif nearest_days_left <= eff_exp_warn:
+                        expiry_risk = True
+                        expiry_note = f"기한 잔여 {nearest_days_left}일 주의"
+                else:
+                    if nearest_days_left <= eff_exp_warn and nearest_lot_stock > 0:
+                        expiry_risk = True
+                        expiry_risk_qty = nearest_lot_stock
+                        expiry_note = f"잔여 {nearest_days_left}일 (판매 정체)"
+
+            # 6. 결품 방지 및 발주 의사결정 액션(Action) 판정 트리 (품목별/관리자 설정 리드타임 + 입고예정 반영)
+            has_in_transit = in_transit_qty > 0
+            norm_arrival_date = normalize_date_str(expected_arrival_date)
+            arr_short = norm_arrival_date[5:] if len(norm_arrival_date) >= 10 else norm_arrival_date
+            days_to_arrival = None
+            if norm_arrival_date and len(norm_arrival_date) >= 10:
+                try:
+                    arr_dt = datetime.strptime(norm_arrival_date[:10], "%Y-%m-%d")
+                    today_dt = now_kst().replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+                    days_to_arrival = (arr_dt - today_dt).days
+                except Exception:
+                    days_to_arrival = None
+
+            effective_total_stock = master_physical_total + in_transit_qty
+            if daily_sales > 0:
+                effective_runway = round(effective_total_stock / daily_sales, 1)
+                effective_runway_str = f"{effective_runway}일"
+            else:
+                effective_runway = 999
+                effective_runway_str = "소진무" if effective_total_stock > 0 else "재고없음"
+
+            pre_arrival_gap = (
+                has_in_transit
+                and daily_sales > 0
+                and days_to_arrival is not None
+                and days_to_arrival > 0
+                and total_runway < days_to_arrival
+            )
+
+            is_urgent = False
+            is_order_prepare = False
+            is_coupang_transfer = False
+            is_exp_warn = False
+            is_in_transit_wait = False
+            is_no_sales = False
+            is_safe = False
+
+            if master_physical_total == 0:
+                if has_in_transit:
+                    if daily_sales > 0 and effective_runway < eff_lead_time:
+                        status = f"🔴 추가 발주 검토 (입고포함 D-{int(effective_runway)}일)"
+                        status_color = "red"
+                        action_cta = "📋 추가 발주 검토"
+                        risk_score = 920 - effective_runway
+                        is_urgent = True
+                    else:
+                        arr_tag = arr_short if arr_short else f"+{in_transit_qty:,}개"
+                        status = f"🚢 입고 대기 (품절 · {arr_tag})"
+                        status_color = "teal"
+                        action_cta = f"🚚 {arr_short} 입고 확인" if arr_short else "🚚 입고 일정 확인"
+                        risk_score = 330
+                        is_in_transit_wait = True
+                else:
+                    status = "🔴 결품 (0개)"
+                    status_color = "red"
+                    action_cta = "🚨 결품 즉시 발주"
+                    risk_score = 1000
+                    is_urgent = True
+            elif daily_sales > 0 and total_runway < eff_lead_time and (not has_in_transit or effective_runway < eff_lead_time):
+                if has_in_transit:
                     status = f"🔴 추가 발주 검토 (입고포함 D-{int(effective_runway)}일)"
                     status_color = "red"
                     action_cta = "📋 추가 발주 검토"
-                    risk_score = 920 - effective_runway
+                    risk_score = (880 if product_type == "수입" else 830) - effective_runway
                     is_urgent = True
                 else:
-                    arr_tag = arr_short if arr_short else f"+{in_transit_qty:,}개"
-                    status = f"🚢 입고 대기 (품절 · {arr_tag})"
+                    status = f"🔴 긴급 발주 (D-{int(total_runway)}일)"
+                    status_color = "red"
+                    action_cta = "🚨 수입 발주 기안" if product_type == "수입" else "🚨 사입 긴급 발주"
+                    risk_score = (900 if product_type == "수입" else 850) - total_runway
+                    is_urgent = True
+            elif g_total >= 10 and (coupang_runway <= 14 or (c_physical_total == 0 and c_sales_7d > 0)):
+                status = f"🔵 쿠팡 채우기 (쿠팡 D-{int(coupang_runway)}일)"
+                status_color = "blue"
+                action_cta = "📦 쿠팡 입고 요청"
+                risk_score = 700 - coupang_runway
+                is_coupang_transfer = True
+            elif daily_sales > 0 and total_runway <= eff_prepare_limit and not has_in_transit:
+                status = f"🟡 발주 준비 (D-{int(total_runway)}일)" if product_type == "수입" else f"🟡 사입 주의 (D-{int(total_runway)}일)"
+                status_color = "amber"
+                action_cta = "📝 발주서 작성" if product_type == "수입" else "📝 사입 발주 검토"
+                risk_score = (500 if product_type == "수입" else 450) - total_runway
+                is_order_prepare = True
+            elif expiry_risk:
+                status = f"⏳ 기한 주의 ({expiry_note})"
+                status_color = "purple"
+                action_cta = "🏷️ 임박 특가/프로모션"
+                risk_score = 350
+                is_exp_warn = True
+            elif has_in_transit and daily_sales > 0 and total_runway <= eff_prepare_limit:
+                arr_tag = arr_short if arr_short else f"+{in_transit_qty:,}개"
+                if effective_runway <= eff_prepare_limit:
+                    status = f"🚢 입고 예정 · 추가준비 ({arr_tag})"
                     status_color = "teal"
-                    action_cta = f"🚚 {arr_short} 입고 확인" if arr_short else "🚚 입고 일정 확인"
-                    risk_score = 330
-                    is_in_transit_wait = True
+                    action_cta = "📋 추가 발주 확인"
+                    risk_score = 310 - min(total_runway, 150)
+                elif pre_arrival_gap:
+                    status = f"🚚 입고 전 소진주의 ({arr_tag})"
+                    status_color = "teal"
+                    action_cta = f"🚚 {arr_short} 입고 점검" if arr_short else "🚚 입고 일정 점검"
+                    risk_score = 320 - min(total_runway, 120)
+                else:
+                    status = f"🚢 입고 예정 ({arr_tag})"
+                    status_color = "teal"
+                    action_cta = f"📦 {arr_short} 입고 대기" if arr_short else "📦 입고 일정 확인"
+                    risk_score = 220 - min(total_runway, 150)
+                is_in_transit_wait = True
+            elif master_physical_total > 0 and daily_sales <= 0:
+                status = "🟠 판매 정체 (소진무)"
+                status_color = "orange"
+                action_cta = "🔔 미판매 점검 알람"
+                risk_score = 250 + min(round(master_physical_total / 1000.0, 2), 49)
+                is_no_sales = True
             else:
-                status = "🔴 결품 (0개)"
-                status_color = "red"
-                action_cta = "🚨 결품 즉시 발주"
-                risk_score = 1000
-                is_urgent = True
-        elif daily_sales > 0 and total_runway < eff_lead_time and (not has_in_transit or effective_runway < eff_lead_time):
-            if has_in_transit:
-                status = f"🔴 추가 발주 검토 (입고포함 D-{int(effective_runway)}일)"
-                status_color = "red"
-                action_cta = "📋 추가 발주 검토"
-                risk_score = (880 if product_type == "수입" else 830) - effective_runway
-                is_urgent = True
-            else:
-                status = f"🔴 긴급 발주 (D-{int(total_runway)}일)"
-                status_color = "red"
-                action_cta = "🚨 수입 발주 기안" if product_type == "수입" else "🚨 사입 긴급 발주"
-                risk_score = (900 if product_type == "수입" else 850) - total_runway
-                is_urgent = True
-        elif g_total >= 10 and (coupang_runway <= 14 or (c_physical_total == 0 and c_sales_7d > 0)):
-            status = f"🔵 쿠팡 채우기 (쿠팡 D-{int(coupang_runway)}일)"
-            status_color = "blue"
-            action_cta = "📦 쿠팡 입고 요청"
-            risk_score = 700 - coupang_runway
-            is_coupang_transfer = True
-        elif daily_sales > 0 and total_runway <= eff_prepare_limit and not has_in_transit:
-            status = f"🟡 발주 준비 (D-{int(total_runway)}일)" if product_type == "수입" else f"🟡 사입 주의 (D-{int(total_runway)}일)"
-            status_color = "amber"
-            action_cta = "📝 발주서 작성" if product_type == "수입" else "📝 사입 발주 검토"
-            risk_score = (500 if product_type == "수입" else 450) - total_runway
-            is_order_prepare = True
-        elif expiry_risk:
-            status = f"⏳ 기한 주의 ({expiry_note})"
-            status_color = "purple"
-            action_cta = "🏷️ 임박 특가/프로모션"
-            risk_score = 350
-            is_exp_warn = True
-        elif has_in_transit and daily_sales > 0 and total_runway <= eff_prepare_limit:
-            arr_tag = arr_short if arr_short else f"+{in_transit_qty:,}개"
-            if effective_runway <= eff_prepare_limit:
-                status = f"🚢 입고 예정 · 추가준비 ({arr_tag})"
-                status_color = "teal"
-                action_cta = "📋 추가 발주 확인"
-                risk_score = 310 - min(total_runway, 150)
-            elif pre_arrival_gap:
-                status = f"🚚 입고 전 소진주의 ({arr_tag})"
-                status_color = "teal"
-                action_cta = f"🚚 {arr_short} 입고 점검" if arr_short else "🚚 입고 일정 점검"
-                risk_score = 320 - min(total_runway, 120)
-            else:
-                status = f"🚢 입고 예정 ({arr_tag})"
-                status_color = "teal"
-                action_cta = f"📦 {arr_short} 입고 대기" if arr_short else "📦 입고 일정 확인"
-                risk_score = 220 - min(total_runway, 150)
-            is_in_transit_wait = True
-        elif master_physical_total > 0 and daily_sales <= 0:
-            status = "🟠 판매 정체 (소진무)"
-            status_color = "orange"
-            action_cta = "🔔 미판매 점검 알람"
-            risk_score = 250 + min(round(master_physical_total / 1000.0, 2), 49)
-            is_no_sales = True
-        else:
-            safe_d = f"D-{int(total_runway)}일"
-            status = f"✅ 정상 안전 ({safe_d})"
-            status_color = "green"
-            action_cta = "✅ 정상 유지"
-            risk_score = 100 - min(total_runway, 200)
-            is_safe = True
+                safe_d = f"D-{int(total_runway)}일"
+                status = f"✅ 정상 안전 ({safe_d})"
+                status_color = "green"
+                action_cta = "✅ 정상 유지"
+                risk_score = 100 - min(total_runway, 200)
+                is_safe = True
 
-        if is_urgent:
-            urgent_order_count += 1
-        elif is_coupang_transfer:
-            coupang_transfer_count += 1
-        elif is_order_prepare:
-            order_prepare_count += 1
-        elif is_exp_warn:
-            expiry_warning_count += 1
-        elif is_in_transit_wait:
-            in_transit_wait_count += 1
-        elif is_no_sales:
-            no_sales_count += 1
-        elif is_safe:
-            safe_count += 1
+            if is_urgent:
+                urgent_order_count += 1
+            elif is_coupang_transfer:
+                coupang_transfer_count += 1
+            elif is_order_prepare:
+                order_prepare_count += 1
+            elif is_exp_warn:
+                expiry_warning_count += 1
+            elif is_in_transit_wait:
+                in_transit_wait_count += 1
+            elif is_no_sales:
+                no_sales_count += 1
+            elif is_safe:
+                safe_count += 1
+
+        else:
+            # Stock remains valid. Unknown sales do not enter any speed/runway/action calculation.
+            total_gaemi_stock += g_total
+            total_coupang_stock += c_physical_total
+            total_coupang_return_stock += c_return_physical_total
+            total_physical_stock += master_physical_total
+            total_coupang_7d = _inventory_add(total_coupang_7d, c_sales_7d)
+            total_coupang_30d = _inventory_add(total_coupang_30d, c_sales_30d)
+            total_other_7d += other_sales_7d
+            total_other_30d += other_sales_30d
+            total_sales_7d = _inventory_add(total_sales_7d, m_sales_7d)
+            total_sales_30d = _inventory_add(total_sales_30d, m_sales_30d)
+            daily_sales = coupang_daily = other_daily = None
+            total_runway = gaemi_runway = coupang_runway = effective_runway = None
+            total_runway_str = gaemi_runway_str = coupang_runway_str = effective_runway_str = "미산출"
+            effective_total_stock = master_physical_total + in_transit_qty
+            days_to_arrival = None
+            pre_arrival_gap = False
+            projected_sales_to_exp = expiry_risk_qty = None
+            expiry_risk = False
+            expiry_note = "판매수량 미산출 · 소진 예측 보류"
+            is_urgent = is_order_prepare = is_coupang_transfer = is_exp_warn = False
+            is_in_transit_wait = is_no_sales = is_safe = False
+            status = "판매 지표 미산출"
+            status_color = "slate"
+            action_cta = "판매수량 확인 후 계산"
+            risk_score = 0
 
         master_summaries.append({
             "id": m.get("id", seller_code),
@@ -2920,6 +3141,7 @@ def get_summary():
             "other_sales_30d": other_sales_30d,
             "total_sales_7d": m_sales_7d,
             "total_sales_30d": m_sales_30d,
+            "metrics_available": metrics_available,
             "daily_sales": daily_sales,
             "coupang_daily": coupang_daily,
             "other_daily": other_daily,
@@ -2929,8 +3151,8 @@ def get_summary():
             "gaemi_runway_str": gaemi_runway_str,
             "coupang_runway": coupang_runway,
             "coupang_runway_str": coupang_runway_str,
-            "is_no_sales": bool(master_physical_total > 0 and daily_sales <= 0),
-            "is_coupang_no_sales": bool(c_physical_total > 0 and coupang_daily <= 0),
+            "is_no_sales": bool(metrics_available and master_physical_total > 0 and daily_sales <= 0),
+            "is_coupang_no_sales": bool(metrics_available and c_physical_total > 0 and coupang_daily <= 0),
             "doc": total_runway,
             "doc_str": total_runway_str,
             "unit_cost": cost_map.get(norm_code, 0.0),
@@ -3708,9 +3930,9 @@ def admin_save_product():
                         "is_return": is_ret_opt,
                         "stock": max(0, int(st_val)),
                         "inbound": 0,
-                        "sales_7d": 0,
-                        "sales_30d": 0,
-                        "doc": 0,
+                        "sales_7d": None,
+                        "sales_30d": None,
+                        "doc": None,
                         "updated_at": now_kst().strftime("%m-%d %H:%M")
                     }
 
@@ -4254,6 +4476,7 @@ HTML_TEMPLATE = r"""
         body.share-mode .fa-link,
         body.share-mode button[onclick*="openCreateProductModal"],
         body.share-mode button[onclick*="openAdminCenter"],
+        body.share-mode button[onclick*="openManualSalesModal"],
         body.share-mode button[onclick*="openPinModal"],
         body.share-mode [data-admin-action] {
             display: none !important;
@@ -4318,6 +4541,11 @@ HTML_TEMPLATE = r"""
                         <i class="fa-solid fa-chevron-down text-[10px] opacity-75"></i>
                     </button>
                     <div id="adminMenuDropdown" class="hidden absolute right-0 mt-1.5 w-52 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs text-slate-700 z-50">
+                        <button type="button" id="btnMenuManualSales" onclick="closeAdminMenu(); openManualSalesModal();" class="w-full text-left px-3.5 py-2 hover:bg-indigo-50 flex items-center gap-2 font-semibold text-indigo-700">
+                            <i class="fa-solid fa-file-invoice-dollar w-4 text-center text-indigo-600"></i>
+                            <span>수기 매출 관리</span>
+                        </button>
+                        <div class="my-1 border-t border-slate-100"></div>
                         <button type="button" onclick="closeAdminMenu(); openCreateProductModal();" class="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 font-semibold text-slate-900">
                             <i class="fa-solid fa-plus w-4 text-center text-indigo-600"></i>
                             <span>단품 추가</span>
@@ -4419,6 +4647,28 @@ HTML_TEMPLATE = r"""
                     </div>
                 </div>
                 <span id="salesReportPeriod" class="text-[11px] text-slate-400">일별 및 당월 누적 집계</span>
+            </div>
+
+            <!-- 1-1. 채널별 자료 기준일 및 최종 갱신 상태 패널 (20년차 식품 MD 실무 판단 지표) -->
+            <div id="channelAutomationStatusPanel" class="bg-white rounded-xl border border-slate-200 p-3 sm:p-3.5 shadow-xs space-y-2.5">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="w-6 h-6 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center text-xs">
+                            <i class="fa-solid fa-clock-rotate-left"></i>
+                        </div>
+                        <span class="font-bold text-xs text-slate-900">채널별 자료 기준일 & 최종 갱신 상태</span>
+                        <span id="automationMasterStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">자동 갱신 완료</span>
+                        <span class="text-[11px] text-slate-400 hidden sm:inline">· 20년차 MD 실무 확인: 판매일과 수집시각을 명확히 구분하며, 미수집·실패는 0원으로 왜곡하지 않습니다.</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-[11px] text-slate-500">
+                        <span id="automationOverallTimes">수집 시각: 확인 중...</span>
+                    </div>
+                </div>
+
+                <!-- 채널별 6개 상태 카드 그리드 (PC 6열, 태블릿 3열, 모바일 2열) -->
+                <div id="automationChannelCardsGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                    <!-- Cards dynamically populated by JS -->
+                </div>
             </div>
 
             <!-- 2. 상태 필터 칩 (채널별 필터 칩 5개) -->
@@ -5337,6 +5587,306 @@ HTML_TEMPLATE = r"""
         </div>
     </div>
 
+    <!-- 관리자 전용 수기 매출 관리 모달 (수기 입출금과 완전 분리된 판매기록 원장) -->
+    <div id="manualSalesModal" class="hidden fixed inset-0 z-[105] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-5xl flex flex-col max-h-[92vh] overflow-hidden">
+            <!-- 헤더 -->
+            <div class="bg-white border-b border-slate-200 px-4 sm:px-5 py-3 flex items-center justify-between gap-2 shrink-0">
+                <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-file-invoice-dollar text-indigo-600 shrink-0"></i>
+                        <h3 class="font-bold text-sm sm:text-base text-slate-900 truncate">수기 매출 관리</h3>
+                        <span id="msHeaderModeBadge" class="hidden sm:inline-flex px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">관리자 전용</span>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-0.5">판매기록 등록·수정·취소 원장 (은행 입금·공개 매출과 별도 관리)</p>
+                </div>
+                <button type="button" onclick="closeManualSalesModal(false)" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 text-base shrink-0" aria-label="수기 매출 관리 닫기">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- 상단 뷰 전환 탭 -->
+            <div class="bg-slate-50 border-b border-slate-200 px-3 sm:px-5 pt-2 flex flex-wrap items-center justify-between gap-2 shrink-0 text-xs">
+                <div class="flex items-center gap-1.5">
+                    <button type="button" id="msTabBtnList" onclick="switchManualSalesView('list')" class="px-3 py-2 rounded-t-lg font-semibold border border-b-0 bg-white text-slate-900 cursor-pointer">판매기록 목록</button>
+                    <button type="button" id="msTabBtnForm" onclick="openManualSalesNewForm()" class="px-3 py-2 rounded-t-lg font-semibold border border-b-0 bg-slate-100 text-slate-600 hover:bg-white cursor-pointer">+ 새 판매기록 등록</button>
+                    <button type="button" id="msTabBtnDetail" onclick="switchManualSalesView('detail')" class="hidden px-3 py-2 rounded-t-lg font-semibold border border-b-0 bg-slate-100 text-slate-600 hover:bg-white cursor-pointer">상세 · 변경이력</button>
+                </div>
+                <div id="msHeaderStatusPill" class="text-[11px] text-slate-500 pb-1.5"></div>
+            </div>
+
+            <!-- 본문 스크롤 영역 -->
+            <div class="p-3 sm:p-5 overflow-y-auto flex-1 text-xs space-y-3">
+                <!-- 기능 상태 안내 배너 -->
+                <div id="msStatusBanner" class="hidden rounded-xl border px-3.5 py-2.5 text-xs"></div>
+
+                <!-- 성공 / 오류 알림 배너 -->
+                <div id="msAlertBanner" class="hidden rounded-xl border px-3.5 py-2.5 text-xs font-semibold flex items-start justify-between gap-2"></div>
+
+                <!-- 결과 불명 재조회 / 동일 요청 재시도 복구 박스 (등록 · 수정 · 전체 취소 공통) -->
+                <div id="msRecoveryBox" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-2 text-amber-950">
+                    <div class="font-bold flex items-center gap-1.5">
+                        <i class="fa-solid fa-triangle-exclamation text-amber-600"></i>
+                        <span id="msRecoveryTitle">이전 요청 결과를 확인하지 못했습니다</span>
+                    </div>
+                    <p id="msRecoveryDesc" class="text-[11px] leading-relaxed text-amber-900">
+                        네트워크 지연이나 응답 유실로 결과를 확인하지 못했습니다. 중복 등록·충돌을 막기 위해 새 요청 시작과 입력 수정이 잠시 잠겨 있습니다. 먼저 "처리 결과 확인"을 누르거나 "같은 요청 다시 시도"로 동일 요청만 안전하게 재시도하세요.
+                    </p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" id="msBtnCheckIdem" onclick="checkManualSalesPendingIdempotency()" class="px-3 py-1.5 rounded-lg bg-white hover:bg-amber-100 border border-amber-300 text-amber-900 font-semibold text-xs cursor-pointer">
+                            처리 결과 확인
+                        </button>
+                        <button type="button" id="msBtnRetrySame" onclick="retryManualSalesPendingRequest()" class="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-800 text-white font-semibold text-xs cursor-pointer">
+                            같은 요청 다시 시도
+                        </button>
+                        <button type="button" id="msBtnResolvePending" onclick="resolveManualSalesPendingOnServer()" class="hidden px-3 py-1.5 rounded-lg bg-white hover:bg-rose-50 border border-rose-300 text-rose-700 font-semibold text-xs cursor-pointer">
+                            서버에서 이전 요청 확정 종료
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 수정 충돌(409 REVISION_CONFLICT) 안내 박스 -->
+                <div id="msConflictBox" class="hidden rounded-xl border border-rose-300 bg-rose-50 p-3 space-y-2 text-rose-950">
+                    <div class="font-bold flex items-center gap-1.5">
+                        <i class="fa-solid fa-code-branch text-rose-600"></i>
+                        <span>다른 곳에서 먼저 수정되어 저장할 수 없습니다</span>
+                    </div>
+                    <p id="msConflictDesc" class="text-[11px] leading-relaxed text-rose-900">
+                        최신 판매기록을 다시 불러온 뒤 변경할 내용을 확인하고 저장해주세요.
+                    </p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" id="msBtnReloadLatest" onclick="reloadLatestManualSaleForEdit()" class="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 text-white font-semibold text-xs cursor-pointer">
+                            최신 내용 다시 불러오기
+                        </button>
+                    </div>
+                </div>
+
+                <!-- VIEW 1: 판매기록 목록 -->
+                <div id="msViewList" class="space-y-3">
+                    <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-wrap items-end gap-2">
+                        <div class="flex flex-col gap-1">
+                            <label for="msFilterStatus" class="text-[11px] font-semibold text-slate-600">상태</label>
+                            <select id="msFilterStatus" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                                <option value="">전체</option>
+                                <option value="submitted">저장됨 (반영 대기)</option>
+                                <option value="cancelled">전체 취소됨</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label for="msFilterDateFrom" class="text-[11px] font-semibold text-slate-600">판매일 시작</label>
+                            <input type="date" id="msFilterDateFrom" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label for="msFilterDateTo" class="text-[11px] font-semibold text-slate-600">판매일 종료</label>
+                            <input type="date" id="msFilterDateTo" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <button type="button" id="msBtnListSearch" onclick="loadManualSalesList(0)" class="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs cursor-pointer">조회</button>
+                            <button type="button" onclick="resetManualSalesFilters()" class="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold text-xs cursor-pointer">초기화</button>
+                        </div>
+                        <div class="sm:ml-auto">
+                            <button type="button" id="msBtnStartNew" onclick="openManualSalesNewForm()" class="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer flex items-center gap-1.5">
+                                <i class="fa-solid fa-plus"></i>
+                                <span>새 판매기록 등록</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="msListContainer" class="space-y-2"></div>
+                    <div id="msListPagination" class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 pt-1"></div>
+                </div>
+
+                <!-- VIEW 2: 판매기록 등록 / 수정 폼 -->
+                <form id="msViewForm" onsubmit="submitManualSaleForm(event)" class="hidden space-y-4">
+                    <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                        <div>
+                            <h4 id="msFormHeading" class="font-bold text-sm text-slate-900">새 판매기록 등록</h4>
+                            <p id="msFormSubheading" class="text-[11px] text-slate-500 mt-0.5">판매일 → 거래처 → 품목·수량·상품금액 → 거래 합계 확인 순으로 입력하세요.</p>
+                        </div>
+                        <button type="button" onclick="switchManualSalesView('list')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs cursor-pointer">목록으로</button>
+                    </div>
+
+                    <div id="msFormPendingLockNote" class="hidden rounded-lg border border-amber-300 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-950 font-medium">
+                        이전 요청의 처리 결과가 확정될 때까지 입력 수정이 잠겨 있습니다. 상단의 "처리 결과 확인" 또는 "같은 요청 다시 시도"를 사용하세요. (저장 버튼을 다시 눌러도 동일 요청 키·원본 본문으로만 안전하게 재시도됩니다.)
+                    </div>
+
+                    <!-- 1~2단계: 판매일 + 거래처 -->
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/70 border border-slate-200 rounded-xl p-3">
+                        <div>
+                            <label for="msFormDate" class="block font-bold text-slate-700 mb-1">1. 판매일 <span class="text-rose-500">*</span></label>
+                            <input type="date" id="msFormDate" required oninput="onManualSaleFormEdited()" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                        <div>
+                            <label for="msFormPartyName" class="block font-bold text-slate-700 mb-1">2. 거래처명 <span class="text-rose-500">*</span></label>
+                            <input type="text" id="msFormPartyName" required maxlength="200" oninput="onManualSaleFormEdited()" placeholder="예: OO식품 도매처" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-xs">
+                        </div>
+                        <div>
+                            <label for="msFormPartyId" class="block font-bold text-slate-700 mb-1">거래처 식별코드 <span class="font-normal text-slate-400">(선택)</span></label>
+                            <input type="text" id="msFormPartyId" maxlength="100" oninput="onManualSaleFormEdited()" placeholder="예: CP-001 (없으면 비움)" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                    </div>
+
+                    <!-- 3단계: 품목 검색 + 품목 행 -->
+                    <div class="space-y-2.5">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <label class="font-bold text-slate-800">3. 품목 및 금액 <span class="text-rose-500">*</span></label>
+                            <button type="button" id="msBtnAddLine" onclick="addManualSaleLine()" class="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-semibold text-xs cursor-pointer">
+                                + 품목 행 추가
+                            </button>
+                        </div>
+
+                        <!-- 기존 마스터 상품 검색 (참고 선택용 · 신규 마스터 생성 안함) -->
+                        <div class="relative bg-indigo-50/50 border border-indigo-200/80 rounded-xl p-2.5 space-y-1.5">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <div class="flex-1 min-w-[200px]">
+                                    <input type="text" id="msProductSearchInput" oninput="searchManualSalesProducts(this.value)" placeholder="기존 상품코드 또는 상품명으로 검색해 행 추가 (미등록 품목은 아래에 직접 입력)" class="w-full px-3 py-1.5 border border-indigo-200 rounded-lg bg-white text-xs">
+                                </div>
+                                <span id="msCatalogHint" class="text-[10px] text-indigo-700">참고 선택 전용 · 미등록 품목은 직접 입력 가능</span>
+                            </div>
+                            <div id="msProductSuggestions" class="hidden max-h-40 overflow-y-auto bg-white border border-indigo-200 rounded-lg divide-y divide-slate-100 shadow-xs"></div>
+                        </div>
+
+                        <!-- 품목 행 목록 -->
+                        <div id="msFormLinesContainer" class="space-y-2.5"></div>
+                    </div>
+
+                    <!-- 추가 정보 (할인 / 배송 / VAT / 증빙 / 메모) -->
+                    <details id="msFormExtraDetails" class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3">
+                        <summary class="cursor-pointer font-bold text-slate-800 select-none">
+                            추가 정보 입력 (주문할인 · 배송비 · VAT 상태 · 증빙 참조 · 메모) ▾
+                        </summary>
+                        <div class="pt-2 space-y-3">
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                    <label for="msFormOrderDiscountAmt" class="block font-semibold text-slate-700 mb-1">주문 단위 할인 (원 · 거래당 1회)</label>
+                                    <input type="number" id="msFormOrderDiscountAmt" min="0" step="1" value="0" oninput="onManualSaleFormEdited(); renderManualSaleOrderDiscountAlloc(); updateManualSaleTotals();" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                                </div>
+                                <div>
+                                    <label for="msFormOrderDiscountMode" class="block font-semibold text-slate-700 mb-1">주문할인 배분 방식</label>
+                                    <select id="msFormOrderDiscountMode" onchange="onManualSaleFormEdited(); renderManualSaleOrderDiscountAlloc(); updateManualSaleTotals();" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                                        <option value="unallocated">미배분 (거래 합계에서 1회 차감)</option>
+                                        <option value="allocated">품목별 직접 배분</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="msFormShippingAmt" class="block font-semibold text-slate-700 mb-1">배송비 (원 · 거래당 1회)</label>
+                                    <input type="number" id="msFormShippingAmt" min="0" step="1" value="0" oninput="onManualSaleFormEdited(); updateManualSaleTotals();" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                                </div>
+                            </div>
+
+                            <div id="msFormOrderDiscountAllocBox" class="hidden bg-white border border-slate-200 rounded-lg p-2.5 space-y-1.5"></div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label for="msFormVatStatus" class="block font-semibold text-slate-700 mb-1">VAT 구분 <span class="font-normal text-slate-400">(자동 10% 계산 안함)</span></label>
+                                    <select id="msFormVatStatus" onchange="onManualSaleFormEdited()" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                                        <option value="unverified">미확정</option>
+                                        <option value="included">부가세 포함</option>
+                                        <option value="excluded">부가세 별도 (세액 자동가산 안함)</option>
+                                        <option value="exempt">면세</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="msFormMemo" class="block font-semibold text-slate-700 mb-1">메모 (선택)</label>
+                                    <input type="text" id="msFormMemo" maxlength="2000" oninput="onManualSaleFormEdited()" placeholder="특이사항이나 참고 메모" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                                </div>
+                            </div>
+
+                            <!-- 증빙 참조 -->
+                            <div class="space-y-1.5">
+                                <div class="flex items-center justify-between">
+                                    <span class="font-semibold text-slate-700">증빙 참조 (선택 · 최대 10건)</span>
+                                    <button type="button" onclick="addManualSaleEvidence()" class="px-2 py-1 rounded bg-white hover:bg-slate-100 border border-slate-300 text-[11px] font-semibold text-slate-700 cursor-pointer">+ 증빙 추가</button>
+                                </div>
+                                <div id="msFormEvidenceContainer" class="space-y-1.5"></div>
+                            </div>
+                        </div>
+                    </details>
+
+                    <!-- 수정 사유 (수정 모드 전용 필수) -->
+                    <div id="msFormReasonWrap" class="hidden bg-amber-50/70 border border-amber-200 rounded-xl p-3">
+                        <label for="msFormReason" class="block font-bold text-amber-950 mb-1">수정 사유 <span class="text-rose-500">*</span></label>
+                        <input type="text" id="msFormReason" maxlength="2000" oninput="onManualSaleFormEdited()" placeholder="예: 수량 오기 정정, 배송비 반영 등 변경 사유를 입력하세요" class="w-full px-3 py-2 border border-amber-300 rounded-lg bg-white text-xs">
+                    </div>
+
+                    <!-- 4단계: 실시간 거래 합계 확인 -->
+                    <div id="msFormTotalsBox" class="bg-slate-900 text-white rounded-xl p-3.5 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300">
+                            <span>4. 거래 합계 확인</span>
+                            <span>원가·이익 미산출 · VAT 자동계산 안함 · 저장 후 대시보드 반영 대기</span>
+                        </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                            <div class="bg-slate-800/80 rounded-lg p-2">
+                                <div class="text-[10px] text-slate-400">품목 상품금액 합계</div>
+                                <div id="msTotGoods" class="font-mono font-bold text-sm mt-0.5">0원</div>
+                            </div>
+                            <div class="bg-slate-800/80 rounded-lg p-2">
+                                <div class="text-[10px] text-slate-400">주문 할인 (1회)</div>
+                                <div id="msTotOrderDiscount" class="font-mono font-bold text-sm text-amber-300 mt-0.5">0원</div>
+                            </div>
+                            <div class="bg-slate-800/80 rounded-lg p-2">
+                                <div class="text-[10px] text-slate-400">할인 후 상품금액</div>
+                                <div id="msTotAfterDiscount" class="font-mono font-bold text-sm mt-0.5">0원</div>
+                            </div>
+                            <div class="bg-slate-800/80 rounded-lg p-2">
+                                <div class="text-[10px] text-slate-400">배송비 (1회)</div>
+                                <div id="msTotShipping" class="font-mono font-bold text-sm mt-0.5">0원</div>
+                            </div>
+                            <div class="bg-indigo-600 rounded-lg p-2 col-span-2 sm:col-span-1">
+                                <div class="text-[10px] text-indigo-100">거래 합계 (검산)</div>
+                                <div id="msTotTransaction" class="font-mono font-black text-base mt-0.5">0원</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-200">
+                        <button type="button" onclick="switchManualSalesView('list')" class="px-3.5 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs cursor-pointer">취소</button>
+                        <button type="submit" id="msFormSubmitBtn" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer flex items-center gap-1.5">
+                            <i class="fa-solid fa-check"></i>
+                            <span id="msFormSubmitText">판매기록 저장</span>
+                        </button>
+                    </div>
+                </form>
+
+                <!-- VIEW 3: 상세 · 전체취소 · 변경이력 -->
+                <div id="msViewDetail" class="hidden space-y-4">
+                    <div id="msDetailContent" class="space-y-3"></div>
+
+                    <!-- 전체 취소 사유 입력 패널 -->
+                    <div id="msCancelPanel" class="hidden bg-rose-50 border border-rose-200 rounded-xl p-3.5 space-y-2.5">
+                        <div class="font-bold text-rose-900 flex items-center gap-1.5">
+                            <i class="fa-solid fa-ban text-rose-600"></i>
+                            <span>판매기록 전체 취소</span>
+                        </div>
+                        <p class="text-[11px] text-rose-800 leading-relaxed">
+                            판매기록을 전체 취소 상태로 전환합니다. 이는 <strong>실제 현금환불 완료와는 별개</strong>이며, 취소 전 기록과 사유는 변경이력에 영구 보존됩니다.
+                        </p>
+                        <div id="msCancelPendingLockNote" class="hidden rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-950 font-medium">
+                            이전 전체 취소 요청 결과를 확인하지 못해 사유 수정이 잠겨 있습니다. 상단의 "처리 결과 확인" 또는 "같은 요청 다시 시도"(아래 실행 버튼 포함)로 동일 키·원본 사유만 안전하게 재시도하세요.
+                        </div>
+                        <div>
+                            <label for="msCancelReasonInput" class="block font-semibold text-rose-900 mb-1">취소 사유 <span class="text-rose-600">*</span></label>
+                            <input type="text" id="msCancelReasonInput" maxlength="2000" placeholder="예: 거래처 발주 철회, 중복 입력 취소 등" class="w-full px-3 py-2 border border-rose-300 rounded-lg bg-white text-xs">
+                        </div>
+                        <div class="flex flex-wrap items-center justify-end gap-2">
+                            <button type="button" onclick="toggleManualSaleCancelPanel(false)" class="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold text-xs cursor-pointer">닫기</button>
+                            <button type="button" id="msBtnConfirmCancel" onclick="submitManualSaleCancel()" class="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer">전체 취소 실행</button>
+                        </div>
+                    </div>
+
+                    <!-- 변경 이력 -->
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <h4 class="font-bold text-slate-900 text-xs">변경 이력</h4>
+                            <span id="msDetailHistoryCount" class="text-[11px] text-slate-500"></span>
+                        </div>
+                        <div id="msDetailHistoryList" class="space-y-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 카테고리 자동완성 -->
     <datalist id="categorySuggestions">
         <option value="오일/식용유"></option>
@@ -5379,6 +5929,306 @@ HTML_TEMPLATE = r"""
                     </button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- 관리자 전용 수기 매출 관리 모달 (수기 입출금과 완전 분리된 판매기록 원장) -->
+    <div id="manualSalesModal" class="hidden fixed inset-0 z-[105] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-5xl flex flex-col max-h-[92vh] overflow-hidden">
+            <!-- 헤더 -->
+            <div class="bg-white border-b border-slate-200 px-4 sm:px-5 py-3 flex items-center justify-between gap-2 shrink-0">
+                <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-file-invoice-dollar text-indigo-600 shrink-0"></i>
+                        <h3 class="font-bold text-sm sm:text-base text-slate-900 truncate">수기 매출 관리</h3>
+                        <span id="msHeaderModeBadge" class="hidden sm:inline-flex px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">관리자 전용</span>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-0.5">판매기록 등록·수정·취소 원장 (은행 입금·공개 매출과 별도 관리)</p>
+                </div>
+                <button type="button" onclick="closeManualSalesModal(false)" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 text-base shrink-0" aria-label="수기 매출 관리 닫기">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- 상단 뷰 전환 탭 -->
+            <div class="bg-slate-50 border-b border-slate-200 px-3 sm:px-5 pt-2 flex flex-wrap items-center justify-between gap-2 shrink-0 text-xs">
+                <div class="flex items-center gap-1.5">
+                    <button type="button" id="msTabBtnList" onclick="switchManualSalesView('list')" class="px-3 py-2 rounded-t-lg font-semibold border border-b-0 bg-white text-slate-900 cursor-pointer">판매기록 목록</button>
+                    <button type="button" id="msTabBtnForm" onclick="openManualSalesNewForm()" class="px-3 py-2 rounded-t-lg font-semibold border border-b-0 bg-slate-100 text-slate-600 hover:bg-white cursor-pointer">+ 새 판매기록 등록</button>
+                    <button type="button" id="msTabBtnDetail" onclick="switchManualSalesView('detail')" class="hidden px-3 py-2 rounded-t-lg font-semibold border border-b-0 bg-slate-100 text-slate-600 hover:bg-white cursor-pointer">상세 · 변경이력</button>
+                </div>
+                <div id="msHeaderStatusPill" class="text-[11px] text-slate-500 pb-1.5"></div>
+            </div>
+
+            <!-- 본문 스크롤 영역 -->
+            <div class="p-3 sm:p-5 overflow-y-auto flex-1 text-xs space-y-3">
+                <!-- 기능 상태 안내 배너 -->
+                <div id="msStatusBanner" class="hidden rounded-xl border px-3.5 py-2.5 text-xs"></div>
+
+                <!-- 성공 / 오류 알림 배너 -->
+                <div id="msAlertBanner" class="hidden rounded-xl border px-3.5 py-2.5 text-xs font-semibold flex items-start justify-between gap-2"></div>
+
+                <!-- 결과 불명 재조회 / 동일 요청 재시도 복구 박스 (등록 · 수정 · 전체 취소 공통) -->
+                <div id="msRecoveryBox" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-2 text-amber-950">
+                    <div class="font-bold flex items-center gap-1.5">
+                        <i class="fa-solid fa-triangle-exclamation text-amber-600"></i>
+                        <span id="msRecoveryTitle">이전 요청 결과를 확인하지 못했습니다</span>
+                    </div>
+                    <p id="msRecoveryDesc" class="text-[11px] leading-relaxed text-amber-900">
+                        네트워크 지연이나 응답 유실로 결과를 확인하지 못했습니다. 중복 등록·충돌을 막기 위해 새 요청 시작과 입력 수정이 잠시 잠겨 있습니다. 먼저 "처리 결과 확인"을 누르거나 "같은 요청 다시 시도"로 동일 요청만 안전하게 재시도하세요.
+                    </p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" id="msBtnCheckIdem" onclick="checkManualSalesPendingIdempotency()" class="px-3 py-1.5 rounded-lg bg-white hover:bg-amber-100 border border-amber-300 text-amber-900 font-semibold text-xs cursor-pointer">
+                            처리 결과 확인
+                        </button>
+                        <button type="button" id="msBtnRetrySame" onclick="retryManualSalesPendingRequest()" class="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-800 text-white font-semibold text-xs cursor-pointer">
+                            같은 요청 다시 시도
+                        </button>
+                        <button type="button" id="msBtnResolvePending" onclick="resolveManualSalesPendingOnServer()" class="hidden px-3 py-1.5 rounded-lg bg-white hover:bg-rose-50 border border-rose-300 text-rose-700 font-semibold text-xs cursor-pointer">
+                            서버에서 이전 요청 확정 종료
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 수정 충돌(409 REVISION_CONFLICT) 안내 박스 -->
+                <div id="msConflictBox" class="hidden rounded-xl border border-rose-300 bg-rose-50 p-3 space-y-2 text-rose-950">
+                    <div class="font-bold flex items-center gap-1.5">
+                        <i class="fa-solid fa-code-branch text-rose-600"></i>
+                        <span>다른 곳에서 먼저 수정되어 저장할 수 없습니다</span>
+                    </div>
+                    <p id="msConflictDesc" class="text-[11px] leading-relaxed text-rose-900">
+                        최신 판매기록을 다시 불러온 뒤 변경할 내용을 확인하고 저장해주세요.
+                    </p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" id="msBtnReloadLatest" onclick="reloadLatestManualSaleForEdit()" class="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 text-white font-semibold text-xs cursor-pointer">
+                            최신 내용 다시 불러오기
+                        </button>
+                    </div>
+                </div>
+
+                <!-- VIEW 1: 판매기록 목록 -->
+                <div id="msViewList" class="space-y-3">
+                    <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-wrap items-end gap-2">
+                        <div class="flex flex-col gap-1">
+                            <label for="msFilterStatus" class="text-[11px] font-semibold text-slate-600">상태</label>
+                            <select id="msFilterStatus" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                                <option value="">전체</option>
+                                <option value="submitted">저장됨 (반영 대기)</option>
+                                <option value="cancelled">전체 취소됨</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label for="msFilterDateFrom" class="text-[11px] font-semibold text-slate-600">판매일 시작</label>
+                            <input type="date" id="msFilterDateFrom" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label for="msFilterDateTo" class="text-[11px] font-semibold text-slate-600">판매일 종료</label>
+                            <input type="date" id="msFilterDateTo" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <button type="button" id="msBtnListSearch" onclick="loadManualSalesList(0)" class="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs cursor-pointer">조회</button>
+                            <button type="button" onclick="resetManualSalesFilters()" class="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold text-xs cursor-pointer">초기화</button>
+                        </div>
+                        <div class="sm:ml-auto">
+                            <button type="button" id="msBtnStartNew" onclick="openManualSalesNewForm()" class="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer flex items-center gap-1.5">
+                                <i class="fa-solid fa-plus"></i>
+                                <span>새 판매기록 등록</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="msListContainer" class="space-y-2"></div>
+                    <div id="msListPagination" class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 pt-1"></div>
+                </div>
+
+                <!-- VIEW 2: 판매기록 등록 / 수정 폼 -->
+                <form id="msViewForm" onsubmit="submitManualSaleForm(event)" class="hidden space-y-4">
+                    <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                        <div>
+                            <h4 id="msFormHeading" class="font-bold text-sm text-slate-900">새 판매기록 등록</h4>
+                            <p id="msFormSubheading" class="text-[11px] text-slate-500 mt-0.5">판매일 → 거래처 → 품목·수량·상품금액 → 거래 합계 확인 순으로 입력하세요.</p>
+                        </div>
+                        <button type="button" onclick="switchManualSalesView('list')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs cursor-pointer">목록으로</button>
+                    </div>
+
+                    <div id="msFormPendingLockNote" class="hidden rounded-lg border border-amber-300 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-950 font-medium">
+                        이전 요청의 처리 결과가 확정될 때까지 입력 수정이 잠겨 있습니다. 상단의 "처리 결과 확인" 또는 "같은 요청 다시 시도"를 사용하세요. (저장 버튼을 다시 눌러도 동일 요청 키·원본 본문으로만 안전하게 재시도됩니다.)
+                    </div>
+
+                    <!-- 1~2단계: 판매일 + 거래처 -->
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/70 border border-slate-200 rounded-xl p-3">
+                        <div>
+                            <label for="msFormDate" class="block font-bold text-slate-700 mb-1">1. 판매일 <span class="text-rose-500">*</span></label>
+                            <input type="date" id="msFormDate" required oninput="onManualSaleFormEdited()" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                        <div>
+                            <label for="msFormPartyName" class="block font-bold text-slate-700 mb-1">2. 거래처명 <span class="text-rose-500">*</span></label>
+                            <input type="text" id="msFormPartyName" required maxlength="200" oninput="onManualSaleFormEdited()" placeholder="예: OO식품 도매처" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-xs">
+                        </div>
+                        <div>
+                            <label for="msFormPartyId" class="block font-bold text-slate-700 mb-1">거래처 식별코드 <span class="font-normal text-slate-400">(선택)</span></label>
+                            <input type="text" id="msFormPartyId" maxlength="100" oninput="onManualSaleFormEdited()" placeholder="예: CP-001 (없으면 비움)" class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                    </div>
+
+                    <!-- 3단계: 품목 검색 + 품목 행 -->
+                    <div class="space-y-2.5">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <label class="font-bold text-slate-800">3. 품목 및 금액 <span class="text-rose-500">*</span></label>
+                            <button type="button" id="msBtnAddLine" onclick="addManualSaleLine()" class="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-semibold text-xs cursor-pointer">
+                                + 품목 행 추가
+                            </button>
+                        </div>
+
+                        <!-- 기존 마스터 상품 검색 (참고 선택용 · 신규 마스터 생성 안함) -->
+                        <div class="relative bg-indigo-50/50 border border-indigo-200/80 rounded-xl p-2.5 space-y-1.5">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <div class="flex-1 min-w-[200px]">
+                                    <input type="text" id="msProductSearchInput" oninput="searchManualSalesProducts(this.value)" placeholder="기존 상품코드 또는 상품명으로 검색해 행 추가 (미등록 품목은 아래에 직접 입력)" class="w-full px-3 py-1.5 border border-indigo-200 rounded-lg bg-white text-xs">
+                                </div>
+                                <span id="msCatalogHint" class="text-[10px] text-indigo-700">참고 선택 전용 · 미등록 품목은 직접 입력 가능</span>
+                            </div>
+                            <div id="msProductSuggestions" class="hidden max-h-40 overflow-y-auto bg-white border border-indigo-200 rounded-lg divide-y divide-slate-100 shadow-xs"></div>
+                        </div>
+
+                        <!-- 품목 행 목록 -->
+                        <div id="msFormLinesContainer" class="space-y-2.5"></div>
+                    </div>
+
+                    <!-- 추가 정보 (할인 / 배송 / VAT / 증빙 / 메모) -->
+                    <details id="msFormExtraDetails" class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3">
+                        <summary class="cursor-pointer font-bold text-slate-800 select-none">
+                            추가 정보 입력 (주문할인 · 배송비 · VAT 상태 · 증빙 참조 · 메모) ▾
+                        </summary>
+                        <div class="pt-2 space-y-3">
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                    <label for="msFormOrderDiscountAmt" class="block font-semibold text-slate-700 mb-1">주문 단위 할인 (원 · 거래당 1회)</label>
+                                    <input type="number" id="msFormOrderDiscountAmt" min="0" step="1" value="0" oninput="onManualSaleFormEdited(); renderManualSaleOrderDiscountAlloc(); updateManualSaleTotals();" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                                </div>
+                                <div>
+                                    <label for="msFormOrderDiscountMode" class="block font-semibold text-slate-700 mb-1">주문할인 배분 방식</label>
+                                    <select id="msFormOrderDiscountMode" onchange="onManualSaleFormEdited(); renderManualSaleOrderDiscountAlloc(); updateManualSaleTotals();" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                                        <option value="unallocated">미배분 (거래 합계에서 1회 차감)</option>
+                                        <option value="allocated">품목별 직접 배분</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="msFormShippingAmt" class="block font-semibold text-slate-700 mb-1">배송비 (원 · 거래당 1회)</label>
+                                    <input type="number" id="msFormShippingAmt" min="0" step="1" value="0" oninput="onManualSaleFormEdited(); updateManualSaleTotals();" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                                </div>
+                            </div>
+
+                            <div id="msFormOrderDiscountAllocBox" class="hidden bg-white border border-slate-200 rounded-lg p-2.5 space-y-1.5"></div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label for="msFormVatStatus" class="block font-semibold text-slate-700 mb-1">VAT 구분 <span class="font-normal text-slate-400">(자동 10% 계산 안함)</span></label>
+                                    <select id="msFormVatStatus" onchange="onManualSaleFormEdited()" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                                        <option value="unverified">미확정</option>
+                                        <option value="included">부가세 포함</option>
+                                        <option value="excluded">부가세 별도 (세액 자동가산 안함)</option>
+                                        <option value="exempt">면세</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="msFormMemo" class="block font-semibold text-slate-700 mb-1">메모 (선택)</label>
+                                    <input type="text" id="msFormMemo" maxlength="2000" oninput="onManualSaleFormEdited()" placeholder="특이사항이나 참고 메모" class="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                                </div>
+                            </div>
+
+                            <!-- 증빙 참조 -->
+                            <div class="space-y-1.5">
+                                <div class="flex items-center justify-between">
+                                    <span class="font-semibold text-slate-700">증빙 참조 (선택 · 최대 10건)</span>
+                                    <button type="button" onclick="addManualSaleEvidence()" class="px-2 py-1 rounded bg-white hover:bg-slate-100 border border-slate-300 text-[11px] font-semibold text-slate-700 cursor-pointer">+ 증빙 추가</button>
+                                </div>
+                                <div id="msFormEvidenceContainer" class="space-y-1.5"></div>
+                            </div>
+                        </div>
+                    </details>
+
+                    <!-- 수정 사유 (수정 모드 전용 필수) -->
+                    <div id="msFormReasonWrap" class="hidden bg-amber-50/70 border border-amber-200 rounded-xl p-3">
+                        <label for="msFormReason" class="block font-bold text-amber-950 mb-1">수정 사유 <span class="text-rose-500">*</span></label>
+                        <input type="text" id="msFormReason" maxlength="2000" oninput="onManualSaleFormEdited()" placeholder="예: 수량 오기 정정, 배송비 반영 등 변경 사유를 입력하세요" class="w-full px-3 py-2 border border-amber-300 rounded-lg bg-white text-xs">
+                    </div>
+
+                    <!-- 4단계: 실시간 거래 합계 확인 -->
+                    <div id="msFormTotalsBox" class="bg-slate-900 text-white rounded-xl p-3.5 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300">
+                            <span>4. 거래 합계 확인</span>
+                            <span>원가·이익 미산출 · VAT 자동계산 안함 · 저장 후 대시보드 반영 대기</span>
+                        </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                            <div class="bg-slate-800/80 rounded-lg p-2">
+                                <div class="text-[10px] text-slate-400">품목 상품금액 합계</div>
+                                <div id="msTotGoods" class="font-mono font-bold text-sm mt-0.5">0원</div>
+                            </div>
+                            <div class="bg-slate-800/80 rounded-lg p-2">
+                                <div class="text-[10px] text-slate-400">주문 할인 (1회)</div>
+                                <div id="msTotOrderDiscount" class="font-mono font-bold text-sm text-amber-300 mt-0.5">0원</div>
+                            </div>
+                            <div class="bg-slate-800/80 rounded-lg p-2">
+                                <div class="text-[10px] text-slate-400">할인 후 상품금액</div>
+                                <div id="msTotAfterDiscount" class="font-mono font-bold text-sm mt-0.5">0원</div>
+                            </div>
+                            <div class="bg-slate-800/80 rounded-lg p-2">
+                                <div class="text-[10px] text-slate-400">배송비 (1회)</div>
+                                <div id="msTotShipping" class="font-mono font-bold text-sm mt-0.5">0원</div>
+                            </div>
+                            <div class="bg-indigo-600 rounded-lg p-2 col-span-2 sm:col-span-1">
+                                <div class="text-[10px] text-indigo-100">거래 합계 (검산)</div>
+                                <div id="msTotTransaction" class="font-mono font-black text-base mt-0.5">0원</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-200">
+                        <button type="button" onclick="switchManualSalesView('list')" class="px-3.5 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs cursor-pointer">취소</button>
+                        <button type="submit" id="msFormSubmitBtn" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer flex items-center gap-1.5">
+                            <i class="fa-solid fa-check"></i>
+                            <span id="msFormSubmitText">판매기록 저장</span>
+                        </button>
+                    </div>
+                </form>
+
+                <!-- VIEW 3: 상세 · 전체취소 · 변경이력 -->
+                <div id="msViewDetail" class="hidden space-y-4">
+                    <div id="msDetailContent" class="space-y-3"></div>
+
+                    <!-- 전체 취소 사유 입력 패널 -->
+                    <div id="msCancelPanel" class="hidden bg-rose-50 border border-rose-200 rounded-xl p-3.5 space-y-2.5">
+                        <div class="font-bold text-rose-900 flex items-center gap-1.5">
+                            <i class="fa-solid fa-ban text-rose-600"></i>
+                            <span>판매기록 전체 취소</span>
+                        </div>
+                        <p class="text-[11px] text-rose-800 leading-relaxed">
+                            판매기록을 전체 취소 상태로 전환합니다. 이는 <strong>실제 현금환불 완료와는 별개</strong>이며, 취소 전 기록과 사유는 변경이력에 영구 보존됩니다.
+                        </p>
+                        <div id="msCancelPendingLockNote" class="hidden rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-950 font-medium">
+                            이전 전체 취소 요청 결과를 확인하지 못해 사유 수정이 잠겨 있습니다. 상단의 "처리 결과 확인" 또는 "같은 요청 다시 시도"(아래 실행 버튼 포함)로 동일 키·원본 사유만 안전하게 재시도하세요.
+                        </div>
+                        <div>
+                            <label for="msCancelReasonInput" class="block font-semibold text-rose-900 mb-1">취소 사유 <span class="text-rose-600">*</span></label>
+                            <input type="text" id="msCancelReasonInput" maxlength="2000" placeholder="예: 거래처 발주 철회, 중복 입력 취소 등" class="w-full px-3 py-2 border border-rose-300 rounded-lg bg-white text-xs">
+                        </div>
+                        <div class="flex flex-wrap items-center justify-end gap-2">
+                            <button type="button" onclick="toggleManualSaleCancelPanel(false)" class="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold text-xs cursor-pointer">닫기</button>
+                            <button type="button" id="msBtnConfirmCancel" onclick="submitManualSaleCancel()" class="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer">전체 취소 실행</button>
+                        </div>
+                    </div>
+
+                    <!-- 변경 이력 -->
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <h4 class="font-bold text-slate-900 text-xs">변경 이력</h4>
+                            <span id="msDetailHistoryCount" class="text-[11px] text-slate-500"></span>
+                        </div>
+                        <div id="msDetailHistoryList" class="space-y-2"></div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -6158,6 +7008,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             window.openCreateProductModal = () => {};
             window.openEditProductModal = () => {};
             window.openAdminCenter = () => {};
+            window.openManualSalesModal = () => {};
             window.openCodeMappingModal = () => {};
         } else {
             const titleEl = document.getElementById('headerMainTitle');
@@ -6367,12 +7218,14 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const m4 = document.getElementById('codeMappingModal');
             const m5 = document.getElementById('productDetailModal');
             const m6 = document.getElementById('appConfirmModal');
+            const m7 = document.getElementById('manualSalesModal');
             return (m1 && !m1.classList.contains('hidden')) ||
                    (m2 && !m2.classList.contains('hidden')) ||
                    (m3 && !m3.classList.contains('hidden')) ||
                    (m4 && !m4.classList.contains('hidden')) ||
                    (m5 && !m5.classList.contains('hidden')) ||
-                   (m6 && !m6.classList.contains('hidden'));
+                   (m6 && !m6.classList.contains('hidden')) ||
+                   (m7 && !m7.classList.contains('hidden'));
         }
 
         function closeAdminMenu() {
@@ -6496,9 +7349,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
         }
 
         async function lockAdminMode() {
-            try {
-                await fetch('/api/admin/logout', { method: 'POST' });
-            } catch (e) {}
+            // 잠금 즉시 세션 상태를 무효화하고 진행 중 수기 매출 요청을 중단(epoch 증가 + AbortController)
             adminToken = '';
             isAdminMode = false;
             adminConfigCache = null;
@@ -6506,7 +7357,11 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             closeCodeMappingModal();
             closeEditProductModal();
             closeAdminCenter();
+            if (typeof closeManualSalesModal === 'function') closeManualSalesModal(true);
             updateAdminUI();
+            try {
+                await fetch('/api/admin/logout', { method: 'POST' });
+            } catch (e) {}
             fetchSummary();
         }
 
@@ -6755,6 +7610,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 isAdminMode = false;
                 adminToken = '';
                 try { sessionStorage.removeItem(ADMIN_TOKEN_KEY); } catch (e) {}
+                if (typeof closeManualSalesModal === 'function') closeManualSalesModal(true);
                 updateAdminUI();
                 notifyUser('관리자 세션이 만료되었거나 인증이 필요합니다. 다시 PIN을 입력해주세요.', 'warning');
                 openPinModal();
@@ -6961,6 +7817,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
         }
 
         function shouldMaskSalesCell(m) {
+            if (m.metrics_available === false) return false;
             if (isCoupangLinked(m)) return false;
             return (Number(m.other_sales_7d || 0) <= 0)
                 && (Number(m.other_sales_30d || 0) <= 0)
@@ -7103,9 +7960,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     </div>
                     <div class="${m.is_no_sales ? 'bg-orange-50/50 border-orange-200' : 'bg-slate-50/70 border-slate-200'} border rounded-xl px-3 py-2">
                         <div class="text-[10px] font-semibold ${m.is_no_sales ? 'text-orange-800' : 'text-slate-500'}">출고 속도 · 통합</div>
-                        <div class="font-bold font-mono text-sm ${m.is_no_sales ? 'text-orange-950' : 'text-slate-900'} mt-0.5">일 ${m.daily_sales}개</div>
-                        <div class="text-[10px] ${m.is_no_sales ? 'text-orange-700' : 'text-slate-500'} truncate">7일 ${m.total_sales_7d} · 30일 ${m.total_sales_30d || 0}</div>
-                        <div class="text-[11px] text-slate-400 truncate mt-0.5 font-mono">쿠팡 ${(m.coupang_sales_7d || 0).toLocaleString()}/${(m.coupang_sales_30d || 0).toLocaleString()} · 타 ${(m.other_sales_7d || 0).toLocaleString()}/${(m.other_sales_30d || 0).toLocaleString()}</div>
+                        <div class="font-bold font-mono text-sm ${m.is_no_sales ? 'text-orange-950' : 'text-slate-900'} mt-0.5">일 ${displayInventoryMetric(m.daily_sales)}개</div>
+                        <div class="text-[10px] ${m.is_no_sales ? 'text-orange-700' : 'text-slate-500'} truncate">7일 ${displayInventoryMetric(m.total_sales_7d)} · 30일 ${displayInventoryMetric(m.total_sales_30d)}</div>
+                        <div class="text-[11px] text-slate-400 truncate mt-0.5 font-mono">쿠팡 ${displayInventoryMetric(m.coupang_sales_7d)}/${displayInventoryMetric(m.coupang_sales_30d)} · 타 ${displayInventoryMetric(m.other_sales_7d)}/${displayInventoryMetric(m.other_sales_30d)}</div>
                     </div>
                 </div>
             `;
@@ -7188,7 +8045,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                 <i class="fa-solid fa-chart-pie text-slate-500 mt-0.5 shrink-0"></i>
                                 <div class="min-w-0 break-words leading-relaxed">
                                     <span class="font-bold text-slate-800">소진 시뮬레이션:</span>
-                                    <span>일평균 <strong>${m.daily_sales}개</strong> 기준, 최단기한(<strong>${escapeHtml(m.nearest_expiry_date)}</strong>, D-${m.nearest_days_left}일)까지 <strong>${m.projected_sales_to_exp}개</strong> 소진 예상 (로트 ${m.nearest_lot_stock}개)</span>
+                                    <span>일평균 <strong>${displayInventoryMetric(m.daily_sales)}개</strong> 기준, 최단기한(<strong>${escapeHtml(m.nearest_expiry_date)}</strong>, D-${m.nearest_days_left}일)까지 <strong>${displayInventoryMetric(m.projected_sales_to_exp)}개</strong> 소진 예상 (로트 ${m.nearest_lot_stock}개)</span>
                                 </div>
                             </div>
                             <div>
@@ -7223,9 +8080,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         <span>
                             <i class="fa-solid fa-truck-fast mr-1 text-slate-500"></i>
                             <span class="font-bold text-slate-900">쿠팡 출고:</span>
-                            7일 <strong>${(m.coupang_sales_7d || 0).toLocaleString()}개</strong> / 30일 <strong>${(m.coupang_sales_30d || 0).toLocaleString()}개</strong>
+                            7일 <strong>${displayInventoryMetric(m.coupang_sales_7d)}개</strong> / 30일 <strong>${displayInventoryMetric(m.coupang_sales_30d)}개</strong>
                         </span>
-                        <span class="text-[10px] font-mono text-slate-500">일평균 <strong class="text-slate-700">${m.coupang_daily || 0}개</strong>${(m.coupang_return_sales_7d || 0) > 0 ? ` · 🔄 반품출고 7일 ${(m.coupang_return_sales_7d || 0).toLocaleString()}개` : ''}</span>
+                        <span class="text-[10px] font-mono text-slate-500">일평균 <strong class="text-slate-700">${displayInventoryMetric(m.coupang_daily)}개</strong>${(m.coupang_return_sales_7d || 0) > 0 ? ` · 🔄 반품출고 7일 ${displayInventoryMetric(m.coupang_return_sales_7d)}개` : ''}</span>
                     </div>
                     ${bundleGroups.length > 0 ? `
                         <div class="flex flex-wrap gap-1.5">
@@ -7233,10 +8090,10 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                 const nPkg = grp.normal_package_stock || 0;
                                 const nPhys = grp.normal_physical_stock || 0;
                                 const rPhys = grp.return_physical_stock || 0;
-                                const gS7 = grp.normal_sales_7d_physical || 0;
-                                const gS30 = (grp.normal_options || []).reduce((acc, o) => acc + ((o.sales_30d || 0) * (o.bundle || grp.bundle || 1)), 0);
+                                const gS7 = inventoryMetric(grp.normal_sales_7d_physical);
+                                const gS30 = (grp.normal_options || []).reduce((acc, o) => addInventoryMetric(acc, o.sales_30d == null ? null : o.sales_30d * (o.bundle || grp.bundle || 1)), 0);
                                 const hasActivity = nPhys > 0 || gS7 > 0 || gS30 > 0;
-                                const salesSuffix = (gS7 > 0 || gS30 > 0) ? ` · 출고 7일 ${gS7.toLocaleString()} / 30일 ${gS30.toLocaleString()}` : '';
+                                const salesSuffix = ` · 출고 7일 ${displayInventoryMetric(gS7)} / 30일 ${displayInventoryMetric(gS30)}`;
                                 return `
                                     <span class="px-2.5 py-1 rounded-lg border text-[11px] font-mono ${hasActivity ? 'bg-slate-50 border-slate-300 text-slate-800 font-semibold' : 'bg-white border-slate-200 text-slate-400'}">
                                         ${grp.bundle}개입: ${nPkg.toLocaleString()}세트 (${nPhys.toLocaleString()}개)${rPhys > 0 ? ` · 🔄 반품 ${rPhys.toLocaleString()}개` : ''}${salesSuffix}
@@ -7273,7 +8130,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
                     <div class="space-y-1.5">
                         <div class="text-[11px] font-bold text-slate-800 flex flex-wrap items-center justify-between gap-1">
-                            <span><i class="fa-solid fa-receipt mr-1 text-slate-500"></i>쿠팡외 출고: 7일 <strong>${(m.other_sales_7d || 0).toLocaleString()}개</strong> / 30일 <strong>${(m.other_sales_30d || m.other_sales_7d || 0).toLocaleString()}개</strong></span>
+                            <span><i class="fa-solid fa-receipt mr-1 text-slate-500"></i>쿠팡외 출고: 7일 <strong>${displayInventoryMetric(m.other_sales_7d)}개</strong> / 30일 <strong>${displayInventoryMetric(m.other_sales_30d)}개</strong></span>
                             ${recentOrders.length > 0 ? `<span class="text-[10px] text-slate-400 font-normal">최근 주문 ${recentOrders.length}건</span>` : ''}
                         </div>
                         ${recentOrders.length > 0 ? `
@@ -7767,9 +8624,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     elTotalStockCost.innerText = `원가 약 ${(tCost / 100000000).toFixed(2)}억 원`;
                     elTotalStockCost.title = `총 가용재고 실물 원가 합계: ${fmtWon(tCost)}`;
                 }
-                document.getElementById('statTotalSales7d').innerText = `7일 ${data.stats.total_sales_7d.toLocaleString()}개`;
+                document.getElementById('statTotalSales7d').innerText = `7일 ${displayInventoryMetric(data.stats.total_sales_7d)}개`;
                 const elSales30 = document.getElementById('statTotalSales30d');
-                if (elSales30) elSales30.innerText = (data.stats.total_sales_30d || 0).toLocaleString();
+                if (elSales30) elSales30.innerText = displayInventoryMetric(data.stats.total_sales_30d);
                 const elSalesSub = document.getElementById('statSalesSubtext');
                 if (elSalesSub) {
                     const c7 = data.stats.total_coupang_7d || 0;
@@ -7953,13 +8810,13 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 sumGaemiStock += m.gaemi_total;
                 sumCoupangStock += m.coupang_physical_total;
                 sumCoupangReturnStock += (m.coupang_return_physical_total || 0);
-                sumCoupangSales += m.coupang_sales_7d;
-                sumCoupangSales30d += (m.coupang_sales_30d || 0);
-                sumOtherSales += m.other_sales_7d;
-                sumOtherSales30d += (m.other_sales_30d || 0);
-                sumTotalSales += m.total_sales_7d;
-                sumTotalSales30d += (m.total_sales_30d || 0);
-                sumDailySales += m.daily_sales;
+                sumCoupangSales = addInventoryMetric(sumCoupangSales, m.coupang_sales_7d);
+                sumCoupangSales30d = addInventoryMetric(sumCoupangSales30d, m.coupang_sales_30d);
+                sumOtherSales = addInventoryMetric(sumOtherSales, m.other_sales_7d);
+                sumOtherSales30d = addInventoryMetric(sumOtherSales30d, m.other_sales_30d);
+                sumTotalSales = addInventoryMetric(sumTotalSales, m.total_sales_7d);
+                sumTotalSales30d = addInventoryMetric(sumTotalSales30d, m.total_sales_30d);
+                sumDailySales = addInventoryMetric(sumDailySales, m.daily_sales);
 
                 const theme = getStatusTheme(m.status_color);
                 const badgeClass = theme.pill;
@@ -8015,17 +8872,19 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 // 통합 런웨이 프로그레스 바 시각화 (품목별/전역 기준 + 입고 예정 반영)
                 const effLt = m.effective_lead_time || 110;
                 const effPrep = m.effective_prepare_limit || 130;
+                const metricsUnavailable = m.metrics_available === false;
                 const isStagnantTotal = (m.total_runway_str === '소진무');
                 const isOutOfStockTotal = (m.total_runway_str === '재고없음');
                 const hasInboundCover = (m.status_color === 'teal' && m.in_transit_qty > 0);
                 let runwayBarColor = "bg-emerald-500";
                 if (hasInboundCover) runwayBarColor = "bg-teal-600";
+                else if (metricsUnavailable) runwayBarColor = 'bg-slate-200';
                 else if (isOutOfStockTotal || (!isStagnantTotal && m.total_runway < effLt)) runwayBarColor = "bg-rose-500";
                 else if (isStagnantTotal) runwayBarColor = "bg-orange-500";
                 else if (m.total_runway <= effPrep) runwayBarColor = "bg-amber-500";
                 const barBase = Math.max(180, effPrep + 30);
                 const barMetric = (hasInboundCover && m.daily_sales > 0 && m.effective_runway) ? m.effective_runway : m.total_runway;
-                const barPercent = (isOutOfStockTotal && !hasInboundCover) ? 8 : ((isStagnantTotal || (hasInboundCover && m.daily_sales <= 0)) ? 100 : Math.min(100, Math.max(8, (barMetric / barBase) * 100)));
+                const barPercent = metricsUnavailable ? 0 : (isOutOfStockTotal && !hasInboundCover) ? 8 : ((isStagnantTotal || (hasInboundCover && m.daily_sales <= 0)) ? 100 : Math.min(100, Math.max(8, (barMetric / barBase) * 100)));
 
                 const inTransitHtml = (m.in_transit_qty && m.in_transit_qty > 0)
                     ? `<div class="text-[11px] font-semibold text-teal-700 mt-0.5 whitespace-nowrap" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 +${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
@@ -8139,14 +8998,14 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                             html += `<td class="${col.tdClass} overflow-hidden">${coupangRunwayHtml}</td>`;
                         }
                     } else if (colId === 'total_sales') {
-                        const s7 = (m.total_sales_7d || 0).toLocaleString();
-                        const s30 = (m.total_sales_30d || 0).toLocaleString();
+                        const s7 = displayInventoryMetric(m.total_sales_7d);
+                        const s30 = displayInventoryMetric(m.total_sales_30d);
                         if (maskSalesCell) {
                             html += `
                                 <td class="${col.tdClass} overflow-hidden">
                                     <div class="masked-cell-value text-transparent select-none" aria-hidden="true">
                                         <div class="font-bold font-mono truncate">${s7}개 <span class="font-normal text-[10px]">/ 30일 ${s30}개</span></div>
-                                        <div class="text-[11px] font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
+                                        <div class="text-[11px] font-normal mt-0.5 truncate">가중 일평균 ${displayInventoryMetric(m.daily_sales)}개</div>
                                     </div>
                                 </td>
                             `;
@@ -8154,7 +9013,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                             html += `
                                 <td class="${col.tdClass} overflow-hidden">
                                     <div class="font-bold font-mono text-slate-900 truncate">${s7}개 <span class="text-slate-400 font-normal text-[10px]">/ 30일 ${s30}개</span></div>
-                                    <div class="text-[11px] text-slate-400 font-normal mt-0.5 truncate">가중 일평균 ${m.daily_sales}개</div>
+                                    <div class="text-[11px] text-slate-400 font-normal mt-0.5 truncate">가중 일평균 ${displayInventoryMetric(m.daily_sales)}개</div>
                                 </td>
                             `;
                         }
@@ -8234,7 +9093,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                 ` : ''}
                             </div>
                             <span class="text-[10px] font-mono text-slate-500">
-                                7일 출고 <strong class="text-slate-700">${(m.coupang_sales_7d || 0).toLocaleString()}개</strong> · 런웨이 <strong class="text-slate-700">${escapeHtml(m.coupang_runway_str)}</strong>
+                                7일 출고 <strong class="text-slate-700">${displayInventoryMetric(m.coupang_sales_7d)}개</strong> · 런웨이 <strong class="text-slate-700">${escapeHtml(m.coupang_runway_str)}</strong>
                             </span>
                         </div>
                     ` : '';
@@ -8245,7 +9104,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                             <div class="p-3 bg-slate-50/40">
                                 <div class="bg-white border border-dashed border-slate-300 rounded-xl px-3.5 py-4 text-center space-y-2">
                                     <div class="text-xs font-semibold text-slate-700">연결된 쿠팡 윙 번들 옵션이 없습니다.</div>
-                                    <div class="text-[11px] text-slate-500">개미창고(3PL) <strong>${m.gaemi_total.toLocaleString()}개</strong> · 쿠팡외 7일 <strong>${(m.other_sales_7d || 0).toLocaleString()}개</strong> — 전체 세부내역은 상단 <strong>세부정보보기</strong>에서 확인하세요.</div>
+                                    <div class="text-[11px] text-slate-500">개미창고(3PL) <strong>${m.gaemi_total.toLocaleString()}개</strong> · 쿠팡외 7일 <strong>${displayInventoryMetric(m.other_sales_7d)}개</strong> — 전체 세부내역은 상단 <strong>세부정보보기</strong>에서 확인하세요.</div>
                                     ${isAdminMode ? `
                                         <div>
                                             <button type="button" data-prod-id="${detailIdEsc}" onclick="event.stopPropagation(); openCodeMappingModal(this.dataset.prodId)" class="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-lg text-[11px] font-semibold">
@@ -8308,7 +9167,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                     </div>
                                     <div class="text-right shrink-0 font-mono">
                                         <div class="text-xs ${hasStock ? 'font-bold text-slate-900' : 'font-medium text-slate-400'}">${opt.coupang_stock.toLocaleString()}세트 <span class="${hasStock ? 'font-semibold text-slate-600' : 'font-normal text-slate-400'}">(실물 ${opt.physical_stock.toLocaleString()}개)</span></div>
-                                        <div class="text-[10px] text-slate-500 mt-0.5">7일 출고 <span class="${(opt.sales_7d_physical || 0) > 0 ? 'font-bold text-slate-700' : 'text-slate-400'}">${opt.sales_7d_physical.toLocaleString()}개</span>${(opt.doc > 0 && hasStock) ? ` · ${opt.doc}일분` : ''}</div>
+                                        <div class="text-[10px] text-slate-500 mt-0.5">7일 출고 <span class="${(opt.sales_7d_physical || 0) > 0 ? 'font-bold text-slate-700' : 'text-slate-400'}">${displayInventoryMetric(opt.sales_7d_physical)}개</span>${opt.doc == null && hasStock ? ' · DOC 미산출' : (opt.doc > 0 && hasStock) ? ` · ${opt.doc}일분` : ''}</div>
                                     </div>
                                 </div>
                             `;
@@ -8335,7 +9194,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                     </div>
                                     <div class="text-right shrink-0 font-mono">
                                         <div class="text-xs font-semibold text-slate-600">${opt.coupang_stock.toLocaleString()}세트 <span class="text-slate-500 font-normal">(반품 실물 ${opt.physical_stock.toLocaleString()}개)</span></div>
-                                        <div class="text-[10px] text-slate-400 mt-0.5">7일 출고 <strong class="text-slate-600">${opt.sales_7d_physical.toLocaleString()}개</strong></div>
+                                        <div class="text-[10px] text-slate-400 mt-0.5">7일 출고 <strong class="text-slate-600">${displayInventoryMetric(opt.sales_7d_physical)}개</strong></div>
                                     </div>
                                 </div>
                             `;
@@ -8402,22 +9261,22 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 } else if (colId === 'gaemi_stock') {
                     footHtml += `<td class="py-2.5 px-2 text-right font-bold font-mono text-slate-800 text-xs overflow-hidden">${sumGaemiStock.toLocaleString()}</td>`;
                 } else if (colId === 'gaemi_runway') {
-                    const avgGRunway = sumDailySales > 0 ? (sumGaemiStock / sumDailySales).toFixed(1) + '일' : (sumGaemiStock > 0 ? '소진무' : '-');
+                    const avgGRunway = sumDailySales == null ? '미산출' : sumDailySales > 0 ? (sumGaemiStock / sumDailySales).toFixed(1) + '일' : (sumGaemiStock > 0 ? '소진무' : '-');
                     footHtml += `<td class="py-2.5 px-1.5 text-center font-semibold font-mono text-slate-700 text-[11px] overflow-hidden">${avgGRunway}</td>`;
                 } else if (colId === 'coupang_stock') {
                     footHtml += `<td class="py-2.5 px-2 text-right font-bold font-mono text-slate-800 text-xs overflow-hidden"><div>${sumCoupangStock.toLocaleString()}</div>${sumCoupangReturnStock > 0 ? `<div class="text-[11px] font-medium text-slate-500">🔄 반품 ${sumCoupangReturnStock.toLocaleString()}</div>` : ''}</td>`;
                 } else if (colId === 'coupang_runway') {
-                    const avgCRunway = sumCoupangSales > 0 ? (sumCoupangStock / (sumCoupangSales / 7.0)).toFixed(1) + '일' : (sumCoupangStock > 0 ? '소진무' : '-');
+                    const avgCRunway = sumCoupangSales == null ? '미산출' : sumCoupangSales > 0 ? (sumCoupangStock / (sumCoupangSales / 7.0)).toFixed(1) + '일' : (sumCoupangStock > 0 ? '소진무' : '-');
                     footHtml += `<td class="py-2.5 px-1.5 text-center font-semibold font-mono text-slate-700 text-[11px] overflow-hidden">${avgCRunway}</td>`;
                 } else if (colId === 'total_sales') {
                     footHtml += `
                         <td class="py-2.5 px-2 text-right font-bold font-mono text-slate-900 text-xs overflow-hidden">
-                            <div class="truncate">7일 ${sumTotalSales.toLocaleString()}개</div>
-                            <div class="text-[10px] text-slate-500 font-normal truncate">30일 ${sumTotalSales30d.toLocaleString()}개</div>
+                            <div class="truncate">7일 ${displayInventoryMetric(sumTotalSales)}개</div>
+                            <div class="text-[10px] text-slate-500 font-normal truncate">30일 ${displayInventoryMetric(sumTotalSales30d)}개</div>
                         </td>
                     `;
                 } else if (colId === 'total_runway') {
-                    const avgDoc = sumDailySales > 0 ? (sumTotalStock / sumDailySales).toFixed(1) + '일' : (sumTotalStock > 0 ? '소진무' : '재고없음');
+                    const avgDoc = sumDailySales == null ? '미산출' : sumDailySales > 0 ? (sumTotalStock / sumDailySales).toFixed(1) + '일' : (sumTotalStock > 0 ? '소진무' : '재고없음');
                     footHtml += `<td class="py-2.5 px-1.5 text-center font-bold text-slate-800 text-[11px] overflow-hidden truncate">평균 ${avgDoc}</td>`;
                 } else {
                     footHtml += `<td class="py-2.5 px-1.5 text-center text-slate-400 overflow-hidden">-</td>`;
@@ -10274,7 +11133,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     gradeMissing,
                     isReturn,
                     stock: parseInt(cdata.stock || 0, 10) || 0,
-                    sales_7d: parseInt(cdata.sales_7d || 0, 10) || 0,
+                    sales_7d: inventoryMetric(cdata.sales_7d),
                     guessedBundle: guessCoupangBundle(optLabel || prodName),
                     owners,
                     isMapped,
@@ -10393,7 +11252,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     }
                     codeCell = `<div class="font-mono font-bold text-slate-900">${escapeHtml(row.option_id)}</div><div class="text-[10px] text-slate-600">${escapeHtml(row.option_name || '')}</div>${gradeChip}`;
                     const pidTxt = row.product_id ? ` · 등록ID ${escapeHtml(row.product_id)}` : '';
-                    infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock}세트 · 7일출고 ${row.sales_7d}세트 (추천 ${row.guessedBundle}개입${pidTxt})</div>`;
+                    infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock}세트 · 7일출고 ${displayInventoryMetric(row.sales_7d)}세트 (추천 ${row.guessedBundle}개입${pidTxt})</div>`;
                 }
 
                 let statusBadge = '';
@@ -11435,7 +12294,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 const csvIsRet = Boolean(cd && (cd.is_return || cGrade.includes('반품') || cGrade.toLowerCase().includes('return')));
                 const isRet = Boolean(opt.is_return || csvIsRet);
                 const csvInfo = cd
-                    ? `현재 ${cd.stock || 0}세트 · 7일출고 ${cd.sales_7d || 0}세트${gradeMissing && !isRet ? ' (등급미확인)' : ''}`
+                    ? `현재 ${cd.stock || 0}세트 · 7일출고 ${displayInventoryMetric(cd.sales_7d)}세트${gradeMissing && !isRet ? ' (등급미확인)' : ''}`
                     : 'CSV 미등록';
                 return `
                     <div class="flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-slate-300 bg-slate-50/70' : 'border-slate-200'} rounded-lg p-2">
@@ -11530,7 +12389,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         grade: cGrade,
                         is_return: isRet,
                         stock: parseInt(cdata.stock || 0, 10) || 0,
-                        sales_7d: parseInt(cdata.sales_7d || 0, 10) || 0,
+                        sales_7d: inventoryMetric(cdata.sales_7d),
                         guessedBundle: guessCoupangBundle(optLabel || prodName),
                         owners: (idxData.coupangOwners[oidStr] || []).filter(o => o.seller_code !== cmState.seller_code),
                         searchBlob: `${oidStr} ${pid} ${optLabel} ${prodName} ${cGrade} ${isRet ? '반품' : ''}`.toLowerCase()
@@ -11578,7 +12437,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                 ${retBadge}
                                 ${pidBadge}
                                 ${ownerBadge}
-                                <span class="text-[10px] text-slate-500 font-mono">재고 ${it.stock}세트 · 7일출고 ${it.sales_7d}</span>
+                                <span class="text-[10px] text-slate-500 font-mono">재고 ${it.stock}세트 · 7일출고 ${displayInventoryMetric(it.sales_7d)}</span>
                             </div>
                             <div class="text-[10px] text-slate-500 truncate">${escapeHtml(it.product_name || '상품명 미기재')}</div>
                         </div>
@@ -11920,11 +12779,17 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             notifyUser('현금흐름 CSV 파일을 성공적으로 내보냈습니다.', 'success');
         }
 
+        let currentAutomationStatus = null;
         let latestDashboardDataSeq = 0;
         async function loadDashboardData(showToast = false) {
             const reqSeq = ++latestDashboardDataSeq;
             try {
-                const res = await (adminToken ? adminFetch('/api/dashboard-data', { cache: 'no-store' }) : fetch('/api/dashboard-data', { cache: 'no-store' }));
+                const dashPromise = (adminToken ? adminFetch('/api/dashboard-data', { cache: 'no-store' }) : fetch('/api/dashboard-data', { cache: 'no-store' }));
+                const autoPromise = fetch('/api/automation-status', { cache: 'no-store' })
+                    .then(r => r.ok ? r.json() : null)
+                    .catch(() => null);
+
+                const [res, autoStatus] = await Promise.all([dashPromise, autoPromise]);
                 if (!res.ok) {
                     if (showToast) notifyUser('대시보드 데이터를 불러오지 못했습니다 (' + res.status + ')', 'error');
                     return;
@@ -11934,12 +12799,14 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     return;
                 }
                 currentDashboardData = data;
+                currentAutomationStatus = autoStatus;
                 if (typeof window !== 'undefined') {
                     window.currentGenerationRevision = (data._generation && data._generation.revision) || null;
+                    window.currentAutomationStatus = autoStatus;
                 }
-                renderSalesTab(data);
-                renderCashFlowTab(data);
-                renderPnLTab(data);
+                renderSalesTab(data, autoStatus);
+                renderCashFlowTab(data, autoStatus);
+                renderPnLTab(data, autoStatus);
 
                 // 미분류 배지 표시 (탭 버튼)
                 const unclassCount = data.unclassified ? (data.unclassified.count || 0) : 0;
@@ -12338,6 +13205,331 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             return lines;
         }
 
+        // -------------------------------------------------------------
+        // 20년차 식품 MD 실무 검증용: 채널별 자료 기준일 및 최종 갱신 상태 헬퍼
+        // -------------------------------------------------------------
+        function inventoryMetric(value) {
+            if (value == null || value === '-' || value === '') return null;
+            const number = Number(value);
+            return Number.isFinite(number) ? number : null;
+        }
+        function displayInventoryMetric(value) {
+            const number = inventoryMetric(value);
+            return number === null ? '미산출' : number.toLocaleString();
+        }
+        function addInventoryMetric(a, b) {
+            a = inventoryMetric(a); b = inventoryMetric(b);
+            return a === null || b === null ? null : a + b;
+        }
+        function escapeHtml(str) {
+            if (str == null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function formatKstTime(isoStr) {
+            if (!isoStr) return '-';
+            try {
+                const dt = new Date(isoStr);
+                if (isNaN(dt.getTime())) return String(isoStr).slice(0, 16);
+                const parts = new Intl.DateTimeFormat('ko-KR', {
+                    timeZone: 'Asia/Seoul',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                }).formatToParts(dt);
+                const m = parts.find(p => p.type === 'month')?.value || '';
+                const d = parts.find(p => p.type === 'day')?.value || '';
+                const h = parts.find(p => p.type === 'hour')?.value || '';
+                const min = parts.find(p => p.type === 'minute')?.value || '';
+                return `${m}/${d} ${h}:${min} KST`;
+            } catch (_) {
+                return String(isoStr).slice(5, 16);
+            }
+        }
+
+        function resolveChannelAutomationState(chKey, autoStatus, d) {
+            const sp = (d && d.sales_profit) || {};
+            const meta = (d && d.metadata) || {};
+            const genMeta = (d && d._generation) || {};
+            const isRetainedGen = Boolean(genMeta.is_retained === true || genMeta.is_retained_fallback === true);
+
+            const autoChannels = (autoStatus && autoStatus.channels) || {};
+            const collStatus = (d && d.collection_status) || sp.collection_status || {};
+            const srcStatus = (sp && sp.source_status) || (d && d.source_status) || {};
+
+            let rawAuto = autoChannels[chKey];
+            if (!rawAuto) {
+                if (chKey === 'coupang' || chKey === 'coupang_growth') {
+                    rawAuto = autoChannels['coupang_growth'] || autoChannels['coupang_wing'] || autoChannels['coupang'];
+                } else if (chKey === 'gaemi' || chKey === 'gaemi_inventory') {
+                    rawAuto = autoChannels['gaemi_inventory'] || autoChannels['gaemi'];
+                } else if (chKey === 'bank' || chKey === 'hana_bank') {
+                    rawAuto = autoChannels['bank'] || autoChannels['hana_bank'];
+                }
+            }
+
+            const legacyColl = collStatus[chKey] || {};
+            const legacySrc = srcStatus[chKey] || {};
+
+            let state = 'uncollected';
+            let stateLabel = '미수집';
+            let badgeClass = 'bg-slate-100 text-slate-600 border border-slate-300';
+            let dotColor = 'bg-slate-400';
+            let sourceAsOf = (rawAuto && rawAuto.source_as_of) || meta.sales_as_of || meta.report_date || (d && d.daily && d.daily.date) || '-';
+            let capturedAt = '-';
+            let detailNote = '';
+            let isZeroOrder = false;
+
+            // 수집 시각: 실제 수집 시각만 사용 (generated_at 임의 대입 금지)
+            if (rawAuto && (rawAuto.success_at || rawAuto.attempted_at)) {
+                capturedAt = formatKstTime(rawAuto.success_at || rawAuto.attempted_at);
+            } else if (legacyColl.last_success_at) {
+                capturedAt = formatKstTime(legacyColl.last_success_at);
+            } else {
+                capturedAt = '-';
+            }
+
+            // 게시 세대(revision) 및 게시 검증 상태 확인
+            const lastSuccessRev = (autoStatus && autoStatus.last_success && autoStatus.last_success.revision) || (autoStatus && autoStatus.revision) || null;
+            const currentRev = (d && d._generation && d._generation.revision) || (typeof window !== 'undefined' ? window.currentGenerationRevision : null) || null;
+            const isRevisionMatched = Boolean(lastSuccessRev && currentRev && lastSuccessRev === currentRev);
+            const isPublicationVerified = Boolean(
+                !isRetainedGen &&
+                autoStatus &&
+                (autoStatus.publication_status === 'published_verified' || (autoStatus.last_success && autoStatus.last_success.external_status_verified === true)) &&
+                isRevisionMatched
+            );
+
+            const rawStatus = String((rawAuto && rawAuto.status) || legacyColl.status || legacySrc.api?.status || '').toLowerCase();
+            const errorCode = (rawAuto && rawAuto.error_code) || legacyColl.legacy_failure?.code || '';
+            const apiErrorCode = String((rawAuto && rawAuto.api_error_code) || '').toLowerCase();
+
+            const isAuthRequired = rawStatus === 'authentication_required' || rawStatus === 'auth_required' ||
+                errorCode === 'auth_required' || errorCode === 'BANK_EXPLICIT_USER_SESSION_REQUIRED' ||
+                errorCode === 'WING_SESSION_EXPIRED' || errorCode === 'BROWSER_SESSION_EXPIRED' ||
+                apiErrorCode === 'http_403' || errorCode === 'http_403' ||
+                (!rawAuto && legacyColl.failures && legacyColl.failures.some(f => f.stage === 'authentication' || f.http_status === 403));
+
+            const isFailed = rawStatus === 'collection_failed' || rawStatus === 'failed' ||
+                errorCode === 'collection_failed' || errorCode === 'completion_validation_failed' ||
+                (!rawAuto && legacyColl.failures && legacyColl.failures.length > 0 && !isAuthRequired);
+
+            // 건수 표시: Coupang은 원천 집계 행수('집계 자료 ○행'), 타 채널은 '○건', 모르면 '건수 미확인'
+            const isCoupang = (chKey === 'coupang' || chKey === 'coupang_growth' || chKey === 'coupang_wing');
+            const cntStr = (rawAuto && rawAuto.processed_count != null)
+                ? (isCoupang ? `집계 자료 ${rawAuto.processed_count}행` : `${rawAuto.processed_count}건`)
+                : '건수 미확인';
+
+            if (rawStatus === 'collected_zero' || rawStatus === 'success_empty' || (rawAuto && rawAuto.processed_count === 0 && rawAuto.completion_verified === true)) {
+                isZeroOrder = true;
+                const isBizZero = Boolean(rawAuto && (rawAuto.is_business_zero_verified === true || rawAuto.business_zero_verified === true));
+
+                if (isRetainedGen || (lastSuccessRev && currentRev && !isRevisionMatched)) {
+                    state = 'retained';
+                    stateLabel = '이전 자료 유지';
+                    badgeClass = 'bg-amber-100 text-amber-900 border border-amber-400 font-semibold';
+                    dotColor = 'bg-amber-600';
+                    detailNote = isBizZero ? '조회 0건 (사업 무매출 확정 · 이전 자료)' : '조회 0건 · 매출 반영 여부 별도 확인 (이전 자료)';
+                } else if (isPublicationVerified) {
+                    state = 'auto_completed';
+                    stateLabel = '자동 갱신 완료';
+                    badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+                    dotColor = 'bg-emerald-500';
+                    detailNote = isBizZero ? '정상 조회 0건 (사업 무매출 확정)' : '조회 0건 · 매출 반영 여부 별도 확인';
+                } else {
+                    state = 'collected_pending';
+                    stateLabel = '수집 완료 (게시 대기)';
+                    badgeClass = 'bg-indigo-50 text-indigo-700 border border-indigo-200';
+                    dotColor = 'bg-indigo-500';
+                    detailNote = isBizZero ? '조회 0건 (사업 무매출 확정 · 게시 대기)' : '조회 0건 · 매출 반영 여부 별도 확인 (게시 대기)';
+                }
+            } else if (rawStatus === 'collected' || rawStatus === 'success') {
+                if (isRetainedGen || (lastSuccessRev && currentRev && !isRevisionMatched)) {
+                    state = 'retained';
+                    stateLabel = '이전 자료 유지';
+                    badgeClass = 'bg-amber-100 text-amber-900 border border-amber-400 font-semibold';
+                    dotColor = 'bg-amber-600';
+                    detailNote = (lastSuccessRev && currentRev && !isRevisionMatched) ? `${cntStr} (게시 세대 불일치 · 이전 검증본)` : `${cntStr} (이전 검증본 유지)`;
+                } else if (isPublicationVerified) {
+                    state = 'auto_completed';
+                    stateLabel = '자동 갱신 완료';
+                    badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+                    dotColor = 'bg-emerald-500';
+                    if (isCoupang) {
+                        detailNote = `${cntStr} · 판매분석 잠정(쿠폰 전) 확인`;
+                    } else if (chKey === 'smartstore') {
+                        detailNote = `결제 ${cntStr} 확인 (정상 수집)`;
+                    } else if (chKey === 'bank') {
+                        detailNote = `거래 ${cntStr} 확인 · 조회/다운로드 전용`;
+                    } else if (chKey === 'gaemi' || chKey === 'gaemi_inventory') {
+                        detailNote = `WMS 재고 snapshot (${cntStr}) 수집 완료`;
+                    } else {
+                        detailNote = `정상 수집 완료 (${cntStr})`;
+                    }
+                } else {
+                    state = 'collected_pending';
+                    stateLabel = '수집 완료 (게시 대기)';
+                    badgeClass = 'bg-indigo-50 text-indigo-700 border border-indigo-200';
+                    dotColor = 'bg-indigo-500';
+                    detailNote = `수집 완료 (${cntStr}) · 대시보드 게시 반영 대기`;
+                }
+            } else if (isAuthRequired) {
+                state = 'auth_required';
+                stateLabel = '인증 필요';
+                badgeClass = 'bg-amber-50 text-amber-800 border border-amber-300';
+                dotColor = 'bg-amber-500';
+                if (chKey === 'bank') {
+                    detailNote = '공동인증서/보안 세션 로그인 필요';
+                } else if (chKey === 'coupang' || chKey === 'coupang_growth' || chKey === 'coupang_wing') {
+                    detailNote = 'Wing 판매자 로그인 세션 만료';
+                } else if (chKey === 'smartstore') {
+                    detailNote = '커머스 세션 만료 (로그인 필요)';
+                } else {
+                    detailNote = '사용자 인증/로그인 세션 갱신 필요';
+                }
+            } else if (isFailed) {
+                state = 'failed';
+                stateLabel = '수집 실패';
+                badgeClass = 'bg-rose-50 text-rose-700 border border-rose-300';
+                dotColor = 'bg-rose-500';
+                detailNote = errorCode ? `오류 코드: ${errorCode}` : '수집 파이프라인 실패 (이전 정상본 유지)';
+            } else if (rawStatus === 'partial') {
+                state = 'retained';
+                stateLabel = '이전 자료 유지';
+                badgeClass = 'bg-amber-100 text-amber-900 border border-amber-400 font-semibold';
+                dotColor = 'bg-amber-600';
+                detailNote = errorCode ? `기간/범위 검토 (${errorCode}) · 이전 정상본 유지` : '부분 수집 · 이전 정상본 유지';
+            } else if (chKey === 'b2b') {
+                state = 'uncollected';
+                stateLabel = '미수집';
+                badgeClass = 'bg-sky-50 text-sky-800 border border-sky-200';
+                dotColor = 'bg-sky-400';
+                sourceAsOf = meta.report_date || '당월 누적';
+                capturedAt = '-';
+                const isManualActive = (typeof isManualSalesActive !== 'undefined' && isManualSalesActive) || (typeof msState !== 'undefined' && msState && msState.isAdmin);
+                detailNote = isManualActive ? '수기 매출 원장 연동 대기' : '외부 수기 매출 대기 (기능 비활성)';
+            } else {
+                state = 'uncollected';
+                stateLabel = '미수집';
+                badgeClass = 'bg-slate-100 text-slate-600 border border-slate-300';
+                dotColor = 'bg-slate-400';
+                detailNote = errorCode ? `미수집 (${errorCode})` : '수집 실행 전 대기';
+            }
+
+            return {
+                key: chKey,
+                state,
+                stateLabel,
+                badgeClass,
+                dotColor,
+                sourceAsOf,
+                capturedAt,
+                detailNote,
+                isZeroOrder,
+                accountScopeVerified: Boolean(rawAuto && rawAuto.account_scope_verified === true),
+                completionVerified: Boolean(rawAuto && rawAuto.completion_verified === true),
+                businessZeroVerified: Boolean(rawAuto && (rawAuto.is_business_zero_verified === true || rawAuto.business_zero_verified === true)),
+                externalStatusVerified: Boolean(autoStatus && autoStatus.last_success && autoStatus.last_success.external_status_verified === true)
+            };
+        }
+
+        function renderChannelAutomationStatusPanel(autoStatus, d) {
+            const gridEl = document.getElementById('automationChannelCardsGrid');
+            if (!gridEl) return;
+
+            const channelsDef = [
+                { key: 'coupang_growth', name: '쿠팡 그로스/Wing', icon: 'fa-box-open', color: 'text-indigo-600' },
+                { key: 'smartstore', name: '네이버 스마트스토어', icon: 'fa-store', color: 'text-emerald-600' },
+                { key: 'cafe24', name: '카페24 (자사몰)', icon: 'fa-globe', color: 'text-amber-600' },
+                { key: 'b2b', name: 'B2B / 수기매출', icon: 'fa-file-invoice', color: 'text-sky-600' },
+                { key: 'gaemi_inventory', name: '개미창고 WMS (재고)', icon: 'fa-warehouse', color: 'text-slate-600' },
+                { key: 'bank', name: '하나은행 (입출금)', icon: 'fa-building-columns', color: 'text-teal-600' }
+            ];
+
+            let hasFailed = false;
+            let hasAuth = false;
+            let hasRetained = false;
+            let allAuto = true;
+            let allUncollected = true;
+            let overallBaseDate = null;
+
+            const cardsHtml = channelsDef.map(def => {
+                const info = resolveChannelAutomationState(def.key, autoStatus, d);
+                if (info.state !== 'uncollected') allUncollected = false;
+                if (info.state === 'failed') hasFailed = true;
+                if (info.state === 'auth_required') hasAuth = true;
+                if (info.state === 'retained') hasRetained = true;
+                if (info.state !== 'auto_completed') allAuto = false;
+
+                if (!overallBaseDate && info.sourceAsOf && info.sourceAsOf !== '-') {
+                    overallBaseDate = info.sourceAsOf;
+                }
+
+                return `
+                <div class="bg-slate-50/80 border border-slate-200/90 rounded-xl p-2.5 flex flex-col justify-between space-y-1.5 shadow-2xs">
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="font-bold text-slate-800 text-[11px] truncate flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full ${escapeHtml(info.dotColor)} shrink-0"></span>
+                            <span class="truncate" title="${escapeHtml(def.name)}">${escapeHtml(def.name)}</span>
+                        </span>
+                        <span class="px-1.5 py-0.2 rounded text-[10px] font-bold ${escapeHtml(info.badgeClass)} whitespace-nowrap shrink-0">${escapeHtml(info.stateLabel)}</span>
+                    </div>
+                    <div class="space-y-0.5 text-[10px]">
+                        <div class="flex items-center justify-between text-slate-600">
+                            <span class="text-slate-400">자료 기준일</span>
+                            <span class="font-mono font-bold text-slate-800">${escapeHtml(info.sourceAsOf)}</span>
+                        </div>
+                        <div class="flex items-center justify-between text-slate-500">
+                            <span class="text-slate-400">수집 시각</span>
+                            <span class="font-mono text-slate-600">${escapeHtml(info.capturedAt)}</span>
+                        </div>
+                    </div>
+                    <div class="text-[10px] text-slate-500 truncate pt-1 border-t border-slate-200/60" title="${escapeHtml(info.detailNote || '')}">
+                        ${escapeHtml(info.detailNote || '-')}
+                    </div>
+                </div>
+                `;
+            }).join('');
+
+            gridEl.innerHTML = cardsHtml;
+
+            const masterBadgeEl = document.getElementById('automationMasterStatusBadge');
+            if (masterBadgeEl) {
+                if (allUncollected) {
+                    masterBadgeEl.innerText = '전 채널 미수집';
+                    masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300';
+                } else if (hasFailed) {
+                    masterBadgeEl.innerText = '일부 수집 실패';
+                    masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-300';
+                } else if (hasAuth) {
+                    masterBadgeEl.innerText = '인증 필요 채널 있음';
+                    masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300';
+                } else if (hasRetained) {
+                    masterBadgeEl.innerText = '이전 자료 유지';
+                    masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-400';
+                } else if (allAuto) {
+                    masterBadgeEl.innerText = '자동 갱신 완료';
+                    masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200';
+                } else {
+                    masterBadgeEl.innerText = '수집 검토 진행';
+                    masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300';
+                }
+            }
+
+            const overallTimesEl = document.getElementById('automationOverallTimes');
+            if (overallTimesEl) {
+                const attTime = (autoStatus && (autoStatus.success_at || autoStatus.attempted_at)) ? formatKstTime(autoStatus.success_at || autoStatus.attempted_at) : '-';
+                overallTimesEl.innerText = `기준일: ${escapeHtml(overallBaseDate || d?.metadata?.report_date || '-')} · 수집: ${escapeHtml(attTime)}`;
+            }
+        }
+
         function cleanSettlementNote(note) {
             return /raw_data[\/]|[.]xlsx:/i.test(String(note || ''))
                 ? '홈택스 전자세금계산서 대조 내역' : String(note || '');
@@ -12391,6 +13583,8 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
         function renderSalesTab(d) {
             if (!d) return;
+            const effectiveAutoStatus = (typeof currentAutomationStatus !== 'undefined' ? currentAutomationStatus : null) || (d && d._automation_status) || null;
+            renderChannelAutomationStatusPanel(effectiveAutoStatus, d);
             const sp = d.sales_profit || {};
             const daily = sp.daily || {};
             const monthly = sp.monthly || {};
@@ -12536,7 +13730,29 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     }
                 }
 
-                periodEl.innerHTML = `<span>기준일: <strong class="font-mono text-slate-700 font-bold">${repDate}</strong> · 귀속월: <strong class="font-mono text-slate-700 font-bold">${curMonth}</strong>${provBadge}${genBadge} · 총 판매수량: <strong class="font-mono text-slate-700 font-bold">${fmtNum(totalQtyVal)}</strong>${qtySuffix}${coverageNote}</span>`;
+                let autoBadge = '';
+                if (effectiveAutoStatus && effectiveAutoStatus.available) {
+                    const runSt = effectiveAutoStatus.run_status;
+                    const attTime = (effectiveAutoStatus.success_at || effectiveAutoStatus.attempted_at) ? formatKstTime(effectiveAutoStatus.success_at || effectiveAutoStatus.attempted_at) : '-';
+                    const autoChs = effectiveAutoStatus.channels || {};
+                    const anyCollected = Object.values(autoChs).some(c => c && (c.status === 'success' || c.status === 'collected' || c.status === 'collected_zero'));
+
+                    if (!anyCollected && (runSt === 'not_attempted' || runSt === 'not_configured' || runSt === 'awaiting_sources')) {
+                        autoBadge = ` · <span id="salesAutoRunBadge" class="bg-slate-100 text-slate-700 border border-slate-300 px-1.5 py-0.5 rounded text-[11px] font-semibold" title="수집 시각: ${attTime}">전 채널 미수집</span>`;
+                    } else if (runSt === 'published_verified' || runSt === 'already_completed') {
+                        autoBadge = ` · <span id="salesAutoRunBadge" class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded text-[11px] font-semibold" title="수집 시각: ${attTime}">자동 갱신 완료</span>`;
+                    } else if (runSt === 'candidate_ready') {
+                        autoBadge = ` · <span id="salesAutoRunBadge" class="bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded text-[11px] font-semibold" title="수집 시각: ${attTime}">수집 검토 완료</span>`;
+                    } else if (runSt === 'awaiting_sources') {
+                        autoBadge = ` · <span id="salesAutoRunBadge" class="bg-slate-100 text-slate-700 border border-slate-300 px-1.5 py-0.5 rounded text-[11px] font-semibold" title="수집 시각: ${attTime}">수집 대기 중</span>`;
+                    } else if (runSt === 'partial') {
+                        autoBadge = ` · <span id="salesAutoRunBadge" class="bg-amber-50 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded text-[11px] font-semibold" title="수집 시각: ${attTime}">일부 수집 실패</span>`;
+                    } else if (runSt === 'failed' || runSt === 'retry_exhausted') {
+                        autoBadge = ` · <span id="salesAutoRunBadge" class="bg-rose-50 text-rose-700 border border-rose-300 px-1.5 py-0.5 rounded text-[11px] font-semibold" title="수집 시각: ${attTime}">수집 실패</span>`;
+                    }
+                }
+
+                periodEl.innerHTML = `<span>기준일: <strong class="font-mono text-slate-700 font-bold">${repDate}</strong> · 귀속월: <strong class="font-mono text-slate-700 font-bold">${curMonth}</strong>${provBadge}${genBadge}${autoBadge} · 총 판매수량: <strong class="font-mono text-slate-700 font-bold">${fmtNum(totalQtyVal)}</strong>${qtySuffix}${coverageNote}</span>`;
             }
 
             // 2. 상단 요약 바
@@ -12769,13 +13985,17 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const cpChipEl = document.getElementById('salesChipCoupangGrowthRev');
             if (cpChipEl) {
                 const cpSrc = { api: collStatus.coupang, ...srcStatus.coupang };
+                const cpAuto = resolveChannelAutomationState('coupang_growth', effectiveAutoStatus, d);
                 cpChipEl.innerText = formatChannelChip(chRevs.coupang_growth, cpSrc, '미산출');
-                setChipSub('salesChipCoupangGrowthSub', mcSales ? '판매분석 잠정 (쿠폰 전 · 원가 미확정)' : '', 'text-indigo-700');
+                const cpSubCls = cpAuto.state === 'retained' ? 'text-amber-900 font-semibold' : 'text-indigo-700';
+                const baseStr = cpAuto.sourceAsOf && cpAuto.sourceAsOf !== '-' ? `자료: ${cpAuto.sourceAsOf.slice(5)} · ` : '';
+                setChipSub('salesChipCoupangGrowthSub', mcSales ? '판매분석 잠정 (쿠폰 전 · 원가 미확정)' : `${baseStr}${cpAuto.stateLabel}`, cpSubCls);
             }
 
             // 스마트스토어 칩 (multichannel_sales 우선 소비 — 기존 과거 참고값 대체 금지)
             const ssChipEl = document.getElementById('salesChipSmartstoreRev');
             if (ssChipEl) {
+                const ssAuto = resolveChannelAutomationState('smartstore', effectiveAutoStatus, d);
                 if (mcSSInfo) {
                     ssChipEl.innerText = mcSSInfo.chipText;
                     ssChipEl.className = mcSSInfo.recognizedSubtotal === null
@@ -12789,13 +14009,16 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     const ssSrc = { api: collStatus.smartstore, ...srcStatus.smartstore };
                     ssChipEl.innerText = formatChannelChip(chRevs.smartstore, ssSrc, '미수집');
                     ssChipEl.className = 'mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight';
-                    setChipSub('salesChipSmartstoreSub', '');
+                    const ssSubCls = ssAuto.state === 'retained' ? 'text-amber-900 font-semibold' : (ssAuto.state === 'auto_completed' ? 'text-emerald-700' : 'text-slate-500');
+                    const baseStr = ssAuto.sourceAsOf && ssAuto.sourceAsOf !== '-' ? `자료: ${ssAuto.sourceAsOf.slice(5)} · ` : '';
+                    setChipSub('salesChipSmartstoreSub', `${baseStr}${ssAuto.stateLabel}`, ssSubCls);
                 }
             }
 
             // 카페24 칩 (multichannel_sales 우선 소비)
             const c24ChipEl = document.getElementById('salesChipCafe24Rev');
             if (c24ChipEl) {
+                const c24Auto = resolveChannelAutomationState('cafe24', effectiveAutoStatus, d);
                 if (mcC24Info) {
                     c24ChipEl.innerText = mcC24Info.chipText;
                     c24ChipEl.className = mcC24Info.recognizedSubtotal === null
@@ -12817,7 +14040,8 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     } else {
                         c24ChipEl.innerText = formatChannelChip(chRevs.cafe24, c24Src, '미수집');
                     }
-                    setChipSub('salesChipCafe24Sub', '');
+                    const baseStr = c24Auto.sourceAsOf && c24Auto.sourceAsOf !== '-' ? `자료: ${c24Auto.sourceAsOf.slice(5)} · ` : '';
+                    setChipSub('salesChipCafe24Sub', `${baseStr}${c24Auto.stateLabel}`, 'text-amber-800');
                 }
             }
 
@@ -12842,7 +14066,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     const b2bReviewOnly = srcStatus.b2b?.aggregation?.status === 'review_only';
                     b2bChipEl.innerText = b2bReviewOnly ? '미반영' : '미수집';
                     b2bChipEl.className = 'mt-0.5 text-sm sm:text-base font-bold text-slate-700 leading-snug tracking-tight';
-                    setChipSub('salesChipB2bSub', '매출 원장 미연동', 'text-slate-400');
+                    setChipSub('salesChipB2bSub', '원장 입력 가능 · 저장 후 대시보드 반영 대기', 'text-sky-700');
                 } else {
                     b2bChipEl.innerText = chRevs.b2b < 0 ? `-${fmtWon(Math.abs(chRevs.b2b))}` : fmtWon(chRevs.b2b);
                     b2bChipEl.className = 'mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight';
@@ -13444,7 +14668,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             return 'raw_material';
         }
 
-        function renderCashFlowTab(d) {
+        function renderCashFlowTab(d, autoStatus = null) {
             if (!d) return;
             const cf = d.cash_flow || {};
             const monthly = cf.monthly || {};
@@ -13497,7 +14721,10 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 const allDates = allTx.map(t => String(t.date || t.datetime || '').slice(0, 10)).filter(Boolean).sort();
                 const txStart = meta.bank_transaction_start || (allDates.length > 0 ? allDates[0] : '-');
                 const txEnd = meta.bank_transaction_end || (allDates.length > 0 ? allDates[allDates.length - 1] : repDate);
-                periodEl.innerHTML = `<span>기준일: <strong class="font-mono text-slate-700 font-bold">${repDate}</strong> · 은행 거래 집계: ${txStart} ~ ${txEnd}</span>`;
+                const effectiveAutoStatus = (typeof currentAutomationStatus !== 'undefined' ? currentAutomationStatus : null) || (d && d._automation_status) || null;
+                const bankSt = resolveChannelAutomationState('bank', effectiveAutoStatus, d);
+                const bankBadge = bankSt ? ` · 하나은행 원장: <span class="px-1.5 py-0.2 rounded text-[10px] font-bold ${bankSt.badgeClass}">${bankSt.stateLabel}</span> (${bankSt.detailNote})` : '';
+                periodEl.innerHTML = `<span>기준일: <strong class="font-mono text-slate-700 font-bold">${repDate}</strong> · 은행 거래 집계: ${txStart} ~ ${txEnd}${bankBadge}</span>`;
             }
 
             // 2. 상단 정산 알람 배너 (settlements) - 선택 월 동기화
@@ -14704,6 +15931,1824 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             } finally {
                 if (btn) btn.disabled = false;
             }
+        }
+
+        // =============================================================
+        // 관리자 전용 수기 매출 관리 (manual_sales_routes 계약 v1 소비)
+        // - 기존 /api/cash-flow/manual-transaction 과 완전 분리
+        // - 모든 사용자 문자열은 escapeHtml / textContent 로만 렌더링
+        // =============================================================
+        const MS_UNIT_LABELS = { ea: '개(ea)', box: '박스(box)', set: '세트(set)', kg: 'kg', l: 'L' };
+        const MS_VAT_LABELS = {
+            unverified: '미확정',
+            included: '부가세 포함',
+            excluded: '부가세 별도 (세액 자동가산 안함)',
+            exempt: '면세'
+        };
+        const MS_EVIDENCE_LABELS = {
+            order: '주문서',
+            invoice: '세금계산서',
+            delivery: '납품서',
+            receipt: '영수증',
+            other: '기타'
+        };
+        const MS_CHANNEL_LABELS = {
+            smartstore: '스마트스토어',
+            cafe24: '카페24',
+            coupang: '쿠팡',
+            coupang_growth: '쿠팡 그로스'
+        };
+
+        const MS_PENDING_KEY_STORAGE = 'iljeomodo_ms_pending_key_v1';
+        let msSessionEpoch = 0;
+        const msActiveAbortControllers = new Set();
+
+        let msState = {
+            status: null,
+            view: 'list',
+            items: [],
+            total: 0,
+            limit: 20,
+            offset: 0,
+            selectedSale: null,
+            selectedHistory: [],
+            formMode: 'create',
+            editSaleId: null,
+            editExpectedRevision: null,
+            lines: [],
+            evidences: [],
+            orderDiscountAllocations: {},
+            isSubmitting: false,
+            pendingOperation: null,
+            conflictSaleId: null,
+            productSearchTimer: null
+        };
+
+        function generateManualSalesIdemKey() {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                return 'ms-' + window.crypto.randomUUID();
+            }
+            const rand = () => Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+            return `ms-${Date.now().toString(16)}-${rand()}-${rand()}`;
+        }
+
+        function msBumpSessionEpochAndAbort() {
+            msSessionEpoch += 1;
+            msActiveAbortControllers.forEach(ctrl => {
+                try { ctrl.abort(); } catch (e) {}
+            });
+            msActiveAbortControllers.clear();
+            if (msState.productSearchTimer) {
+                clearTimeout(msState.productSearchTimer);
+                msState.productSearchTimer = null;
+            }
+        }
+
+        function msIsSessionStale(epoch) {
+            return epoch !== msSessionEpoch || !isAdminMode;
+        }
+
+        async function msAdminFetch(url, options = {}, epoch = msSessionEpoch) {
+            if (msIsSessionStale(epoch)) {
+                throw new Error('MS_SESSION_STALE');
+            }
+            const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            if (ctrl) msActiveAbortControllers.add(ctrl);
+            try {
+                const reqOpts = Object.assign({}, options);
+                if (ctrl) reqOpts.signal = ctrl.signal;
+                const res = await adminFetch(url, reqOpts);
+                if (msIsSessionStale(epoch)) {
+                    throw new Error('MS_SESSION_STALE');
+                }
+                return res;
+            } catch (err) {
+                if (msIsSessionStale(epoch) || (ctrl && ctrl.signal.aborted)) {
+                    throw new Error('MS_SESSION_STALE');
+                }
+                throw err;
+            } finally {
+                if (ctrl) msActiveAbortControllers.delete(ctrl);
+            }
+        }
+
+        function msOpLabel(operation) {
+            if (operation === 'update') return '판매기록 수정';
+            if (operation === 'cancel') return '판매기록 전체 취소';
+            return '판매기록 등록';
+        }
+
+        function msSuccessMessage(operation, serverMessage = '', recovered = false) {
+            let base;
+            if (operation === 'cancel') {
+                base = serverMessage || '판매기록 취소 완료 · 실제 환불 완료 아님';
+            } else if (operation === 'update') {
+                base = '판매기록 수정 저장 완료 · 대시보드 반영 대기';
+            } else {
+                base = serverMessage || '판매기록 저장 완료 · 대시보드 반영 대기';
+            }
+            if (!recovered) return base;
+            if (operation === 'cancel') return `기존 전체 취소 요청이 정상 처리된 것으로 확인되었습니다. (${base})`;
+            if (operation === 'update') return `기존 수정 요청이 정상 반영된 것으로 확인되었습니다. (${base})`;
+            return `기존 등록 요청이 정상 저장된 것으로 확인되었습니다. (${base})`;
+        }
+
+        function msPersistOpaquePendingKey(op) {
+            if (!op || !op.key) return;
+            // 비밀토큰·원문 판매본문·개인정보는 일체 저장하지 않고 불투명 요청 key + operation만 세션 범위 저장
+            try {
+                sessionStorage.setItem(MS_PENDING_KEY_STORAGE, JSON.stringify({
+                    key: String(op.key),
+                    operation: op.operation === 'update' || op.operation === 'cancel' ? op.operation : 'create'
+                }));
+            } catch (e) {}
+        }
+
+        function msClearOpaquePendingKey() {
+            try { sessionStorage.removeItem(MS_PENDING_KEY_STORAGE); } catch (e) {}
+        }
+
+        function msRestoreOpaquePendingKey() {
+            if (msState.pendingOperation) return;
+            try {
+                const raw = sessionStorage.getItem(MS_PENDING_KEY_STORAGE);
+                if (!raw) return;
+                const parsed = JSON.parse(raw);
+                const key = typeof parsed?.key === 'string' ? parsed.key.trim() : '';
+                const operation = (parsed?.operation === 'update' || parsed?.operation === 'cancel') ? parsed.operation : 'create';
+                if (!/^[A-Za-z0-9._:-]{8,128}$/.test(key)) {
+                    msClearOpaquePendingKey();
+                    return;
+                }
+                msState.pendingOperation = Object.freeze({
+                    key,
+                    operation,
+                    targetSaleId: null,
+                    expectedRevision: null,
+                    payloadJson: null,
+                    hasPayload: false,
+                    state: 'unknown',
+                    lastChecked404: false
+                });
+            } catch (e) {
+                msClearOpaquePendingKey();
+            }
+        }
+
+        function msUpdatePendingOperationState(patch) {
+            if (!msState.pendingOperation) return null;
+            msState.pendingOperation = Object.freeze(Object.assign({}, msState.pendingOperation, patch));
+            return msState.pendingOperation;
+        }
+
+        function setManualSalesPendingLock(locked) {
+            const form = document.getElementById('msViewForm');
+            const op = msState.pendingOperation;
+            if (form) {
+                form.querySelectorAll('input, select, textarea, button').forEach(el => {
+                    if (el.id === 'msFormSubmitBtn') return;
+                    const txt = (el.textContent || '').trim();
+                    if (el.tagName === 'BUTTON' && (txt === '목록으로' || txt === '취소')) return;
+                    el.disabled = !!locked;
+                });
+                const submitBtn = document.getElementById('msFormSubmitBtn');
+                const submitTxt = document.getElementById('msFormSubmitText');
+                if (submitBtn) {
+                    const canRetryFormOp = !!(locked && op && op.hasPayload && (op.operation === 'create' || op.operation === 'update'));
+                    submitBtn.disabled = !!(locked && !canRetryFormOp);
+                    if (submitTxt) {
+                        if (canRetryFormOp) {
+                            submitTxt.textContent = op.operation === 'update' ? '같은 수정 요청 다시 시도' : '같은 요청 다시 저장';
+                        } else if (!locked) {
+                            submitTxt.textContent = msState.formMode === 'update' ? '수정 내용 저장' : '판매기록 저장';
+                        }
+                    }
+                }
+            }
+            const formLockNote = document.getElementById('msFormPendingLockNote');
+            if (formLockNote) formLockNote.classList.toggle('hidden', !locked);
+
+            const cancelInp = document.getElementById('msCancelReasonInput');
+            const cancelBtn = document.getElementById('msBtnConfirmCancel');
+            const cancelLockNote = document.getElementById('msCancelPendingLockNote');
+            const matchingCancelPending = !!(locked && op && op.operation === 'cancel' && op.hasPayload && msState.selectedSale && op.targetSaleId === msState.selectedSale.sale_id);
+            if (cancelInp) cancelInp.disabled = !!locked;
+            if (cancelBtn) {
+                cancelBtn.disabled = !!(locked && !matchingCancelPending);
+                if (!msState.isSubmitting) {
+                    cancelBtn.textContent = matchingCancelPending ? '같은 취소 요청 다시 시도' : '전체 취소 실행';
+                }
+            }
+            if (cancelLockNote) cancelLockNote.classList.toggle('hidden', !matchingCancelPending);
+        }
+
+        function syncManualSalesRecoveryUI(customDesc = '') {
+            const op = msState.pendingOperation;
+            const box = document.getElementById('msRecoveryBox');
+            const titleEl = document.getElementById('msRecoveryTitle');
+            const descEl = document.getElementById('msRecoveryDesc');
+            const retryBtn = document.getElementById('msBtnRetrySame');
+            const resolveBtn = document.getElementById('msBtnResolvePending');
+            if (!box) return;
+            if (!op) {
+                box.classList.add('hidden');
+                setManualSalesPendingLock(false);
+                return;
+            }
+            const label = msOpLabel(op.operation);
+            if (titleEl) {
+                titleEl.textContent = `이전 ${label} 결과를 확인하지 못했습니다`;
+            }
+            if (descEl) {
+                if (customDesc) {
+                    descEl.textContent = customDesc;
+                } else if (!op.hasPayload) {
+                    descEl.textContent = op.lastChecked404
+                        ? '조회 시점에는 아직 저장 기록이 확인되지 않았습니다(처리 지연 또는 서버 미도달 가능 · 영구 미저장 확정 아님). 중복 방지를 위해 클라이언트 임의 해제는 차단되어 있으며, "서버에서 이전 요청 확정 종료"로 서버 확정을 완료해야 새 입력이 가능합니다.'
+                        : `이전 세션에서 결과가 확인되지 않은 ${label} 요청이 남아 있습니다. "처리 결과 확인"으로 저장 여부를 확인하거나 "서버에서 이전 요청 확정 종료"로 서버 확정을 완료해야 새 요청을 시작할 수 있습니다.`;
+                } else if (op.lastChecked404) {
+                    descEl.textContent = '조회 시점에는 아직 저장 기록이 확인되지 않았습니다(처리 지연 또는 서버 미도달 가능 · 영구 미저장 확정 아님). 중복 방지를 위해 새 키로 재전송하지 말고 "같은 요청 다시 시도"로 동일 키 재시도만 진행하세요.';
+                } else {
+                    descEl.textContent = `네트워크 지연이나 응답 유실로 ${label} 결과를 확인하지 못했습니다. 중복 등록·충돌을 막기 위해 새 요청 시작과 입력 수정이 잠겨 있습니다. 먼저 "처리 결과 확인"을 누르거나 "같은 요청 다시 시도"로 동일 요청만 안전하게 재시도하세요.`;
+                }
+            }
+            if (retryBtn) {
+                retryBtn.classList.toggle('hidden', !op.hasPayload);
+                retryBtn.textContent = op.operation === 'cancel'
+                    ? '같은 취소 요청 다시 시도'
+                    : (op.operation === 'update' ? '같은 수정 요청 다시 시도' : '같은 요청 다시 저장');
+            }
+            if (resolveBtn) {
+                resolveBtn.classList.toggle('hidden', !!op.hasPayload);
+            }
+            box.classList.remove('hidden');
+            setManualSalesPendingLock(true);
+        }
+
+        function msTranslateReason(code) {
+            const map = {
+                FEATURE_DISABLED: '수기 매출 기록 기능이 현재 비활성화(기본 꺼짐) 상태입니다.',
+                DEVELOPMENT_MODE_REQUIRED: '로컬 검증 모드가 활성화되지 않아 수기 매출 기록을 사용할 수 없습니다.',
+                STORAGE_NOT_CONFIGURED: '수기 매출 저장소 설정이 완료되지 않아 조회·저장을 수행할 수 없습니다.',
+                LOCAL_STORAGE_FORBIDDEN_ON_RENDER: '운영 서버의 임시 디스크에는 수기 매출 원장을 저장할 수 없습니다.',
+                POSTGRES_DRIVER_UNAVAILABLE: '원격 저장소 연결 모듈이 준비되지 않아 현재 사용할 수 없습니다.',
+                STORAGE_UNAVAILABLE: '원격 저장소에 접속할 수 없어 조회·저장이 중단되었습니다.',
+                STORAGE_SCHEMA_NOT_READY: '저장소 연결은 확인되었으나 초기 저장 구조가 준비되지 않았습니다.',
+                STORAGE_PERMISSIONS: '저장소 연결은 확인되었으나 저장 권한이 부족합니다.',
+                STORAGE_ROLE_UNSAFE: '저장소 연결은 확인되었으나 저장 권한 설정이 안전 기준에 맞지 않습니다.',
+                STORAGE_BUSY: '저장소 잠금 또는 동시 처리 경합이 발생했습니다. 잠시 후 다시 시도해주세요.',
+                CATALOG_UNAVAILABLE: '상품 목록을 불러올 수 없습니다.'
+            };
+            return map[code] || '수기 매출 기능을 현재 사용할 수 없습니다.';
+        }
+
+        function describeManualSalesStatus(statusJson) {
+            const st = statusJson || {};
+            const reason = st.reason || st.code || null;
+            const reasonMsg = msTranslateReason(reason);
+            const storageMode = st.storage_mode || 'off';
+            const localOnly = st.local_only !== false;
+            const configured = st.configured === true;
+            const connHealth = st.connection_health || 'not_checked';
+            const schemaReady = st.schema_ready === true ? 'ready' : (st.schema_ready === false ? 'not_ready' : 'not_checked');
+            const writeReady = st.write_ready === true ? 'ready' : (st.write_ready === false ? 'not_ready' : 'not_checked');
+            const techSummary = `configured=${configured ? 'true' : 'false'} · connection=${connHealth} · ready=${writeReady} · structure=${schemaReady} · reason=${reason || 'none'}`;
+
+            // 1) 쓰기 가능 상태: 로컬 검증 vs 원격 영속 원장 구분 (저장 전 준비 상태와 실제 저장 성공 문구 분리)
+            if (st.success && st.writable) {
+                if (storageMode === 'sqlite_local' || localOnly) {
+                    return {
+                        category: 'local_dev',
+                        writable: true,
+                        pill: '로컬 검증 모드 · 운영 저장소 아님',
+                        bannerClass: 'rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-2.5 text-[11px] text-sky-950 space-y-1',
+                        headline: '로컬 검증 모드 (임시 저장소 · 운영 저장소 아님)',
+                        body: '현재 로컬 검증 환경으로 연결되어 있으며 운영 영속 저장소가 아닙니다. 판매기록을 저장해도 공개 매출·현금흐름·재고에는 자동 반영되지 않고 저장 후 대시보드 반영 대기 상태로만 보관됩니다.',
+                        techSummary
+                    };
+                }
+                return {
+                    category: 'production_ready',
+                    writable: true,
+                    pill: '원장 입력 가능 · 게시 반영 대기',
+                    bannerClass: 'rounded-xl border border-indigo-200 bg-indigo-50/70 px-3.5 py-2.5 text-[11px] text-indigo-900 space-y-1',
+                    headline: '원장 입력 가능 · 저장 후 대시보드 반영 대기',
+                    body: '판매기록을 저장하면 수기 매출 원장에 보관되며, 공개 매출·현금흐름·재고에는 자동 합산되지 않고 대시보드 게시 반영 대기 상태로 유지됩니다.',
+                    techSummary
+                };
+            }
+
+            // 2) 접속 오류 상태 (연결 불가 / 잠금 경합): 설정 미준비와 명확히 분리
+            if (connHealth === 'unavailable' || reason === 'STORAGE_UNAVAILABLE' || reason === 'STORAGE_BUSY') {
+                return {
+                    category: 'connection_error',
+                    writable: false,
+                    pill: '원격 저장소 접속 오류',
+                    bannerClass: 'rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-3 text-xs text-rose-950 space-y-1',
+                    headline: '원격 저장소 접속 오류 (연결 불가)',
+                    body: `${reasonMsg} 기존 4개 대시보드 탭과 수기 입출금 기능은 그대로 사용할 수 있으며, 잠시 후 다시 시도하거나 서버 접속 상태를 확인하세요.`,
+                    techSummary
+                };
+            }
+
+            // 3) 연결은 확인되었으나 초기 저장 구조·권한 미준비 (connection_health=healthy && write_ready=false)
+            if (connHealth === 'healthy' && (st.write_ready === false || reason === 'STORAGE_SCHEMA_NOT_READY' || reason === 'STORAGE_PERMISSIONS' || reason === 'STORAGE_ROLE_UNSAFE')) {
+                return {
+                    category: 'not_ready_schema_or_permissions',
+                    writable: false,
+                    pill: '저장 준비 안됨 (구조·권한 확인)',
+                    bannerClass: 'rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3 text-xs text-amber-950 space-y-1',
+                    headline: '저장 준비 안됨 (저장소 연결 확인됨 · 쓰기 준비 미완료)',
+                    body: `${reasonMsg} 접속 오류가 아니라 초기 저장 구조 또는 권한 준비 미완료로 차단된 상태입니다.`,
+                    techSummary
+                };
+            }
+
+            // 4) 기능 꺼짐 또는 저장소 설정 미완료 (공급자 중립 안내)
+            const isDisabledOff = !st.enabled || reason === 'FEATURE_DISABLED';
+            return {
+                category: isDisabledOff ? 'disabled_off' : 'not_ready_config',
+                writable: false,
+                pill: isDisabledOff ? '기능 비활성 · 저장 꺼짐' : '저장 준비 안됨',
+                bannerClass: 'rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3 text-xs text-amber-950 space-y-1',
+                headline: isDisabledOff ? '수기 매출 기능 비활성화 (기본 꺼짐)' : '저장 준비 안됨 (저장소 설정 미완료)',
+                body: `${reasonMsg} 현재 환경에서는 수기 매출 원장 조회와 등록이 차단되어 있습니다. 기존 4개 대시보드 탭과 수기 입출금 기능은 그대로 사용할 수 있습니다.`,
+                techSummary
+            };
+        }
+
+        function msShowAlert(msg, variant = 'success', detailCode = '') {
+            const el = document.getElementById('msAlertBanner');
+            if (!el) return;
+            if (!msg) {
+                el.classList.add('hidden');
+                el.innerHTML = '';
+                return;
+            }
+            const styles = {
+                success: 'bg-emerald-50 border-emerald-300 text-emerald-900',
+                error: 'bg-rose-50 border-rose-300 text-rose-900',
+                warning: 'bg-amber-50 border-amber-300 text-amber-950',
+                info: 'bg-indigo-50 border-indigo-200 text-indigo-900'
+            };
+            const detailHtml = detailCode
+                ? `<details class="mt-1 font-normal text-[11px] opacity-80"><summary class="cursor-pointer select-none">기술 상세 보기 ▾</summary><div class="mt-0.5 font-mono">참고 상태: ${escapeHtml(detailCode)}</div></details>`
+                : '';
+            el.className = `rounded-xl border px-3.5 py-2.5 text-xs font-semibold flex items-start justify-between gap-2 ${styles[variant] || styles.info}`;
+            el.innerHTML = `<div class="min-w-0"><div>${escapeHtml(msg)}</div>${detailHtml}</div>
+                <button type="button" onclick="msShowAlert('')" class="text-current opacity-60 hover:opacity-100 shrink-0 cursor-pointer" aria-label="알림 닫기"><i class="fa-solid fa-xmark"></i></button>`;
+            el.classList.remove('hidden');
+        }
+
+        function msShowRecoveryBox(show, descText = '') {
+            if (show && msState.pendingOperation) {
+                syncManualSalesRecoveryUI(descText);
+                return;
+            }
+            if (!show && !msState.pendingOperation) {
+                syncManualSalesRecoveryUI();
+            }
+        }
+
+        function msShowConflictBox(show, currentRev = null) {
+            const box = document.getElementById('msConflictBox');
+            const desc = document.getElementById('msConflictDesc');
+            if (!box) return;
+            if (show) {
+                if (desc) {
+                    desc.textContent = currentRev != null
+                        ? `현재 최신 기록(버전 ${currentRev})으로 이미 변경되었습니다. 최신 내용을 다시 불러온 뒤 수정 사항을 확인하고 저장해주세요.`
+                        : '다른 곳에서 먼저 수정되어 저장할 수 없습니다. 최신 내용을 다시 불러온 뒤 확인하고 저장해주세요.';
+                }
+                box.classList.remove('hidden');
+            } else {
+                box.classList.add('hidden');
+            }
+        }
+
+        async function openManualSalesModal() {
+            if (IS_SHARE_MODE) return;
+            if (!isAdminMode) {
+                notifyUser('수기 매출 관리는 관리자 PIN 인증 후 이용할 수 있습니다.', 'warning');
+                openPinModal();
+                return;
+            }
+            const modal = document.getElementById('manualSalesModal');
+            if (!modal) return;
+            const epoch = msSessionEpoch;
+            msRestoreOpaquePendingKey();
+            msShowConflictBox(false);
+            if (!msState.pendingOperation) {
+                msShowAlert('');
+            }
+            modal.classList.remove('hidden');
+            if (msState.pendingOperation && msState.pendingOperation.hasPayload) {
+                const targetView = msState.pendingOperation.operation === 'cancel' ? 'detail' : 'form';
+                switchManualSalesView(targetView);
+            } else {
+                switchManualSalesView('list');
+            }
+            syncManualSalesRecoveryUI();
+            await refreshManualSalesStatusAndList(epoch);
+        }
+
+        function closeManualSalesModal(clearCache = false) {
+            const modal = document.getElementById('manualSalesModal');
+            if (modal) modal.classList.add('hidden');
+            if (clearCache) {
+                // 잠금·401 시 세션 epoch 즉시 증가 및 진행 중 요청 전부 중단(늦게 도착한 응답의 DOM 재노출 원천 차단)
+                msBumpSessionEpochAndAbort();
+                msState.status = null;
+                msState.items = [];
+                msState.total = 0;
+                msState.selectedSale = null;
+                msState.selectedHistory = [];
+                msState.pendingOperation = null;
+                msState.conflictSaleId = null;
+                msState.lines = [];
+                msState.evidences = [];
+                msState.orderDiscountAllocations = {};
+                msState.isSubmitting = false;
+
+                ['msListContainer', 'msListPagination', 'msDetailContent', 'msDetailHistoryList',
+                 'msFormLinesContainer', 'msFormEvidenceContainer', 'msFormOrderDiscountAllocBox',
+                 'msProductSuggestions'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.innerHTML = '';
+                });
+                ['msFormPartyName', 'msFormPartyId', 'msFormMemo', 'msFormReason',
+                 'msCancelReasonInput', 'msProductSearchInput'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+                const sug = document.getElementById('msProductSuggestions');
+                if (sug) sug.classList.add('hidden');
+                const cancelPanel = document.getElementById('msCancelPanel');
+                if (cancelPanel) cancelPanel.classList.add('hidden');
+                msShowAlert('');
+                msShowConflictBox(false);
+                syncManualSalesRecoveryUI();
+            }
+        }
+
+        function switchManualSalesView(view) {
+            msState.view = view;
+            ['list', 'form', 'detail'].forEach(v => {
+                const pane = document.getElementById('msView' + v.charAt(0).toUpperCase() + v.slice(1));
+                const btn = document.getElementById('msTabBtn' + v.charAt(0).toUpperCase() + v.slice(1));
+                if (pane) pane.classList.toggle('hidden', v !== view);
+                if (btn) {
+                    if (v === 'detail') {
+                        btn.classList.toggle('hidden', !msState.selectedSale && view !== 'detail');
+                    }
+                    if (v === view) {
+                        btn.className = 'px-3 py-2 rounded-t-lg font-semibold border border-b-0 bg-white text-slate-900 cursor-pointer';
+                    } else {
+                        btn.className = (v === 'detail' && !msState.selectedSale ? 'hidden ' : '') + 'px-3 py-2 rounded-t-lg font-semibold border border-b-0 bg-slate-100 text-slate-600 hover:bg-white cursor-pointer';
+                    }
+                }
+            });
+        }
+
+        async function refreshManualSalesStatusAndList(epoch = msSessionEpoch) {
+            const banner = document.getElementById('msStatusBanner');
+            const pill = document.getElementById('msHeaderStatusPill');
+            const newBtn = document.getElementById('msBtnStartNew');
+            const tabFormBtn = document.getElementById('msTabBtnForm');
+            try {
+                const res = await msAdminFetch('/api/manual-sales/status', { method: 'GET' }, epoch);
+                const json = await res.json();
+                if (msIsSessionStale(epoch)) return;
+                msState.status = json;
+                const ui = describeManualSalesStatus(json);
+                if (res.ok && ui.writable) {
+                    if (banner) {
+                        banner.className = ui.bannerClass;
+                        banner.innerHTML = `<div class="font-bold">${escapeHtml(ui.headline)}</div>
+                            <div>${escapeHtml(ui.body)}</div>`;
+                        banner.classList.remove('hidden');
+                    }
+                    if (pill) pill.textContent = ui.pill;
+                    if (newBtn) newBtn.disabled = false;
+                    if (tabFormBtn) tabFormBtn.disabled = false;
+                    await loadManualSalesList(0, epoch);
+                } else {
+                    if (banner) {
+                        banner.className = ui.bannerClass;
+                        banner.innerHTML = `<div class="font-bold">${escapeHtml(ui.headline)}</div>
+                            <div class="text-[11px] opacity-90">${escapeHtml(ui.body)}</div>
+                            <details class="text-[11px] opacity-80 pt-0.5"><summary class="cursor-pointer select-none">설정 상태 상세 ▾</summary><div class="mt-1 font-mono">${escapeHtml(ui.techSummary)}</div></details>`;
+                        banner.classList.remove('hidden');
+                    }
+                    if (pill) pill.textContent = ui.pill;
+                    if (newBtn) newBtn.disabled = true;
+                    if (tabFormBtn) tabFormBtn.disabled = true;
+                    const listEl = document.getElementById('msListContainer');
+                    if (listEl) {
+                        listEl.innerHTML = `<div class="text-center py-8 px-4 rounded-xl border border-dashed border-slate-300 text-slate-500 text-xs">${escapeHtml(ui.headline)} — ${escapeHtml(msTranslateReason(json.reason || json.code))}</div>`;
+                    }
+                    const pagEl = document.getElementById('msListPagination');
+                    if (pagEl) pagEl.innerHTML = '';
+                }
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED' && err.message !== 'MS_SESSION_STALE') {
+                    msShowAlert('수기 매출 상태 조회 중 오류가 발생했습니다: ' + err.message, 'error');
+                }
+            }
+        }
+
+        function resetManualSalesFilters() {
+            const s = document.getElementById('msFilterStatus');
+            const f = document.getElementById('msFilterDateFrom');
+            const t = document.getElementById('msFilterDateTo');
+            if (s) s.value = '';
+            if (f) f.value = '';
+            if (t) t.value = '';
+            loadManualSalesList(0);
+        }
+
+        async function loadManualSalesList(offset = 0, epoch = msSessionEpoch) {
+            if (!msState.status || !msState.status.writable || msIsSessionStale(epoch)) return;
+            const listEl = document.getElementById('msListContainer');
+            const pagEl = document.getElementById('msListPagination');
+            const statusVal = document.getElementById('msFilterStatus')?.value || '';
+            const dateFrom = document.getElementById('msFilterDateFrom')?.value || '';
+            const dateTo = document.getElementById('msFilterDateTo')?.value || '';
+            const params = new URLSearchParams();
+            params.set('limit', String(msState.limit));
+            params.set('offset', String(Math.max(0, offset)));
+            if (statusVal) params.set('status', statusVal);
+            if (dateFrom) params.set('date_from', dateFrom);
+            if (dateTo) params.set('date_to', dateTo);
+
+            if (listEl) listEl.innerHTML = '<div class="text-center py-6 text-slate-400 text-xs">판매기록 목록을 불러오는 중...</div>';
+            try {
+                const res = await msAdminFetch('/api/manual-sales?' + params.toString(), { method: 'GET' }, epoch);
+                const json = await res.json();
+                if (msIsSessionStale(epoch)) return;
+                if (!res.ok || !json.success) {
+                    msShowAlert(json.message || '판매기록 목록을 불러오지 못했습니다.', 'error', json.code || '');
+                    if (listEl) listEl.innerHTML = `<div class="text-center py-6 text-rose-600 text-xs">${escapeHtml(json.message || '목록 조회 실패')}</div>`;
+                    return;
+                }
+                msState.items = Array.isArray(json.items) ? json.items : [];
+                msState.total = Number(json.total || 0);
+                msState.offset = Number(json.offset || 0);
+                renderManualSalesList();
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED' && err.message !== 'MS_SESSION_STALE') {
+                    msShowAlert('목록 조회 네트워크 오류: ' + err.message, 'error');
+                }
+            }
+        }
+
+        function msStatusBadgeHtml(sale) {
+            if (sale.status === 'cancelled') {
+                return '<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 whitespace-nowrap">전체 취소됨</span>';
+            }
+            return '<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">저장됨 · 반영 대기</span>';
+        }
+
+        function renderManualSalesList() {
+            const listEl = document.getElementById('msListContainer');
+            const pagEl = document.getElementById('msListPagination');
+            if (!listEl) return;
+            if (!msState.items.length) {
+                listEl.innerHTML = '<div class="text-center py-8 px-4 rounded-xl border border-dashed border-slate-200 text-slate-400 text-xs">조건에 해당하는 수기 판매기록이 없습니다.</div>';
+            } else {
+                listEl.innerHTML = msState.items.map(s => {
+                    const lines = Array.isArray(s.lines) ? s.lines : [];
+                    const firstLine = lines[0];
+                    const firstLabel = firstLine ? (firstLine.product_name || firstLine.product_code || '품목') : '품목 없음';
+                    const lineSummary = lines.length > 1 ? `${firstLabel} 외 ${lines.length - 1}건` : firstLabel;
+                    const txAmt = s.totals && s.totals.transaction_amount != null ? fmtWon(s.totals.transaction_amount) : '-';
+                    const partyName = s.counterparty && s.counterparty.name ? s.counterparty.name : '-';
+                    const safeSaleId = escapeHtml(s.sale_id);
+                    const editBtn = s.status === 'submitted'
+                        ? `<button type="button" onclick="openManualSaleEdit('${safeSaleId}')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-50 border border-slate-300 text-indigo-700 font-semibold text-[11px] cursor-pointer">수정</button>`
+                        : '';
+                    return `
+                        <div class="rounded-xl border border-slate-200 bg-white hover:border-slate-300 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition">
+                            <div class="min-w-0 space-y-1">
+                                <div class="flex flex-wrap items-center gap-1.5">
+                                    <span class="font-mono font-bold text-slate-800">${escapeHtml(s.sale_date || '-')}</span>
+                                    <span class="font-bold text-slate-900 truncate">${escapeHtml(partyName)}</span>
+                                    ${msStatusBadgeHtml(s)}
+                                    <span class="text-[10px] text-slate-400 font-mono">v${escapeHtml(s.revision)}</span>
+                                </div>
+                                <div class="text-[11px] text-slate-600 truncate">${escapeHtml(lineSummary)} <span class="text-slate-400">(품목 ${lines.length}건 · 원가/이익 미산출)</span></div>
+                            </div>
+                            <div class="flex flex-wrap items-center justify-between sm:justify-end gap-2 shrink-0">
+                                <div class="text-left sm:text-right">
+                                    <div class="text-[10px] text-slate-400">거래 합계</div>
+                                    <div class="font-mono font-bold text-sm text-indigo-700">${escapeHtml(txAmt)}</div>
+                                </div>
+                                <div class="flex items-center gap-1.5">
+                                    <button type="button" onclick="openManualSaleDetail('${safeSaleId}')" class="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold text-[11px] cursor-pointer">상세·이력</button>
+                                    ${editBtn}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            if (pagEl) {
+                const startIdx = msState.total > 0 ? msState.offset + 1 : 0;
+                const endIdx = Math.min(msState.offset + msState.items.length, msState.total);
+                const prevDisabled = msState.offset <= 0 ? 'disabled' : '';
+                const nextDisabled = (msState.offset + msState.limit >= msState.total) ? 'disabled' : '';
+                pagEl.innerHTML = `
+                    <span>총 <strong>${fmtNum(msState.total)}건</strong> (${startIdx}~${endIdx} 표시)</span>
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" ${prevDisabled} onclick="loadManualSalesList(${Math.max(0, msState.offset - msState.limit)})" class="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 cursor-pointer">이전</button>
+                        <button type="button" ${nextDisabled} onclick="loadManualSalesList(${msState.offset + msState.limit})" class="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 cursor-pointer">다음</button>
+                    </div>
+                `;
+            }
+        }
+
+        function createEmptyManualSaleLine() {
+            return {
+                line_id: null,
+                product_code: '',
+                product_name: '',
+                variant_key: '',
+                quantity: '1',
+                unit: 'ea',
+                amount_mode: 'final',
+                goods_amount: '',
+                gross_amount: '',
+                unit_price: '',
+                item_discount_amount: '0',
+                online_channel: '',
+                online_order_key: '',
+                online_item_key: ''
+            };
+        }
+
+        function openManualSalesNewForm() {
+            if (!msState.status || !msState.status.writable) {
+                msShowAlert(msTranslateReason(msState.status?.reason || 'STORAGE_NOT_CONFIGURED'), 'warning');
+                return;
+            }
+            if (msState.pendingOperation) {
+                syncManualSalesRecoveryUI();
+                if (msState.pendingOperation.operation === 'create' && msState.pendingOperation.hasPayload) {
+                    switchManualSalesView('form');
+                    msShowAlert('결과가 확인되지 않은 등록 요청이 남아 있습니다. 상단의 "처리 결과 확인" 또는 "같은 요청 다시 저장"으로 먼저 마무리하세요.', 'warning');
+                } else {
+                    msShowAlert(`결과가 확인되지 않은 이전 ${msOpLabel(msState.pendingOperation.operation)} 요청을 먼저 확인해야 새 등록을 시작할 수 있습니다.`, 'warning');
+                }
+                return;
+            }
+            msState.formMode = 'create';
+            msState.editSaleId = null;
+            msState.editExpectedRevision = null;
+            msState.conflictSaleId = null;
+            msState.lines = [createEmptyManualSaleLine()];
+            msState.evidences = [];
+            msState.orderDiscountAllocations = {};
+
+            msShowAlert('');
+            msShowConflictBox(false);
+
+            const today = new Date().toISOString().split('T')[0];
+            const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+            setVal('msFormDate', today);
+            setVal('msFormPartyName', '');
+            setVal('msFormPartyId', '');
+            setVal('msFormOrderDiscountAmt', '0');
+            setVal('msFormOrderDiscountMode', 'unallocated');
+            setVal('msFormShippingAmt', '0');
+            setVal('msFormVatStatus', 'unverified');
+            setVal('msFormMemo', '');
+            setVal('msFormReason', '');
+            setVal('msProductSearchInput', '');
+            const sug = document.getElementById('msProductSuggestions');
+            if (sug) { sug.classList.add('hidden'); sug.innerHTML = ''; }
+
+            const heading = document.getElementById('msFormHeading');
+            if (heading) heading.textContent = '새 판매기록 등록';
+            const submitTxt = document.getElementById('msFormSubmitText');
+            if (submitTxt) submitTxt.textContent = '판매기록 저장';
+            const reasonWrap = document.getElementById('msFormReasonWrap');
+            if (reasonWrap) reasonWrap.classList.add('hidden');
+            const reasonEl = document.getElementById('msFormReason');
+            if (reasonEl) reasonEl.required = false;
+
+            renderManualSaleLines();
+            renderManualSaleEvidences();
+            renderManualSaleOrderDiscountAlloc();
+            updateManualSaleTotals();
+            syncManualSalesRecoveryUI();
+            switchManualSalesView('form');
+        }
+
+        async function openManualSaleEdit(saleId) {
+            if (!msState.status || !msState.status.writable) return;
+            if (msState.pendingOperation) {
+                syncManualSalesRecoveryUI();
+                if (msState.pendingOperation.operation === 'update' && msState.pendingOperation.targetSaleId === saleId && msState.pendingOperation.hasPayload) {
+                    switchManualSalesView('form');
+                    msShowAlert('결과가 확인되지 않은 수정 요청이 남아 있습니다. 상단의 "처리 결과 확인" 또는 "같은 수정 요청 다시 시도"를 사용하세요.', 'warning');
+                } else {
+                    msShowAlert(`결과가 확인되지 않은 이전 ${msOpLabel(msState.pendingOperation.operation)} 요청을 먼저 확인해야 수정을 시작할 수 있습니다.`, 'warning');
+                }
+                return;
+            }
+            const epoch = msSessionEpoch;
+            msShowAlert('');
+            msShowConflictBox(false);
+            try {
+                const res = await msAdminFetch('/api/manual-sales/' + encodeURIComponent(saleId), { method: 'GET' }, epoch);
+                const json = await res.json();
+                if (msIsSessionStale(epoch)) return;
+                if (!res.ok || !json.success || !json.sale) {
+                    msShowAlert(json.message || '판매기록을 불러오지 못했습니다.', 'error', json.code || '');
+                    return;
+                }
+                populateManualSaleEditForm(json.sale);
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED' && err.message !== 'MS_SESSION_STALE') {
+                    msShowAlert('수정 대상 조회 오류: ' + err.message, 'error');
+                }
+            }
+        }
+
+        function populateManualSaleEditForm(sale) {
+            if (sale.status === 'cancelled') {
+                msShowAlert('이미 전체 취소된 판매기록은 수정할 수 없습니다.', 'warning');
+                return;
+            }
+            if (msState.pendingOperation) {
+                syncManualSalesRecoveryUI();
+                return;
+            }
+            msState.formMode = 'update';
+            msState.editSaleId = sale.sale_id;
+            msState.editExpectedRevision = sale.revision;
+            msState.conflictSaleId = null;
+
+            const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+            setVal('msFormDate', sale.sale_date || '');
+            setVal('msFormPartyName', sale.counterparty?.name || '');
+            setVal('msFormPartyId', sale.counterparty?.id || '');
+            setVal('msFormOrderDiscountAmt', String(sale.order_discount?.amount ?? 0));
+            const allocStatus = sale.order_discount?.allocation_status === 'allocated' ? 'allocated' : 'unallocated';
+            setVal('msFormOrderDiscountMode', allocStatus);
+            setVal('msFormShippingAmt', String(sale.shipping_amount ?? 0));
+            setVal('msFormVatStatus', sale.vat_status || 'unverified');
+            setVal('msFormMemo', sale.memo || '');
+            setVal('msFormReason', '');
+            setVal('msProductSearchInput', '');
+
+            msState.orderDiscountAllocations = {};
+            (sale.order_discount?.allocations || []).forEach(a => {
+                msState.orderDiscountAllocations[a.line_index] = String(a.amount ?? 0);
+            });
+
+            // 계약 준수: 편집 가능 입력 필드만 투영 (파생 응답 필드 제외, 유지 품목 line_id 보존)
+            msState.lines = (sale.lines || []).map(ln => ({
+                line_id: ln.line_id || null,
+                product_code: ln.product_code || '',
+                product_name: ln.product_name || '',
+                variant_key: ln.variant_key || '',
+                quantity: ln.quantity != null ? String(ln.quantity) : '1',
+                unit: ln.unit || 'ea',
+                amount_mode: ln.amount_mode || 'final',
+                goods_amount: ln.amount_mode === 'final' && ln.goods_amount != null ? String(ln.goods_amount) : '',
+                gross_amount: ln.amount_mode === 'gross_discount' && ln.gross_amount != null ? String(ln.gross_amount) : '',
+                unit_price: ln.unit_price != null ? String(ln.unit_price) : '',
+                item_discount_amount: String(ln.item_discount_amount ?? 0),
+                online_channel: ln.online_link?.channel || '',
+                online_order_key: ln.online_link?.order_key || '',
+                online_item_key: ln.online_link?.item_key || ''
+            }));
+            if (!msState.lines.length) msState.lines = [createEmptyManualSaleLine()];
+
+            msState.evidences = (sale.evidence_refs || []).map(ev => ({
+                type: ev.type || 'other',
+                reference: ev.reference || ''
+            }));
+
+            const heading = document.getElementById('msFormHeading');
+            if (heading) heading.textContent = `판매기록 수정 (현재 v${sale.revision})`;
+            const submitTxt = document.getElementById('msFormSubmitText');
+            if (submitTxt) submitTxt.textContent = '수정 내용 저장';
+            const reasonWrap = document.getElementById('msFormReasonWrap');
+            if (reasonWrap) reasonWrap.classList.remove('hidden');
+            const reasonEl = document.getElementById('msFormReason');
+            if (reasonEl) reasonEl.required = true;
+
+            const extraEl = document.getElementById('msFormExtraDetails');
+            if (extraEl && ((sale.order_discount?.amount || 0) > 0 || (sale.shipping_amount || 0) > 0 || (sale.evidence_refs || []).length > 0 || sale.memo)) {
+                extraEl.open = true;
+            }
+
+            renderManualSaleLines();
+            renderManualSaleEvidences();
+            renderManualSaleOrderDiscountAlloc();
+            updateManualSaleTotals();
+            syncManualSalesRecoveryUI();
+            switchManualSalesView('form');
+        }
+
+        async function reloadLatestManualSaleForEdit() {
+            if (!msState.conflictSaleId) return;
+            const targetId = msState.conflictSaleId;
+            msShowConflictBox(false);
+            await openManualSaleEdit(targetId);
+            msShowAlert('최신 판매기록을 불러왔습니다. 변경 사항을 확인한 뒤 다시 저장해주세요.', 'info');
+        }
+
+        function onManualSaleFormEdited() {
+            // 불명 요청(pendingOperation)이 존재하는 동안 입력 이벤트가 발생해도
+            // 절대로 pendingOperation 스냅샷(원래 key·불변 본문)을 지우지 않는다.
+            if (msState.pendingOperation) {
+                syncManualSalesRecoveryUI();
+            }
+        }
+
+        function searchManualSalesProducts(queryText) {
+            const box = document.getElementById('msProductSuggestions');
+            if (!box || msState.pendingOperation) return;
+            if (msState.productSearchTimer) clearTimeout(msState.productSearchTimer);
+            const q = String(queryText || '').trim();
+            if (!q) {
+                box.classList.add('hidden');
+                box.innerHTML = '';
+                return;
+            }
+            const epoch = msSessionEpoch;
+            msState.productSearchTimer = setTimeout(async () => {
+                if (msIsSessionStale(epoch) || msState.pendingOperation) return;
+                try {
+                    const res = await msAdminFetch(`/api/manual-sales/products?q=${encodeURIComponent(q)}&limit=15`, { method: 'GET' }, epoch);
+                    const json = await res.json();
+                    if (msIsSessionStale(epoch)) return;
+                    if (!res.ok || !json.success) {
+                        box.innerHTML = `<div class="p-2 text-[11px] text-rose-600">${escapeHtml(json.message || '상품 검색 실패')}</div>`;
+                        box.classList.remove('hidden');
+                        return;
+                    }
+                    const items = Array.isArray(json.items) ? json.items : [];
+                    if (!items.length) {
+                        box.innerHTML = '<div class="p-2 text-[11px] text-slate-500">일치하는 기존 상품이 없습니다. 아래 행에 품목명을 직접 입력해 등록할 수 있습니다.</div>';
+                    } else {
+                        box.innerHTML = items.map(it => {
+                            const c = escapeHtml(it.product_code);
+                            const n = escapeHtml(it.product_name);
+                            return `<button type="button" onclick="pickManualSalesProduct('${c.replace(/'/g, '&#39;')}', '${n.replace(/'/g, '&#39;')}')" class="w-full text-left px-3 py-1.5 hover:bg-indigo-50 flex items-center justify-between gap-2 text-xs cursor-pointer">
+                                <span class="font-medium text-slate-800 truncate">${n}</span>
+                                <span class="font-mono text-[11px] text-indigo-700 shrink-0">${c}</span>
+                            </button>`;
+                        }).join('');
+                    }
+                    box.classList.remove('hidden');
+                } catch (err) {
+                    if (err.message !== 'ADMIN_AUTH_REQUIRED' && err.message !== 'MS_SESSION_STALE') {
+                        box.classList.add('hidden');
+                    }
+                }
+            }, 220);
+        }
+
+        function pickManualSalesProduct(code, name) {
+            onManualSaleFormEdited();
+            const blankIdx = msState.lines.findIndex(l => !l.product_code && !l.product_name && !l.goods_amount && !l.gross_amount);
+            if (blankIdx >= 0) {
+                msState.lines[blankIdx].product_code = code;
+                msState.lines[blankIdx].product_name = name;
+            } else {
+                const ln = createEmptyManualSaleLine();
+                ln.product_code = code;
+                ln.product_name = name;
+                msState.lines.push(ln);
+            }
+            const inp = document.getElementById('msProductSearchInput');
+            if (inp) inp.value = '';
+            const box = document.getElementById('msProductSuggestions');
+            if (box) { box.classList.add('hidden'); box.innerHTML = ''; }
+            renderManualSaleLines();
+            renderManualSaleOrderDiscountAlloc();
+            updateManualSaleTotals();
+        }
+
+        function addManualSaleLine() {
+            onManualSaleFormEdited();
+            if (msState.lines.length >= 100) {
+                msShowAlert('품목은 한 거래당 최대 100건까지 입력할 수 있습니다.', 'warning');
+                return;
+            }
+            msState.lines.push(createEmptyManualSaleLine());
+            renderManualSaleLines();
+            renderManualSaleOrderDiscountAlloc();
+            updateManualSaleTotals();
+        }
+
+        function removeManualSaleLine(idx) {
+            onManualSaleFormEdited();
+            if (msState.lines.length <= 1) {
+                msShowAlert('최소 1개 이상의 품목이 필요합니다.', 'warning');
+                return;
+            }
+            msState.lines.splice(idx, 1);
+            msState.orderDiscountAllocations = {};
+            renderManualSaleLines();
+            renderManualSaleOrderDiscountAlloc();
+            updateManualSaleTotals();
+        }
+
+        function updateManualSaleLineField(idx, field, value) {
+            onManualSaleFormEdited();
+            const ln = msState.lines[idx];
+            if (!ln) return;
+            ln[field] = value;
+            if (field === 'amount_mode') {
+                renderManualSaleLines();
+            }
+            updateManualSaleTotals();
+        }
+
+        function computeLineGoodsAmount(ln) {
+            if (ln.amount_mode === 'gross_discount') {
+                const gross = parseInt(ln.gross_amount, 10);
+                const disc = parseInt(ln.item_discount_amount || '0', 10);
+                if (isNaN(gross) || gross < 0 || isNaN(disc) || disc < 0) return 0;
+                return Math.max(0, gross - disc);
+            }
+            const goods = parseInt(ln.goods_amount, 10);
+            return (!isNaN(goods) && goods >= 0) ? goods : 0;
+        }
+
+        function renderManualSaleLines() {
+            const container = document.getElementById('msFormLinesContainer');
+            if (!container) return;
+            container.innerHTML = msState.lines.map((ln, idx) => {
+                const isGross = ln.amount_mode === 'gross_discount';
+                const computedGoods = computeLineGoodsAmount(ln);
+                const hasExtra = !!(ln.variant_key || ln.online_channel || ln.online_order_key || ln.online_item_key);
+                const removeBtn = msState.lines.length > 1
+                    ? `<button type="button" onclick="removeManualSaleLine(${idx})" class="text-[11px] text-rose-600 hover:text-rose-800 font-semibold cursor-pointer">행 삭제</button>`
+                    : '';
+                const amountInputs = isGross
+                    ? `
+                        <div>
+                            <label class="block text-[11px] font-semibold text-slate-600 mb-1">단가 (원 · 선택)</label>
+                            <input type="number" min="0" step="1" value="${escapeHtml(ln.unit_price)}" oninput="updateManualSaleLineField(${idx}, 'unit_price', this.value)" placeholder="검산용 단가" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-semibold text-slate-600 mb-1">총상품가 (원) <span class="text-rose-500">*</span></label>
+                            <input type="number" min="0" step="1" required value="${escapeHtml(ln.gross_amount)}" oninput="updateManualSaleLineField(${idx}, 'gross_amount', this.value)" placeholder="예: 6000" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-semibold text-slate-600 mb-1">품목할인 (원 · 차감)</label>
+                            <input type="number" min="0" step="1" value="${escapeHtml(ln.item_discount_amount)}" oninput="updateManualSaleLineField(${idx}, 'item_discount_amount', this.value)" placeholder="0" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                    `
+                    : `
+                        <div>
+                            <label class="block text-[11px] font-semibold text-slate-600 mb-1">최종 상품금액 (원) <span class="text-rose-500">*</span></label>
+                            <input type="number" min="0" step="1" required value="${escapeHtml(ln.goods_amount)}" oninput="updateManualSaleLineField(${idx}, 'goods_amount', this.value)" placeholder="예: 12000" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-semibold text-slate-600 mb-1">품목할인 참고 (원 · 재차감 안함)</label>
+                            <input type="number" min="0" step="1" value="${escapeHtml(ln.item_discount_amount)}" oninput="updateManualSaleLineField(${idx}, 'item_discount_amount', this.value)" placeholder="0" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-semibold text-slate-600 mb-1">단가 참고 (원 · 선택)</label>
+                            <input type="number" min="0" step="1" value="${escapeHtml(ln.unit_price)}" oninput="updateManualSaleLineField(${idx}, 'unit_price', this.value)" placeholder="선택" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                        </div>
+                    `;
+                return `
+                    <div class="ms-line-card rounded-xl border border-slate-200 bg-white p-3 space-y-2.5" data-line-idx="${idx}">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-mono font-bold text-[10px]">품목 #${idx + 1}</span>
+                                <span id="msLineGoodsBadge_${idx}" class="text-[11px] font-mono font-bold text-indigo-700">상품금액 ${fmtWon(computedGoods)}</span>
+                            </div>
+                            ${removeBtn}
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                            <div class="sm:col-span-3">
+                                <label class="block text-[11px] font-semibold text-slate-600 mb-1">품목코드 (선택)</label>
+                                <input type="text" maxlength="80" value="${escapeHtml(ln.product_code)}" oninput="updateManualSaleLineField(${idx}, 'product_code', this.value)" placeholder="예: 20TZ01" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                            </div>
+                            <div class="sm:col-span-5">
+                                <label class="block text-[11px] font-semibold text-slate-600 mb-1">품목명 <span class="text-rose-500">*</span></label>
+                                <input type="text" maxlength="200" value="${escapeHtml(ln.product_name)}" oninput="updateManualSaleLineField(${idx}, 'product_name', this.value)" placeholder="상품명 입력 (마스터 미등록 가능)" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                            </div>
+                            <div class="sm:col-span-2">
+                                <label class="block text-[11px] font-semibold text-slate-600 mb-1">주문수량 <span class="text-rose-500">*</span></label>
+                                <input type="text" inputmode="decimal" required value="${escapeHtml(ln.quantity)}" oninput="updateManualSaleLineField(${idx}, 'quantity', this.value)" placeholder="예: 2 또는 1.5" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-mono">
+                            </div>
+                            <div class="sm:col-span-2">
+                                <label class="block text-[11px] font-semibold text-slate-600 mb-1">단위</label>
+                                <select onchange="updateManualSaleLineField(${idx}, 'unit', this.value)" class="w-full px-2 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                                    <option value="ea" ${ln.unit === 'ea' ? 'selected' : ''}>개(ea)</option>
+                                    <option value="box" ${ln.unit === 'box' ? 'selected' : ''}>박스(box)</option>
+                                    <option value="set" ${ln.unit === 'set' ? 'selected' : ''}>세트(set)</option>
+                                    <option value="kg" ${ln.unit === 'kg' ? 'selected' : ''}>kg</option>
+                                    <option value="l" ${ln.unit === 'l' ? 'selected' : ''}>L</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                            <div>
+                                <label class="block text-[11px] font-semibold text-slate-600 mb-1">금액 입력 방식</label>
+                                <select onchange="updateManualSaleLineField(${idx}, 'amount_mode', this.value)" class="w-full px-2 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                                    <option value="final" ${!isGross ? 'selected' : ''}>최종 상품금액 직접 입력</option>
+                                    <option value="gross_discount" ${isGross ? 'selected' : ''}>총상품가 − 품목할인</option>
+                                </select>
+                            </div>
+                            ${amountInputs}
+                        </div>
+                        <details ${hasExtra ? 'open' : ''} class="text-[11px] text-slate-600">
+                            <summary class="cursor-pointer select-none text-slate-500 hover:text-slate-800">품목 추가 옵션 (규격 · 온라인 주문 중복방지 연결) ▾</summary>
+                            <div class="mt-2 grid grid-cols-1 sm:grid-cols-4 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+                                <div>
+                                    <label class="block text-[10px] font-semibold text-slate-600 mb-0.5">옵션/규격 (선택)</label>
+                                    <input type="text" maxlength="100" value="${escapeHtml(ln.variant_key)}" oninput="updateManualSaleLineField(${idx}, 'variant_key', this.value)" placeholder="예: 500ml" class="w-full px-2 py-1 border border-slate-300 rounded bg-white text-xs">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-semibold text-slate-600 mb-0.5">연결 채널 (선택)</label>
+                                    <select onchange="updateManualSaleLineField(${idx}, 'online_channel', this.value)" class="w-full px-2 py-1 border border-slate-300 rounded bg-white text-xs">
+                                        <option value="">연결 안함</option>
+                                        <option value="smartstore" ${ln.online_channel === 'smartstore' ? 'selected' : ''}>스마트스토어</option>
+                                        <option value="cafe24" ${ln.online_channel === 'cafe24' ? 'selected' : ''}>카페24</option>
+                                        <option value="coupang" ${ln.online_channel === 'coupang' ? 'selected' : ''}>쿠팡</option>
+                                        <option value="coupang_growth" ${ln.online_channel === 'coupang_growth' ? 'selected' : ''}>쿠팡 그로스</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-semibold text-slate-600 mb-0.5">온라인 원주문키</label>
+                                    <input type="text" maxlength="160" value="${escapeHtml(ln.online_order_key)}" oninput="updateManualSaleLineField(${idx}, 'online_order_key', this.value)" placeholder="주문번호/키" class="w-full px-2 py-1 border border-slate-300 rounded bg-white text-xs font-mono">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-semibold text-slate-600 mb-0.5">온라인 품목키</label>
+                                    <input type="text" maxlength="160" value="${escapeHtml(ln.online_item_key)}" oninput="updateManualSaleLineField(${idx}, 'online_item_key', this.value)" placeholder="상품주문번호/키" class="w-full px-2 py-1 border border-slate-300 rounded bg-white text-xs font-mono">
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function addManualSaleEvidence() {
+            onManualSaleFormEdited();
+            if (msState.evidences.length >= 10) {
+                msShowAlert('증빙 참조는 최대 10건까지 입력할 수 있습니다.', 'warning');
+                return;
+            }
+            msState.evidences.push({ type: 'other', reference: '' });
+            renderManualSaleEvidences();
+        }
+
+        function removeManualSaleEvidence(idx) {
+            onManualSaleFormEdited();
+            msState.evidences.splice(idx, 1);
+            renderManualSaleEvidences();
+        }
+
+        function updateManualSaleEvidence(idx, field, val) {
+            onManualSaleFormEdited();
+            if (msState.evidences[idx]) msState.evidences[idx][field] = val;
+        }
+
+        function renderManualSaleEvidences() {
+            const box = document.getElementById('msFormEvidenceContainer');
+            if (!box) return;
+            if (!msState.evidences.length) {
+                box.innerHTML = '<div class="text-[11px] text-slate-400">등록된 증빙 참조가 없습니다.</div>';
+                return;
+            }
+            box.innerHTML = msState.evidences.map((ev, idx) => `
+                <div class="flex flex-wrap items-center gap-2">
+                    <select onchange="updateManualSaleEvidence(${idx}, 'type', this.value)" class="px-2 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                        <option value="order" ${ev.type === 'order' ? 'selected' : ''}>주문서</option>
+                        <option value="invoice" ${ev.type === 'invoice' ? 'selected' : ''}>세금계산서</option>
+                        <option value="delivery" ${ev.type === 'delivery' ? 'selected' : ''}>납품서</option>
+                        <option value="receipt" ${ev.type === 'receipt' ? 'selected' : ''}>영수증</option>
+                        <option value="other" ${ev.type === 'other' ? 'selected' : ''}>기타</option>
+                    </select>
+                    <input type="text" maxlength="500" value="${escapeHtml(ev.reference)}" oninput="updateManualSaleEvidence(${idx}, 'reference', this.value)" placeholder="증빙 번호 또는 참조 설명" class="flex-1 min-w-[160px] px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                    <button type="button" onclick="removeManualSaleEvidence(${idx})" class="px-2 py-1 rounded text-[11px] text-rose-600 hover:bg-rose-50 cursor-pointer">삭제</button>
+                </div>
+            `).join('');
+        }
+
+        function renderManualSaleOrderDiscountAlloc() {
+            const box = document.getElementById('msFormOrderDiscountAllocBox');
+            const amt = parseInt(document.getElementById('msFormOrderDiscountAmt')?.value || '0', 10) || 0;
+            const mode = document.getElementById('msFormOrderDiscountMode')?.value || 'unallocated';
+            if (!box) return;
+            if (amt <= 0 || mode !== 'allocated') {
+                box.classList.add('hidden');
+                box.innerHTML = '';
+                return;
+            }
+            box.classList.remove('hidden');
+            box.innerHTML = '<div class="text-[11px] font-semibold text-slate-700 mb-1">품목별 주문할인 배분액 (합계가 주문할인 총액과 일치해야 함)</div>' +
+                msState.lines.map((ln, idx) => {
+                    const v = msState.orderDiscountAllocations[idx] ?? '0';
+                    const lbl = ln.product_name || ln.product_code || `품목 #${idx + 1}`;
+                    return `<div class="flex items-center justify-between gap-2 text-xs">
+                        <span class="truncate text-slate-700">#${idx + 1} ${escapeHtml(lbl)}</span>
+                        <input type="number" min="0" step="1" value="${escapeHtml(v)}" oninput="onManualSaleFormEdited(); msState.orderDiscountAllocations[${idx}] = this.value; updateManualSaleTotals();" class="w-28 px-2 py-1 border border-slate-300 rounded text-right font-mono text-xs">
+                    </div>`;
+                }).join('');
+        }
+
+        function updateManualSaleTotals() {
+            let goodsSum = 0;
+            msState.lines.forEach((ln, idx) => {
+                const g = computeLineGoodsAmount(ln);
+                goodsSum += g;
+                const badge = document.getElementById(`msLineGoodsBadge_${idx}`);
+                if (badge) badge.textContent = `상품금액 ${fmtWon(g)}`;
+            });
+            const orderDisc = Math.max(0, parseInt(document.getElementById('msFormOrderDiscountAmt')?.value || '0', 10) || 0);
+            const shipping = Math.max(0, parseInt(document.getElementById('msFormShippingAmt')?.value || '0', 10) || 0);
+            const afterDisc = goodsSum - orderDisc;
+            const txTotal = afterDisc + shipping;
+
+            const setT = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+            setT('msTotGoods', fmtWon(goodsSum));
+            setT('msTotOrderDiscount', orderDisc > 0 ? '-' + fmtWon(orderDisc) : '0원');
+            setT('msTotAfterDiscount', afterDisc < 0 ? '-' + fmtWon(Math.abs(afterDisc)) : fmtWon(afterDisc));
+            setT('msTotShipping', fmtWon(shipping));
+            setT('msTotTransaction', txTotal < 0 ? '-' + fmtWon(Math.abs(txTotal)) : fmtWon(txTotal));
+        }
+
+        function parseStrictIntMoney(raw, label, allowEmpty = false) {
+            const s = String(raw ?? '').trim();
+            if (!s) {
+                if (allowEmpty) return null;
+                throw new Error(`${label}을(를) 입력하세요.`);
+            }
+            if (!/^\d+$/.test(s)) {
+                throw new Error(`${label}은(는) 0 이상의 정수원으로 입력하세요.`);
+            }
+            const n = Number(s);
+            if (!Number.isSafeInteger(n) || n < 0 || n > 1e12) {
+                throw new Error(`${label} 허용 범위를 확인하세요.`);
+            }
+            return n;
+        }
+
+        function buildManualSalePayload() {
+            const saleDate = (document.getElementById('msFormDate')?.value || '').trim();
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDate)) {
+                throw new Error('판매일(YYYY-MM-DD)을 정확히 입력하세요.');
+            }
+            const partyName = (document.getElementById('msFormPartyName')?.value || '').trim();
+            if (!partyName) {
+                throw new Error('거래처명을 입력하세요.');
+            }
+            const partyId = (document.getElementById('msFormPartyId')?.value || '').trim();
+            const counterparty = { name: partyName };
+            if (partyId) counterparty.id = partyId;
+
+            if (!msState.lines.length) {
+                throw new Error('최소 1개 이상의 품목을 입력하세요.');
+            }
+
+            let goodsTotal = 0;
+            const lines = msState.lines.map((ln, idx) => {
+                const code = (ln.product_code || '').trim();
+                const name = (ln.product_name || '').trim();
+                if (!code && !name) {
+                    throw new Error(`품목 #${idx + 1}의 품목코드 또는 품목명을 입력하세요.`);
+                }
+                const qtyStr = String(ln.quantity ?? '').trim();
+                if (!/^\d+(?:\.\d{1,3})?$/.test(qtyStr) || Number(qtyStr) <= 0) {
+                    throw new Error(`품목 #${idx + 1}의 수량은 0보다 큰 소수 3자리 이내 숫자로 입력하세요.`);
+                }
+                const lineObj = {
+                    quantity: qtyStr,
+                    unit: ln.unit || 'ea',
+                    amount_mode: ln.amount_mode === 'gross_discount' ? 'gross_discount' : 'final'
+                };
+                if (msState.formMode === 'update' && ln.line_id) {
+                    lineObj.line_id = ln.line_id;
+                }
+                if (code) lineObj.product_code = code;
+                if (name) lineObj.product_name = name;
+                const variantKey = (ln.variant_key || '').trim();
+                if (variantKey) lineObj.variant_key = variantKey;
+
+                const disc = parseStrictIntMoney(ln.item_discount_amount || '0', `품목 #${idx + 1} 품목할인`, false);
+                lineObj.item_discount_amount = disc;
+                const unitPrice = parseStrictIntMoney(ln.unit_price, `품목 #${idx + 1} 단가`, true);
+                if (unitPrice !== null) lineObj.unit_price = unitPrice;
+
+                // 계약 엄수: final은 gross_amount 생략, gross_discount는 goods_amount 생략
+                if (lineObj.amount_mode === 'final') {
+                    const goods = parseStrictIntMoney(ln.goods_amount, `품목 #${idx + 1} 최종 상품금액`, false);
+                    lineObj.goods_amount = goods;
+                    goodsTotal += goods;
+                } else {
+                    const gross = parseStrictIntMoney(ln.gross_amount, `품목 #${idx + 1} 총상품가`, false);
+                    if (disc > gross) {
+                        throw new Error(`품목 #${idx + 1} 품목할인이 총상품가를 초과할 수 없습니다.`);
+                    }
+                    lineObj.gross_amount = gross;
+                    goodsTotal += (gross - disc);
+                }
+
+                // 계약 엄수: online_link는 channel/order_key/item_key만 전송 (match_status 금지)
+                const ch = (ln.online_channel || '').trim();
+                const ok = (ln.online_order_key || '').trim();
+                const ik = (ln.online_item_key || '').trim();
+                if (ch || ok || ik) {
+                    if (!ch || !ok || !ik) {
+                        throw new Error(`품목 #${idx + 1} 온라인 주문 연결은 채널·원주문키·품목키를 모두 입력하세요.`);
+                    }
+                    lineObj.online_link = { channel: ch, order_key: ok, item_key: ik };
+                }
+                return lineObj;
+            });
+
+            const orderDiscountAmt = parseStrictIntMoney(document.getElementById('msFormOrderDiscountAmt')?.value || '0', '주문 단위 할인', false);
+            if (orderDiscountAmt > goodsTotal) {
+                throw new Error('주문 단위 할인이 품목 상품금액 합계를 초과할 수 없습니다.');
+            }
+            const allocMode = document.getElementById('msFormOrderDiscountMode')?.value || 'unallocated';
+            let orderDiscount;
+            if (orderDiscountAmt === 0) {
+                orderDiscount = { amount: 0, allocation_status: 'not_applicable', allocations: [] };
+            } else if (allocMode === 'allocated') {
+                const allocations = [];
+                let allocSum = 0;
+                lines.forEach((_, idx) => {
+                    const aVal = parseStrictIntMoney(msState.orderDiscountAllocations[idx] || '0', `품목 #${idx + 1} 주문할인 배분액`, false);
+                    if (aVal > 0) {
+                        allocations.push({ line_index: idx, amount: aVal });
+                        allocSum += aVal;
+                    }
+                });
+                if (allocSum !== orderDiscountAmt) {
+                    throw new Error(`품목별 주문할인 배분 합계(${fmtWon(allocSum)})가 주문 단위 할인(${fmtWon(orderDiscountAmt)})과 일치하지 않습니다.`);
+                }
+                orderDiscount = { amount: orderDiscountAmt, allocation_status: 'allocated', allocations };
+            } else {
+                orderDiscount = { amount: orderDiscountAmt, allocation_status: 'unallocated', allocations: [] };
+            }
+
+            const shippingAmt = parseStrictIntMoney(document.getElementById('msFormShippingAmt')?.value || '0', '배송비', false);
+            const vatStatus = document.getElementById('msFormVatStatus')?.value || 'unverified';
+            const memo = (document.getElementById('msFormMemo')?.value || '').trim();
+
+            const evidenceRefs = [];
+            msState.evidences.forEach((ev, idx) => {
+                const ref = (ev.reference || '').trim();
+                if (ref) {
+                    evidenceRefs.push({ type: ev.type || 'other', reference: ref });
+                }
+            });
+
+            const afterDisc = goodsTotal - orderDiscountAmt;
+            const txTotal = afterDisc + shippingAmt;
+            const payload = {
+                sale_date: saleDate,
+                counterparty,
+                lines,
+                order_discount: orderDiscount,
+                shipping_amount: shippingAmt,
+                vat_status: vatStatus,
+                evidence_refs: evidenceRefs,
+                client_totals: {
+                    goods_amount: goodsTotal,
+                    order_discount_amount: orderDiscountAmt,
+                    goods_after_order_discount: afterDisc,
+                    shipping_amount: shippingAmt,
+                    transaction_amount: txTotal
+                }
+            };
+            if (memo) payload.memo = memo;
+
+            if (msState.formMode === 'update') {
+                const reason = (document.getElementById('msFormReason')?.value || '').trim();
+                if (!reason) {
+                    throw new Error('수정 사유를 입력하세요.');
+                }
+                payload.expected_revision = msState.editExpectedRevision;
+                payload.reason = reason;
+            }
+            return payload;
+        }
+
+        async function submitManualSaleForm(event) {
+            if (event) event.preventDefault();
+            if (msState.isSubmitting) return;
+
+            // 공통 pendingOperation 보호: 결과 불명 요청이 존재하면 새 key를 절대 생성하지 않음
+            if (msState.pendingOperation) {
+                const pending = msState.pendingOperation;
+                syncManualSalesRecoveryUI();
+                if (pending.hasPayload && (pending.operation === 'create' || pending.operation === 'update')) {
+                    // 일반 저장 버튼 클릭도 동일 key + 불변 원본 본문 재시도로 안전하게 연결
+                    await executeManualSaleMutation(pending);
+                } else {
+                    msShowAlert(`결과가 확인되지 않은 이전 ${msOpLabel(pending.operation)} 요청이 있습니다. 먼저 상단의 "처리 결과 확인"을 눌러주세요.`, 'warning');
+                }
+                return;
+            }
+
+            msShowAlert('');
+            msShowConflictBox(false);
+
+            let payload;
+            try {
+                payload = buildManualSalePayload();
+            } catch (valErr) {
+                msShowAlert(valErr.message, 'error');
+                return;
+            }
+
+            const key = generateManualSalesIdemKey();
+            const isUpdate = msState.formMode === 'update';
+            const opInfo = Object.freeze({
+                key,
+                operation: isUpdate ? 'update' : 'create',
+                targetSaleId: isUpdate ? msState.editSaleId : null,
+                expectedRevision: isUpdate ? msState.editExpectedRevision : null,
+                payloadJson: JSON.stringify(payload),
+                hasPayload: true,
+                state: 'in_flight',
+                lastChecked404: false
+            });
+            msState.pendingOperation = opInfo;
+            msPersistOpaquePendingKey(opInfo);
+            await executeManualSaleMutation(opInfo);
+        }
+
+        async function executeManualSaleMutation(opInfo) {
+            if (!opInfo || !opInfo.hasPayload || msState.isSubmitting) return;
+            const epoch = msSessionEpoch;
+            const isCancel = opInfo.operation === 'cancel';
+            const isUpdate = opInfo.operation === 'update';
+            const btn = document.getElementById(isCancel ? 'msBtnConfirmCancel' : 'msFormSubmitBtn');
+            const retryBtn = document.getElementById('msBtnRetrySame');
+
+            msState.isSubmitting = true;
+            msUpdatePendingOperationState({ state: 'in_flight' });
+            msPersistOpaquePendingKey(opInfo);
+            setManualSalesPendingLock(true);
+            setButtonBusy(btn, true, isCancel ? '취소 처리 중...' : '<i class="fa-solid fa-spinner fa-spin"></i><span>저장 중...</span>');
+            if (retryBtn && !retryBtn.classList.contains('hidden')) {
+                setButtonBusy(retryBtn, true, '재시도 중...');
+            }
+
+            try {
+                let url = '/api/manual-sales';
+                let method = 'POST';
+                if (isUpdate) {
+                    url = '/api/manual-sales/' + encodeURIComponent(opInfo.targetSaleId);
+                    method = 'PATCH';
+                } else if (isCancel) {
+                    url = '/api/manual-sales/' + encodeURIComponent(opInfo.targetSaleId) + '/cancel';
+                    method = 'POST';
+                }
+
+                const res = await msAdminFetch(url, {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Idempotency-Key': opInfo.key
+                    },
+                    body: opInfo.payloadJson
+                }, epoch);
+                const json = await res.json();
+                if (msIsSessionStale(epoch)) return;
+
+                if (res.ok && json.success && json.sale) {
+                    msState.pendingOperation = null;
+                    msClearOpaquePendingKey();
+                    msShowConflictBox(false);
+                    syncManualSalesRecoveryUI();
+                    if (isCancel) {
+                        toggleManualSaleCancelPanel(false);
+                        msState.selectedSale = json.sale;
+                        renderManualSaleDetail();
+                    }
+                    const successMsg = msSuccessMessage(opInfo.operation, json.message || '', false);
+                    msShowAlert(successMsg, 'success');
+                    notifyUser(successMsg, 'success');
+                    await loadManualSalesList(0, epoch);
+                    await openManualSaleDetail(json.sale.sale_id, true, epoch);
+                    return;
+                }
+                if (res.status === 409 && json.code === 'REVISION_CONFLICT') {
+                    msState.pendingOperation = null;
+                    msClearOpaquePendingKey();
+                    syncManualSalesRecoveryUI();
+                    if (isUpdate) {
+                        msState.conflictSaleId = opInfo.targetSaleId;
+                        msShowConflictBox(true, json.current_revision);
+                        msShowAlert(json.message || '다른 곳에서 먼저 수정되었습니다. 최신 내용을 다시 불러오세요.', 'error', json.code);
+                    } else if (isCancel) {
+                        toggleManualSaleCancelPanel(false);
+                        msShowAlert('다른 곳에서 먼저 수정되었습니다. 최신 기록을 다시 불러옵니다.', 'warning', json.code);
+                        await openManualSaleDetail(opInfo.targetSaleId, true, epoch);
+                    }
+                    return;
+                }
+                if (res.status >= 500) {
+                    // 결과 불명(503/500): 동일 key·불변 본문·입력 잠금 유지
+                    msUpdatePendingOperationState({ state: 'unknown' });
+                    syncManualSalesRecoveryUI((json.message || `${msOpLabel(opInfo.operation)} 처리 중 일시 오류가 발생했습니다.`) + ' 먼저 "처리 결과 확인"을 누르거나 "같은 요청 다시 시도"로 동일 요청만 안전하게 재시도하세요.');
+                    msShowAlert(json.message || '저장소 일시 오류로 처리 결과를 확인하지 못했습니다.', 'warning', json.code || String(res.status));
+                    return;
+                }
+                if (res.status === 409 && json.code === 'IDEMPOTENCY_ABANDONED') {
+                    // 서버에서 영구 폐기(tombstone) 확정된 키: 원 요청은 저장되지 않으며 잠금 해제 후 새로 입력 가능
+                    msState.pendingOperation = null;
+                    msClearOpaquePendingKey();
+                    syncManualSalesRecoveryUI();
+                    msShowAlert('이미 서버에서 확정 종료(폐기)된 요청 키입니다. 이전 요청은 저장되지 않았으며, 목록 확인 후 필요 시 새로 등록하세요.', 'info', json.code);
+                    return;
+                }
+                // 400/422/기타 409 확정 거절: 서버 미반영이 확정되었으므로 잠금 해제 후 입력 수정 허용
+                msState.pendingOperation = null;
+                msClearOpaquePendingKey();
+                syncManualSalesRecoveryUI();
+                msShowAlert(json.message || '입력 내용을 확인하세요.', 'error', json.code || '');
+            } catch (err) {
+                if (err.message === 'ADMIN_AUTH_REQUIRED' || err.message === 'MS_SESSION_STALE' || msIsSessionStale(epoch)) {
+                    return;
+                }
+                // 네트워크 단절 / 서버 커밋 후 응답 유실 등 결과 불명: 동일 key·불변 본문 유지 + 입력 잠금
+                msUpdatePendingOperationState({ state: 'unknown' });
+                syncManualSalesRecoveryUI();
+                msShowAlert(`네트워크 오류 또는 응답 유실로 ${msOpLabel(opInfo.operation)} 결과를 확인하지 못했습니다.`, 'warning');
+            } finally {
+                msState.isSubmitting = false;
+                if (!msIsSessionStale(epoch)) {
+                    setButtonBusy(btn, false);
+                    if (retryBtn) setButtonBusy(retryBtn, false);
+                    syncManualSalesRecoveryUI();
+                }
+            }
+        }
+
+        async function applyManualSalesServerResolution(opInfo, json, epoch) {
+            if (msIsSessionStale(epoch)) return false;
+            if (json.resolution === 'abandoned') {
+                // 서버 영속 tombstone 확정 이후에만 미확인 잠금 해제
+                msState.pendingOperation = null;
+                msClearOpaquePendingKey();
+                toggleManualSaleCancelPanel(false);
+                syncManualSalesRecoveryUI();
+                const msg = '서버에서 미저장 요청을 확정 종료했습니다. 이전 요청은 뒤늦게 도착해도 저장되지 않으며, 이제 새 판매기록을 안전하게 입력할 수 있습니다.';
+                msShowAlert(msg, 'info');
+                notifyUser(msg, 'info');
+                await loadManualSalesList(0, epoch);
+                return true;
+            }
+            if (json.sale_id || json.resolution === 'committed') {
+                const resolvedOp = json.operation || opInfo.operation;
+                const serverMsg = json.result && typeof json.result.message === 'string' ? json.result.message : '';
+                msState.pendingOperation = null;
+                msClearOpaquePendingKey();
+                toggleManualSaleCancelPanel(false);
+                syncManualSalesRecoveryUI();
+                const recoveredMsg = msSuccessMessage(resolvedOp, serverMsg, true);
+                msShowAlert(recoveredMsg, 'success');
+                notifyUser(recoveredMsg, 'success');
+                await loadManualSalesList(0, epoch);
+                if (json.sale_id) {
+                    await openManualSaleDetail(json.sale_id, true, epoch);
+                }
+                return true;
+            }
+            return false;
+        }
+
+        async function checkManualSalesPendingIdempotency() {
+            const opInfo = msState.pendingOperation;
+            if (!opInfo || msState.isSubmitting) return;
+            const epoch = msSessionEpoch;
+            const btn = document.getElementById('msBtnCheckIdem');
+            setButtonBusy(btn, true, '확인 중...');
+            try {
+                const res = await msAdminFetch('/api/manual-sales/idempotency/' + encodeURIComponent(opInfo.key), { method: 'GET' }, epoch);
+                const json = await res.json();
+                if (msIsSessionStale(epoch)) return;
+                if (res.ok && json.success && (json.sale_id || json.resolution === 'committed' || json.resolution === 'abandoned')) {
+                    await applyManualSalesServerResolution(opInfo, json, epoch);
+                } else if (res.status === 404) {
+                    // 404는 조회 시점 미커밋일 수 있으므로 영구 미저장 확정으로 취급하지 않고 pendingOperation 유지!
+                    msUpdatePendingOperationState({ state: 'unknown', lastChecked404: true });
+                    syncManualSalesRecoveryUI();
+                    const note = opInfo.hasPayload
+                        ? '조회 시점에는 아직 저장 기록이 확인되지 않았습니다(처리 지연 또는 서버 미도달 가능 · 영구 미저장 확정 아님). 중복 방지를 위해 새 요청 대신 "같은 요청 다시 시도"로 동일 키 재시도만 진행하세요.'
+                        : '조회 시점에는 아직 저장 기록이 확인되지 않았습니다(처리 지연 또는 서버 미도달 가능 · 영구 미저장 확정 아님). 클라이언트 임의 해제는 불가하며, 새 입력을 시작하려면 "서버에서 이전 요청 확정 종료"로 서버 확정을 완료하세요.';
+                    msShowAlert(note, 'info');
+                } else {
+                    msShowAlert(json.message || '처리 결과 확인 중 오류가 발생했습니다.', 'warning', json.code || '');
+                }
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED' && err.message !== 'MS_SESSION_STALE') {
+                    msShowAlert('처리 결과 확인 네트워크 오류: ' + err.message, 'warning');
+                }
+            } finally {
+                if (!msIsSessionStale(epoch)) {
+                    setButtonBusy(btn, false);
+                }
+            }
+        }
+
+        async function retryManualSalesPendingRequest() {
+            if (!msState.pendingOperation) return;
+            if (!msState.pendingOperation.hasPayload) {
+                await checkManualSalesPendingIdempotency();
+                return;
+            }
+            await executeManualSaleMutation(msState.pendingOperation);
+        }
+
+        async function resolveManualSalesPendingOnServer() {
+            const opInfo = msState.pendingOperation;
+            if (!opInfo || opInfo.hasPayload || msState.isSubmitting) return;
+            const epoch = msSessionEpoch;
+            const ok = await showConfirmModal(
+                '서버에 이전 요청의 최종 처리를 확정 요청하시겠습니까?\n• 이미 서버에 저장된 경우: 기존 거래를 유지한 채 최신 상세를 복구합니다.\n• 아직 미저장인 경우: 서버에 영구 종료(폐기)를 기록해 뒤늦게 도착한 원요청도 차단한 뒤 잠금을 해제합니다.',
+                { title: '서버에서 이전 요청 확정 종료', okText: '서버 확정 요청', danger: false }
+            );
+            if (!ok || msIsSessionStale(epoch) || !msState.pendingOperation || msState.pendingOperation.key !== opInfo.key) return;
+
+            const btn = document.getElementById('msBtnResolvePending');
+            msState.isSubmitting = true;
+            setButtonBusy(btn, true, '서버 확정 중...');
+            try {
+                const res = await msAdminFetch(
+                    '/api/manual-sales/idempotency/' + encodeURIComponent(opInfo.key) + '/resolve',
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: '{}'
+                    },
+                    epoch
+                );
+                const json = await res.json();
+                if (msIsSessionStale(epoch)) return;
+                if (res.ok && json.success && (json.resolution === 'committed' || json.resolution === 'abandoned')) {
+                    await applyManualSalesServerResolution(opInfo, json, epoch);
+                } else {
+                    // 서버 확정 실패(503/500/오류): 절대 키를 삭제하거나 잠금을 해제하지 않음
+                    msUpdatePendingOperationState({ state: 'unknown' });
+                    syncManualSalesRecoveryUI();
+                    msShowAlert(
+                        (json.message || '서버에서 이전 요청 확정을 완료하지 못했습니다.') + ' 미확인 키는 유지되므로 잠시 후 다시 시도하세요.',
+                        'warning',
+                        json.code || String(res.status)
+                    );
+                }
+            } catch (err) {
+                if (err.message === 'ADMIN_AUTH_REQUIRED' || err.message === 'MS_SESSION_STALE' || msIsSessionStale(epoch)) {
+                    return;
+                }
+                // 네트워크 실패/응답 유실: 절대 키 삭제·잠금 해제 금지
+                msUpdatePendingOperationState({ state: 'unknown' });
+                syncManualSalesRecoveryUI();
+                msShowAlert('네트워크 오류로 서버 확정 결과를 확인하지 못했습니다. 미확인 키를 유지한 채 "처리 결과 확인" 또는 "서버에서 이전 요청 확정 종료"를 다시 시도하세요.', 'warning');
+            } finally {
+                msState.isSubmitting = false;
+                if (!msIsSessionStale(epoch)) {
+                    setButtonBusy(btn, false);
+                    syncManualSalesRecoveryUI();
+                }
+            }
+        }
+
+        async function openManualSaleDetail(saleId, preserveAlert = false, epoch = msSessionEpoch) {
+            if (msIsSessionStale(epoch)) return;
+            if (!preserveAlert) msShowAlert('');
+            msShowConflictBox(false);
+            const keepCancelPanel = !!(msState.pendingOperation && msState.pendingOperation.operation === 'cancel' && msState.pendingOperation.targetSaleId === saleId);
+            if (!keepCancelPanel) toggleManualSaleCancelPanel(false);
+            try {
+                const detRes = await msAdminFetch('/api/manual-sales/' + encodeURIComponent(saleId), { method: 'GET' }, epoch);
+                const detJson = await detRes.json();
+                if (msIsSessionStale(epoch)) return;
+                if (!detRes.ok || !detJson.success || !detJson.sale) {
+                    msShowAlert(detJson.message || '판매기록 상세 조회 실패', 'error', detJson.code || '');
+                    return;
+                }
+                const histRes = await msAdminFetch('/api/manual-sales/' + encodeURIComponent(saleId) + '/history?limit=50&offset=0', { method: 'GET' }, epoch);
+                const histJson = await histRes.json();
+                if (msIsSessionStale(epoch)) return;
+                msState.selectedSale = detJson.sale;
+                msState.selectedHistory = (histRes.ok && histJson.success && Array.isArray(histJson.items)) ? histJson.items : [];
+                renderManualSaleDetail();
+                syncManualSalesRecoveryUI();
+                switchManualSalesView('detail');
+            } catch (err) {
+                if (err.message !== 'ADMIN_AUTH_REQUIRED' && err.message !== 'MS_SESSION_STALE') {
+                    msShowAlert('상세 조회 네트워크 오류: ' + err.message, 'error');
+                }
+            }
+        }
+
+        function renderManualSaleDetail() {
+            const sale = msState.selectedSale;
+            const detEl = document.getElementById('msDetailContent');
+            const histEl = document.getElementById('msDetailHistoryList');
+            const histCntEl = document.getElementById('msDetailHistoryCount');
+            if (!sale || !detEl) return;
+
+            const safeId = escapeHtml(sale.sale_id);
+            const isSubmitted = sale.status === 'submitted';
+            const reflectionTxt = sale.reflection_status === 'pending'
+                ? '대시보드 반영 대기 (공개 매출 미반영)'
+                : (sale.status === 'cancelled' ? '취소 기록 (대시보드 미반영 · 실 현금환불 완료와 별개)' : '공개 매출 미반영');
+            const actionsHtml = isSubmitted
+                ? `<div class="flex flex-wrap items-center gap-1.5">
+                    <button type="button" id="msBtnDetailEdit" onclick="openManualSaleEdit('${safeId}')" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs cursor-pointer">수정하기</button>
+                    <button type="button" id="msBtnDetailCancel" onclick="toggleManualSaleCancelPanel(true)" class="px-3 py-1.5 rounded-lg bg-white hover:bg-rose-50 border border-rose-300 text-rose-700 font-semibold text-xs cursor-pointer">전체 취소</button>
+                   </div>`
+                : `<span class="text-[11px] font-semibold text-rose-700">전체 취소 완료된 기록은 수정할 수 없습니다</span>`;
+
+            const linesHtml = (sale.lines || []).map((ln, idx) => {
+                const unitLbl = MS_UNIT_LABELS[ln.unit] || ln.unit || '';
+                const idBadge = ln.product_identity_status === 'catalog_match'
+                    ? '<span class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-semibold">마스터 코드 일치</span>'
+                    : '<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-semibold">미검토 직접입력</span>';
+                const modeNote = ln.amount_mode === 'gross_discount'
+                    ? `총상품가 ${fmtWon(ln.gross_amount)} − 품목할인 ${fmtWon(ln.item_discount_amount || 0)}`
+                    : ((ln.item_discount_amount || 0) > 0 ? `최종금액 입력 (품목할인 참고 ${fmtWon(ln.item_discount_amount)})` : '최종금액 입력');
+                const linkNote = ln.online_link
+                    ? `<div class="text-[10px] text-amber-800 mt-0.5">온라인 연결 신고(${escapeHtml(MS_CHANNEL_LABELS[ln.online_link.channel] || ln.online_link.channel)}) · 중복집계 방지 대상</div>`
+                    : '';
+                return `
+                    <div class="rounded-lg border border-slate-200 bg-slate-50/50 p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div class="min-w-0 space-y-0.5">
+                            <div class="flex flex-wrap items-center gap-1.5">
+                                <span class="font-mono text-[10px] text-slate-400">#${idx + 1}</span>
+                                ${ln.product_code ? `<span class="font-mono text-[11px] font-bold text-slate-700">${escapeHtml(ln.product_code)}</span>` : ''}
+                                <span class="font-semibold text-slate-900">${escapeHtml(ln.product_name || '-')}</span>
+                                ${ln.variant_key ? `<span class="text-[11px] text-slate-500">(${escapeHtml(ln.variant_key)})</span>` : ''}
+                                ${idBadge}
+                            </div>
+                            <div class="text-[11px] text-slate-600">주문수량 <strong>${escapeHtml(ln.quantity)} ${escapeHtml(unitLbl)}</strong> · ${escapeHtml(modeNote)} · 원가·이익 미산출</div>
+                            ${linkNote}
+                        </div>
+                        <div class="text-left sm:text-right shrink-0">
+                            <div class="text-[10px] text-slate-400">상품금액</div>
+                            <div class="font-mono font-bold text-sm text-indigo-700">${fmtWon(ln.goods_amount || 0)}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            const evHtml = (sale.evidence_refs || []).length
+                ? (sale.evidence_refs || []).map(ev => `<span class="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-[11px] text-slate-700">${escapeHtml(MS_EVIDENCE_LABELS[ev.type] || ev.type)}: ${escapeHtml(ev.reference)}</span>`).join(' ')
+                : '<span class="text-slate-400">없음</span>';
+
+            const totals = sale.totals || {};
+            detEl.innerHTML = `
+                <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        ${msStatusBadgeHtml(sale)}
+                        <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">운영 미검토</span>
+                        <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">원가·이익 미산출</span>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        ${actionsHtml}
+                        <button type="button" onclick="switchManualSalesView('list')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs cursor-pointer">목록으로</button>
+                    </div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                    <div class="text-[11px] font-semibold text-indigo-800">${escapeHtml(reflectionTxt)}</div>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                        <div><span class="text-slate-500">판매일:</span> <strong class="font-mono text-slate-900">${escapeHtml(sale.sale_date || '-')}</strong></div>
+                        <div><span class="text-slate-500">거래처:</span> <strong class="text-slate-900">${escapeHtml(sale.counterparty?.name || '-')}</strong>${sale.counterparty?.id ? ` <span class="font-mono text-[11px] text-slate-500">(${escapeHtml(sale.counterparty.id)})</span>` : ''}</div>
+                        <div><span class="text-slate-500">VAT 구분:</span> <strong class="text-slate-900">${escapeHtml(MS_VAT_LABELS[sale.vat_status] || sale.vat_status || '미확정')}</strong></div>
+                    </div>
+                    <div class="text-xs"><span class="text-slate-500">증빙 참조:</span> ${evHtml}</div>
+                    ${sale.memo ? `<div class="text-xs"><span class="text-slate-500">메모:</span> <span class="text-slate-800">${escapeHtml(sale.memo)}</span></div>` : ''}
+                </div>
+                <div class="space-y-1.5">
+                    <div class="font-bold text-slate-800">품목 내역 (${(sale.lines || []).length}건)</div>
+                    ${linesHtml}
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-slate-900 text-white rounded-xl p-3 text-xs">
+                    <div><div class="text-[10px] text-slate-400">품목 상품금액</div><div class="font-mono font-bold">${fmtWon(totals.goods_amount || 0)}</div></div>
+                    <div><div class="text-[10px] text-slate-400">주문 할인 (1회)</div><div class="font-mono font-bold text-amber-300">${(totals.order_discount_amount || 0) > 0 ? '-' + fmtWon(totals.order_discount_amount) : '0원'}</div></div>
+                    <div><div class="text-[10px] text-slate-400">할인 후 상품금액</div><div class="font-mono font-bold">${fmtWon(totals.goods_after_order_discount || 0)}</div></div>
+                    <div><div class="text-[10px] text-slate-400">배송비 (1회)</div><div class="font-mono font-bold">${fmtWon(totals.shipping_amount || 0)}</div></div>
+                    <div><div class="text-[10px] text-indigo-200">거래 합계</div><div class="font-mono font-black text-sm">${fmtWon(totals.transaction_amount || 0)}</div></div>
+                </div>
+                <details class="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                    <summary class="cursor-pointer select-none font-semibold text-slate-600">기록 관리 정보 보기 ▾</summary>
+                    <div class="mt-1.5 space-y-0.5 font-mono text-[10px]">
+                        <div>버전: v${escapeHtml(sale.revision)} · 최종 갱신: ${escapeHtml(sale.updated_at || '-')}</div>
+                        <div>기록 식별자: ${safeId}</div>
+                        <div>최초 등록: ${escapeHtml(sale.created_at || '-')}</div>
+                    </div>
+                </details>
+            `;
+
+            if (histCntEl) histCntEl.textContent = `총 ${msState.selectedHistory.length}건`;
+            if (histEl) {
+                const evtLabels = { create: '최초 등록', update: '내용 수정', cancel: '전체 취소', created: '최초 등록', updated: '내용 수정', cancelled: '전체 취소' };
+                histEl.innerHTML = msState.selectedHistory.map(ev => {
+                    const lbl = evtLabels[ev.type] || ev.type || '변경';
+                    const bTx = ev.before?.totals?.transaction_amount;
+                    const aTx = ev.after?.totals?.transaction_amount;
+                    const amtDiff = (bTx != null && aTx != null && bTx !== aTx)
+                        ? ` · 거래합계 ${fmtWon(bTx)} → ${fmtWon(aTx)}`
+                        : (aTx != null ? ` · 거래합계 ${fmtWon(aTx)}` : '');
+                    const reasonHtml = ev.reason ? `<div class="text-[11px] text-slate-700 mt-0.5">사유: ${escapeHtml(ev.reason)}</div>` : '';
+                    return `
+                        <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-mono font-bold text-[10px]">v${escapeHtml(ev.revision)}</span>
+                                    <strong class="text-slate-900">${escapeHtml(lbl)}</strong>
+                                    <span class="text-[11px] text-slate-500">${escapeHtml(amtDiff)}</span>
+                                </div>
+                                <span class="font-mono text-[10px] text-slate-400">${escapeHtml(ev.created_at || '')}</span>
+                            </div>
+                            ${reasonHtml}
+                        </div>
+                    `;
+                }).join('') || '<div class="text-slate-400 text-xs">이력이 없습니다.</div>';
+            }
+        }
+
+        function toggleManualSaleCancelPanel(show) {
+            const panel = document.getElementById('msCancelPanel');
+            const inp = document.getElementById('msCancelReasonInput');
+            if (!panel) return;
+            if (show) {
+                const pending = msState.pendingOperation;
+                if (pending) {
+                    const isSameCancel = pending.operation === 'cancel' && pending.hasPayload && msState.selectedSale && pending.targetSaleId === msState.selectedSale.sale_id;
+                    syncManualSalesRecoveryUI();
+                    if (isSameCancel) {
+                        panel.classList.remove('hidden');
+                        return;
+                    }
+                    msShowAlert(`결과가 확인되지 않은 이전 ${msOpLabel(pending.operation)} 요청을 먼저 확인해야 취소를 시작할 수 있습니다.`, 'warning');
+                    return;
+                }
+                if (inp) inp.value = '';
+                panel.classList.remove('hidden');
+                setTimeout(() => inp?.focus(), 30);
+            } else {
+                panel.classList.add('hidden');
+            }
+        }
+
+        async function submitManualSaleCancel() {
+            const sale = msState.selectedSale;
+            if (msState.isSubmitting) return;
+
+            // 공통 pendingOperation 보호: 취소 결과 불명 시 새 key/옛 revision 충돌을 방지하고 동일 key·본문만 재시도
+            if (msState.pendingOperation) {
+                const pending = msState.pendingOperation;
+                syncManualSalesRecoveryUI();
+                if (pending.operation === 'cancel' && pending.hasPayload && sale && pending.targetSaleId === sale.sale_id) {
+                    await executeManualSaleMutation(pending);
+                } else {
+                    msShowAlert(`결과가 확인되지 않은 이전 ${msOpLabel(pending.operation)} 요청이 있습니다. 먼저 상단의 "처리 결과 확인"을 눌러주세요.`, 'warning');
+                }
+                return;
+            }
+
+            if (!sale) return;
+            const reason = (document.getElementById('msCancelReasonInput')?.value || '').trim();
+            if (!reason) {
+                msShowAlert('전체 취소 사유를 입력하세요.', 'error');
+                return;
+            }
+            const epoch = msSessionEpoch;
+            const ok = await showConfirmModal(
+                `[${sale.sale_date} · ${sale.counterparty?.name || ''}] 판매기록을 전체 취소하시겠습니까?\n(실제 현금환불 완료와는 별개이며, 취소 이력이 보존됩니다)`,
+                { title: '판매기록 전체 취소 확인', okText: '전체 취소 실행', danger: true }
+            );
+            if (!ok || msIsSessionStale(epoch) || msState.pendingOperation) return;
+
+            const key = generateManualSalesIdemKey();
+            const opInfo = Object.freeze({
+                key,
+                operation: 'cancel',
+                targetSaleId: sale.sale_id,
+                expectedRevision: sale.revision,
+                payloadJson: JSON.stringify({
+                    expected_revision: sale.revision,
+                    reason
+                }),
+                hasPayload: true,
+                state: 'in_flight',
+                lastChecked404: false
+            });
+            msState.pendingOperation = opInfo;
+            msPersistOpaquePendingKey(opInfo);
+            await executeManualSaleMutation(opInfo);
         }
 
         // 초기화

@@ -1,0 +1,1 @@
+"""Food business management automation."""
