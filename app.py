@@ -4852,7 +4852,7 @@ HTML_TEMPLATE = r"""
                 <div class="flex items-center space-x-1.5">
                     <span class="text-slate-500 whitespace-nowrap">출고</span>
                     <span id="statTotalSales7d" class="font-bold font-mono text-slate-900 whitespace-nowrap">7일 0개</span>
-                    <span class="text-slate-400 text-[11px]">/ 30일 <span class="whitespace-nowrap"><span id="statTotalSales30d" class="font-mono text-slate-700">0</span>개</span></span>
+                    <span class="text-slate-400 text-[11px]">/ 30일 <span id="statTotalSales30d" class="font-mono text-slate-700 whitespace-nowrap">0개</span></span>
                     <span id="statSalesSubtext" class="text-slate-400 text-[11px] hidden lg:inline"></span>
                 </div>
             </div>
@@ -7967,9 +7967,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     </div>
                     <div class="${m.is_no_sales ? 'bg-orange-50/50 border-orange-200' : 'bg-slate-50/70 border-slate-200'} border rounded-xl px-3 py-2">
                         <div class="text-[10px] font-semibold ${m.is_no_sales ? 'text-orange-800' : 'text-slate-500'}">출고 속도 · 통합</div>
-                        <div class="font-bold font-mono text-sm ${m.is_no_sales ? 'text-orange-950' : 'text-slate-900'} mt-0.5">일 ${displayInventoryMetric(m.daily_sales)}개</div>
-                        <div class="text-[10px] ${m.is_no_sales ? 'text-orange-700' : 'text-slate-500'} truncate">7일 ${displayInventoryMetric(m.total_sales_7d)} · 30일 ${displayInventoryMetric(m.total_sales_30d)}</div>
-                        <div class="text-[11px] text-slate-400 truncate mt-0.5 font-mono">쿠팡 ${displayInventoryMetric(m.coupang_sales_7d)}/${displayInventoryMetric(m.coupang_sales_30d)} · 타 ${displayInventoryMetric(m.other_sales_7d)}/${displayInventoryMetric(m.other_sales_30d)}</div>
+                        <div class="font-bold font-mono text-sm ${m.is_no_sales ? 'text-orange-950' : 'text-slate-900'} mt-0.5">일 ${displayInventoryMetric(m.daily_sales, '개')}</div>
+                        <div class="text-[10px] ${m.is_no_sales ? 'text-orange-700' : 'text-slate-500'} truncate">7일 ${displayInventoryMetric(m.total_sales_7d, '개')} · 30일 ${displayInventoryMetric(m.total_sales_30d, '개')}</div>
+                        <div class="text-[11px] text-slate-400 truncate mt-0.5 font-mono">쿠팡 7일 ${displayInventoryMetric(m.coupang_sales_7d)} / 30일 ${displayInventoryMetric(m.coupang_sales_30d)} · 타 7일 ${displayInventoryMetric(m.other_sales_7d)} / 30일 ${displayInventoryMetric(m.other_sales_30d)}</div>
                     </div>
                 </div>
             `;
@@ -8052,7 +8052,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                 <i class="fa-solid fa-chart-pie text-slate-500 mt-0.5 shrink-0"></i>
                                 <div class="min-w-0 break-words leading-relaxed">
                                     <span class="font-bold text-slate-800">소진 시뮬레이션:</span>
-                                    <span>일평균 <strong>${displayInventoryMetric(m.daily_sales)}개</strong> 기준, 최단기한(<strong>${escapeHtml(m.nearest_expiry_date)}</strong>, D-${m.nearest_days_left}일)까지 <strong>${displayInventoryMetric(m.projected_sales_to_exp)}개</strong> 소진 예상 (로트 ${m.nearest_lot_stock}개)</span>
+                                    <span>일평균 <strong>${displayInventoryMetric(m.daily_sales, '개')}</strong> 기준, 최단기한(<strong>${escapeHtml(m.nearest_expiry_date)}</strong>, D-${m.nearest_days_left}일)까지 <strong>${displayInventoryMetric(m.projected_sales_to_exp, '개')}</strong> 소진 예상 (로트 ${m.nearest_lot_stock}개)</span>
                                 </div>
                             </div>
                             <div>
@@ -8087,9 +8087,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         <span>
                             <i class="fa-solid fa-truck-fast mr-1 text-slate-500"></i>
                             <span class="font-bold text-slate-900">쿠팡 출고:</span>
-                            7일 <strong>${displayInventoryMetric(m.coupang_sales_7d)}개</strong> / 30일 <strong>${displayInventoryMetric(m.coupang_sales_30d)}개</strong>
+                            7일 <strong>${displayInventoryMetric(m.coupang_sales_7d, '개')}</strong> / 30일 <strong>${displayInventoryMetric(m.coupang_sales_30d, '개')}</strong>
                         </span>
-                        <span class="text-[10px] font-mono text-slate-500">일평균 <strong class="text-slate-700">${displayInventoryMetric(m.coupang_daily)}개</strong>${(m.coupang_return_sales_7d || 0) > 0 ? ` · 🔄 반품출고 7일 ${displayInventoryMetric(m.coupang_return_sales_7d)}개` : ''}</span>
+                        <span class="text-[10px] font-mono text-slate-500">일평균 <strong class="text-slate-700">${displayInventoryMetric(m.coupang_daily, '개')}</strong>${(m.coupang_return_sales_7d || 0) > 0 ? ` · 🔄 반품출고 7일 ${displayInventoryMetric(m.coupang_return_sales_7d, '개')}` : ''}</span>
                     </div>
                     ${bundleGroups.length > 0 ? `
                         <div class="flex flex-wrap gap-1.5">
@@ -8137,7 +8137,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
                     <div class="space-y-1.5">
                         <div class="text-[11px] font-bold text-slate-800 flex flex-wrap items-center justify-between gap-1">
-                            <span><i class="fa-solid fa-receipt mr-1 text-slate-500"></i>쿠팡외 출고: 7일 <strong>${displayInventoryMetric(m.other_sales_7d)}개</strong> / 30일 <strong>${displayInventoryMetric(m.other_sales_30d)}개</strong></span>
+                            <span><i class="fa-solid fa-receipt mr-1 text-slate-500"></i>쿠팡외 출고: 7일 <strong>${displayInventoryMetric(m.other_sales_7d, '개')}</strong> / 30일 <strong>${displayInventoryMetric(m.other_sales_30d, '개')}</strong></span>
                             ${recentOrders.length > 0 ? `<span class="text-[10px] text-slate-400 font-normal">최근 주문 ${recentOrders.length}건</span>` : ''}
                         </div>
                         ${recentOrders.length > 0 ? `
@@ -8631,16 +8631,23 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     elTotalStockCost.innerText = `원가 약 ${(tCost / 100000000).toFixed(2)}억 원`;
                     elTotalStockCost.title = `총 가용재고 실물 원가 합계: ${fmtWon(tCost)}`;
                 }
-                document.getElementById('statTotalSales7d').innerText = `7일 ${displayInventoryMetric(data.stats.total_sales_7d)}개`;
+                const elSales7 = document.getElementById('statTotalSales7d');
+                if (elSales7) {
+                    const v7 = inventoryMetric(data.stats.total_sales_7d);
+                    elSales7.innerText = v7 === null ? '7일 미산출' : `7일 ${v7.toLocaleString()}개`;
+                }
                 const elSales30 = document.getElementById('statTotalSales30d');
-                if (elSales30) elSales30.innerText = displayInventoryMetric(data.stats.total_sales_30d);
+                if (elSales30) {
+                    const v30 = inventoryMetric(data.stats.total_sales_30d);
+                    elSales30.innerText = v30 === null ? '미산출' : `${v30.toLocaleString()}개`;
+                }
                 const elSalesSub = document.getElementById('statSalesSubtext');
                 if (elSalesSub) {
-                    const c7 = data.stats.total_coupang_7d || 0;
-                    const c30 = data.stats.total_coupang_30d || 0;
-                    const o7 = data.stats.total_other_7d || 0;
-                    const o30 = data.stats.total_other_30d || 0;
-                    elSalesSub.innerText = `(쿠팡 7일 ${c7}/${c30} + 타채널 7일 ${o7}/${o30})`;
+                    const c7Text = displayInventoryMetric(data.stats.total_coupang_7d);
+                    const c30Text = displayInventoryMetric(data.stats.total_coupang_30d);
+                    const o7Text = displayInventoryMetric(data.stats.total_other_7d);
+                    const o30Text = displayInventoryMetric(data.stats.total_other_30d);
+                    elSalesSub.innerText = `(쿠팡 7일 ${c7Text} / 30일 ${c30Text} + 타채널 7일 ${o7Text} / 30일 ${o30Text})`;
                 }
 
                 // 4. 하단 소스 상태 배지
@@ -9005,22 +9012,23 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                             html += `<td class="${col.tdClass} overflow-hidden">${coupangRunwayHtml}</td>`;
                         }
                     } else if (colId === 'total_sales') {
-                        const s7 = displayInventoryMetric(m.total_sales_7d);
-                        const s30 = displayInventoryMetric(m.total_sales_30d);
+                        const s7Text = displayInventoryMetric(m.total_sales_7d, '개');
+                        const s30Text = displayInventoryMetric(m.total_sales_30d, '개');
+                        const dailyText = displayInventoryMetric(m.daily_sales, '개');
                         if (maskSalesCell) {
                             html += `
                                 <td class="${col.tdClass} overflow-hidden">
                                     <div class="masked-cell-value text-transparent select-none" aria-hidden="true">
-                                        <div class="font-bold font-mono truncate">${s7}개 <span class="font-normal text-[10px]">/ 30일 ${s30}개</span></div>
-                                        <div class="text-[11px] font-normal mt-0.5 truncate">가중 일평균 ${displayInventoryMetric(m.daily_sales)}개</div>
+                                        <div class="font-bold font-mono truncate">7일 ${s7Text} <span class="font-normal text-[10px]">/ 30일 ${s30Text}</span></div>
+                                        <div class="text-[11px] font-normal mt-0.5 truncate">가중 일평균 ${dailyText}</div>
                                     </div>
                                 </td>
                             `;
                         } else {
                             html += `
                                 <td class="${col.tdClass} overflow-hidden">
-                                    <div class="font-bold font-mono text-slate-900 truncate">${s7}개 <span class="text-slate-400 font-normal text-[10px]">/ 30일 ${s30}개</span></div>
-                                    <div class="text-[11px] text-slate-400 font-normal mt-0.5 truncate">가중 일평균 ${displayInventoryMetric(m.daily_sales)}개</div>
+                                    <div class="font-bold font-mono text-slate-900 truncate">7일 ${s7Text} <span class="text-slate-400 font-normal text-[10px]">/ 30일 ${s30Text}</span></div>
+                                    <div class="text-[11px] text-slate-400 font-normal mt-0.5 truncate">가중 일평균 ${dailyText}</div>
                                 </td>
                             `;
                         }
@@ -9174,7 +9182,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                     </div>
                                     <div class="text-right shrink-0 font-mono">
                                         <div class="text-xs ${hasStock ? 'font-bold text-slate-900' : 'font-medium text-slate-400'}">${opt.coupang_stock.toLocaleString()}세트 <span class="${hasStock ? 'font-semibold text-slate-600' : 'font-normal text-slate-400'}">(실물 ${opt.physical_stock.toLocaleString()}개)</span></div>
-                                        <div class="text-[10px] text-slate-500 mt-0.5">7일 출고 <span class="${(opt.sales_7d_physical || 0) > 0 ? 'font-bold text-slate-700' : 'text-slate-400'}">${displayInventoryMetric(opt.sales_7d_physical)}개</span>${opt.doc == null && hasStock ? ' · DOC 미산출' : (opt.doc > 0 && hasStock) ? ` · ${opt.doc}일분` : ''}</div>
+                                        <div class="text-[10px] text-slate-500 mt-0.5">7일 출고 <span class="${(opt.sales_7d_physical || 0) > 0 ? 'font-bold text-slate-700' : 'text-slate-400'}">${displayInventoryMetric(opt.sales_7d_physical, '개')}</span>${opt.doc == null && hasStock ? ' · DOC 미산출' : (opt.doc > 0 && hasStock) ? ` · ${opt.doc}일분` : ''}</div>
                                     </div>
                                 </div>
                             `;
@@ -9201,7 +9209,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                     </div>
                                     <div class="text-right shrink-0 font-mono">
                                         <div class="text-xs font-semibold text-slate-600">${opt.coupang_stock.toLocaleString()}세트 <span class="text-slate-500 font-normal">(반품 실물 ${opt.physical_stock.toLocaleString()}개)</span></div>
-                                        <div class="text-[10px] text-slate-400 mt-0.5">7일 출고 <strong class="text-slate-600">${displayInventoryMetric(opt.sales_7d_physical)}개</strong></div>
+                                        <div class="text-[10px] text-slate-400 mt-0.5">7일 출고 <strong class="text-slate-600">${displayInventoryMetric(opt.sales_7d_physical, '개')}</strong></div>
                                     </div>
                                 </div>
                             `;
@@ -9278,8 +9286,8 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 } else if (colId === 'total_sales') {
                     footHtml += `
                         <td class="py-2.5 px-2 text-right font-bold font-mono text-slate-900 text-xs overflow-hidden">
-                            <div class="truncate">7일 ${displayInventoryMetric(sumTotalSales)}개</div>
-                            <div class="text-[10px] text-slate-500 font-normal truncate">30일 ${displayInventoryMetric(sumTotalSales30d)}개</div>
+                            <div class="truncate">7일 ${displayInventoryMetric(sumTotalSales, '개')}</div>
+                            <div class="text-[10px] text-slate-500 font-normal truncate">30일 ${displayInventoryMetric(sumTotalSales30d, '개')}</div>
                         </td>
                     `;
                 } else if (colId === 'total_runway') {
@@ -11259,7 +11267,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     }
                     codeCell = `<div class="font-mono font-bold text-slate-900">${escapeHtml(row.option_id)}</div><div class="text-[10px] text-slate-600">${escapeHtml(row.option_name || '')}</div>${gradeChip}`;
                     const pidTxt = row.product_id ? ` · 등록ID ${escapeHtml(row.product_id)}` : '';
-                    infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock}세트 · 7일출고 ${displayInventoryMetric(row.sales_7d)}세트 (추천 ${row.guessedBundle}개입${pidTxt})</div>`;
+                    infoCell = `<div class="truncate max-w-[260px] text-slate-700" title="${escapeHtml(row.product_name)}">${escapeHtml(row.product_name || '상품명 미기재')}</div><div class="text-[10px] text-slate-500 font-mono">재고 ${row.stock}세트 · 7일출고 ${displayInventoryMetric(row.sales_7d, '세트')} (추천 ${row.guessedBundle}개입${pidTxt})</div>`;
                 }
 
                 let statusBadge = '';
@@ -12301,7 +12309,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 const csvIsRet = Boolean(cd && (cd.is_return || cGrade.includes('반품') || cGrade.toLowerCase().includes('return')));
                 const isRet = Boolean(opt.is_return || csvIsRet);
                 const csvInfo = cd
-                    ? `현재 ${cd.stock || 0}세트 · 7일출고 ${displayInventoryMetric(cd.sales_7d)}세트${gradeMissing && !isRet ? ' (등급미확인)' : ''}`
+                    ? `현재 ${cd.stock || 0}세트 · 7일출고 ${displayInventoryMetric(cd.sales_7d, '세트')}${gradeMissing && !isRet ? ' (등급미확인)' : ''}`
                     : 'CSV 미등록';
                 return `
                     <div class="flex flex-wrap items-center gap-2 bg-white border ${isRet ? 'border-slate-300 bg-slate-50/70' : 'border-slate-200'} rounded-lg p-2">
@@ -13220,9 +13228,10 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const number = Number(value);
             return Number.isFinite(number) ? number : null;
         }
-        function displayInventoryMetric(value) {
+        function displayInventoryMetric(value, unit = '') {
             const number = inventoryMetric(value);
-            return number === null ? '미산출' : number.toLocaleString();
+            if (number === null) return '미산출';
+            return unit ? `${number.toLocaleString()}${unit}` : number.toLocaleString();
         }
         function addInventoryMetric(a, b) {
             a = inventoryMetric(a); b = inventoryMetric(b);
