@@ -304,3 +304,11 @@
 3. Basis: 45 Naver rows 1,452,680 KRW; Cafe24 goods payments 126,000 KRW with refunds separate; do not mix with Coupang basis.
 4. Validation: identical workspace code py_compile passed and full web 93 tests passed (16.211s); candidate payload hashes and frontend evidence verified.
 5. Next: deploy code before generation 66c09a0f; preserve source/cost/refund limitations. Manual sales remains separate future work.
+
+
+## 2026-11-19 Mapping recovery diagnostics
+1. Change: server-only classified mapping restore diagnostics.
+2. File: cloud_storage.py; no additional requests or retry changes.
+3. Purpose: identify production stale stage without secrets or raw errors.
+4. Validation: isolated web109 and related18 passed; syntax passed; original master hash unchanged.
+5. Pending: observe Render diagnostic before publishing fixed approved generation.

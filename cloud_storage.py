@@ -11,7 +11,17 @@ import re
 from pathlib import Path, PurePosixPath
 import time
 import urllib.request
+import urllib.error
+import logging
 from datetime import datetime, timezone
+
+
+def mapping_log(diagnostic):
+    """Server-side only; diagnostics must never turn a successful restore into failure."""
+    try:
+        logging.getLogger(__name__).warning('Cloud mapping diagnostic %s', json.dumps(diagnostic, sort_keys=True))
+    except Exception:
+        pass
 
 
 def load_cloud_env(root):
@@ -114,6 +124,28 @@ def atomic_write(path, data):
         temporary.unlink(missing_ok=True)
 
 
+class CloudRequestError(RuntimeError):
+    """Allowlisted diagnostic only; never retain a response, URL or exception text."""
+    def __init__(self, reason, http_status=None):
+        super().__init__('Cloud request failed: ' + reason)
+        self.reason = reason
+        self.http_status = http_status
+
+
+def request_failure(exc):
+    if isinstance(exc, CloudRequestError):
+        return exc
+    if isinstance(exc, urllib.error.HTTPError):
+        return CloudRequestError('authentication_rejected' if exc.code in (401, 403) else 'http_error', exc.code)
+    if isinstance(exc, TimeoutError) or (isinstance(exc, urllib.error.URLError) and isinstance(exc.reason, TimeoutError)):
+        return CloudRequestError('timeout')
+    if isinstance(exc, (json.JSONDecodeError, UnicodeError)):
+        return CloudRequestError('invalid_json_response')
+    if isinstance(exc, (urllib.error.URLError, OSError)):
+        return CloudRequestError('connection_failed')
+    return CloudRequestError('request_failed')
+
+
 class CloudStore:
     def __init__(self, mode=None, folder=None, url=None, token=None, timeout=90):
         self.url = url if url is not None else os.environ.get('GOOGLE_APPS_SCRIPT_URL', '').strip()
@@ -122,10 +154,13 @@ class CloudStore:
         selected = mode or os.environ.get('CLOUD_SYNC_MODE', 'auto').lower()
         self.mode = ('gas' if self.url and self.token else 'local' if os.environ.get('CLOUD_DRIVE_DIR') else 'off') if selected == 'auto' else selected
         if self.mode not in ('gas', 'local', 'off'):
+            mapping_log(dict(kind='cloud_mapping_recovery', stage='configuration', reason='invalid_mode'))
             raise ValueError('CLOUD_SYNC_MODE must be auto/gas/local/off')
         if self.mode == 'gas' and not (self.url.startswith('https://') and self.token):
+            mapping_log(dict(kind='cloud_mapping_recovery', stage='configuration', reason='missing_or_invalid_configuration'))
             raise ValueError('Apps Script HTTPS URL and token are required')
         if self.mode == 'local' and folder is None and not os.environ.get('CLOUD_DRIVE_DIR'):
+            mapping_log(dict(kind='cloud_mapping_recovery', stage='configuration', reason='local_path_missing'))
             raise ValueError('CLOUD_DRIVE_DIR is required')
         self.timeout = timeout
 
@@ -141,12 +176,18 @@ class CloudStore:
                 with urllib.request.urlopen(req, timeout=self.timeout) as response:
                     result = json.load(response)
                 if not isinstance(result, dict) or not result.get('success'):
-                    # Do not expose URL/token or remote response content in pipeline logs.
-                    raise RuntimeError('Drive bridge rejected action: ' + action)
+                    # Inspect only for classification. Never retain or log remote text.
+                    message = result.get('error', '') if isinstance(result, dict) else ''
+                    message = message.lower() if isinstance(message, str) else ''
+                    reason = ('authentication_rejected' if message.startswith('unauthorized') else
+                              'unsupported_action' if message.startswith(('unknown action', 'unknown backup action')) else
+                              'object_missing' if message == 'object not found' else
+                              'bridge_rejected' if isinstance(result, dict) else 'invalid_response')
+                    raise CloudRequestError(reason)
                 return result
-            except Exception:
+            except Exception as exc:
                 if attempt == 2:
-                    raise RuntimeError('Drive bridge request failed: ' + action) from None
+                    raise request_failure(exc) from None
                 time.sleep(attempt + 1)
 
     def manifest(self, revision=None):
@@ -258,12 +299,65 @@ def backup(root, store, dry_run=False):
 
 
 def restore_latest(root, store):
+    """Existing restore with server-log-only diagnostics; no additional remote calls."""
+    trace = dict(stage='backup_manifest', object_kind='none', manifest_status='not_checked')
+    failure = None
+    try:
+        result = _restore_latest(root, store, trace)
+        return result
+    except Exception as exc:
+        failure = exc
+        raise
+    finally:
+        # Mapping verification is local and diagnostic only. Restore selection,
+        # all-object-before-write behavior and consumer bindings remain unchanged.
+        mapping = dict(mapping_status='not_checked', mapping_sha_verified=False,
+                       mapping_parse_verified=False, mapping_content_sha256=None,
+                       gaemi_keys=None, coupang_keys=None)
+        entry = trace.pop('mapping_entry', None)
+        if trace['manifest_status'] == 'received':
+            mapping['mapping_status'] = 'not_in_manifest' if entry is None else 'cache_missing'
+            if entry is not None:
+                try:
+                    path = Path(root) / 'master_data/오키드상품정보.xlsx'
+                    if path.is_file():
+                        content = path.read_bytes()
+                        if digest(content) != entry['sha256'] or len(content) != entry['size']:
+                            mapping['mapping_status'] = 'cache_integrity_mismatch'
+                        else:
+                            mapping.update(mapping_sha_verified=True, mapping_status='mapping_invalid',
+                                           mapping_content_sha256=digest(content))
+                            allowed = inventory_allowlist(path)
+                            mapping.update(mapping_status='verified', mapping_parse_verified=True,
+                                           gaemi_keys=len(allowed['gaemi']), coupang_keys=len(allowed['coupang']))
+                except Exception:
+                    # Diagnostic failure must not alter the existing restore outcome.
+                    if mapping['mapping_status'] != 'mapping_invalid':
+                        mapping['mapping_status'] = 'cache_check_failed'
+        diagnostic = dict(kind='cloud_mapping_recovery', **trace, **mapping,
+                          restore_outcome='failed' if failure else result['status'],
+                          reason=(failure.reason if isinstance(failure, CloudRequestError) else
+                                  'validation_failed' if isinstance(failure, (ValueError, KeyError, TypeError)) else
+                                  'cache_io_failed' if isinstance(failure, OSError) else
+                                  'restore_failed' if failure else 'none'),
+                          http_status=failure.http_status if isinstance(failure, CloudRequestError) else None)
+        mapping_log(diagnostic)
+
+
+def _restore_latest(root, store, trace):
     """Refresh dashboard/reports/mapping/raw stock, preserving live admin state."""
     root = Path(root)
     manifest = store.manifest()
     if not manifest:
+        trace['manifest_status'] = 'empty'
         return dict(status='empty', restored=0)
+    trace['stage'] = 'manifest_validation'
+    if not isinstance(manifest, dict) or not isinstance(manifest.get('files'), dict):
+        trace['manifest_status'] = 'invalid'
+        raise ValueError('Invalid cloud manifest shape')
+    trace['manifest_status'] = 'received'
     files = manifest.get('files', {})
+    trace['mapping_entry'] = files.get('master_data/오키드상품정보.xlsx')
     dashboard_key = 'web_dashboard/dashboard_data.json'
     if dashboard_key not in files:
         raise ValueError('Cloud manifest has no dashboard')
@@ -289,6 +383,11 @@ def restore_latest(root, store):
             selected.add(max(stock, key=lambda p: (PurePosixPath(p).name[:10], files[p].get('mtime_ns', 0))))
     pending = []
     for relative in sorted(selected):
+        trace['stage'] = 'backup_get'
+        trace['object_kind'] = ('whitelist' if relative == 'master_data/오키드상품정보.xlsx' else
+                                'master_other' if relative.startswith('master_data/') else
+                                'report' if relative.startswith('output_excel/') else
+                                'inventory' if relative.startswith('raw_data/inventory/') else 'dashboard')
         path = safe_path(root, relative)
         entry = files[relative]
         if path.exists() and digest(path.read_bytes()) == entry['sha256']:
@@ -302,8 +401,11 @@ def restore_latest(root, store):
                 raise ValueError('Invalid cloud dashboard')
         pending.append((relative, path, content))
     # Validate every object before writes. Publish dashboard last.
+    trace['stage'] = 'cache_write'
     for relative, path, content in sorted(pending, key=lambda row: row[0] == dashboard_key):
         atomic_write(path, content)
+    trace['stage'] = 'complete'
+    trace['object_kind'] = 'none'
     return dict(status='synced', restored=len(pending), revision=manifest['revision'],
                 report_date=manifest['report_date'], created_at=manifest['created_at'])
 
