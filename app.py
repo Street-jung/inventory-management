@@ -393,27 +393,34 @@ def refresh_cloud_files(force=False):
             cloud_read_state['status'] = 'disabled'
             return
         cache = Path(os.environ.get('CLOUD_CACHE_DIR') or Path(BASE_DIR) / '.cloud_cache')
+        try:
+            from mapping_seed_runtime_probe import log_once
+            log_once(app, BASE_DIR, cache, is_generation_configured())
+        except Exception:
+            pass
         result = restore_latest(cache, store)
         cloud_read_state.update(result)
         if result['status'] in ('synced', 'local_newer'):
             # 1. 재고 원천 및 채널 화이트리스트는 항상 클라우드 캐시에서 갱신 (재고 동기화 보존)
-            app.config['INVENTORY_RAW_DIR'] = str(cache / 'raw_data/inventory')
+            if not result.get('mapping_seed_only'):
+                app.config['INVENTORY_RAW_DIR'] = str(cache / 'raw_data/inventory')
             app.config['CHANNEL_WHITELIST_FILE'] = str(cache / 'master_data/오키드상품정보.xlsx')
 
             # 2. 고정 / 명시적 릴리스 모드 보호:
             # DASHBOARD_DATA_FILE이 환경변수 또는 고정 릴리스 설정으로 명시된 경우 구버전 클라우드 캐시로 덮어쓰지 않음
-            explicit_json = os.environ.get('DASHBOARD_DATA_FILE') or (app.config.get('DASHBOARD_DATA_FILE') if app.config.get('FIXED_RELEASE_DATA') else None)
-            if explicit_json:
-                app.config['DASHBOARD_DATA_FILE'] = explicit_json
-            else:
-                app.config['DASHBOARD_DATA_FILE'] = str(cache / 'web_dashboard/dashboard_data.json')
+            if not result.get('mapping_seed_only'):
+                explicit_json = os.environ.get('DASHBOARD_DATA_FILE') or (app.config.get('DASHBOARD_DATA_FILE') if app.config.get('FIXED_RELEASE_DATA') else None)
+                if explicit_json:
+                    app.config['DASHBOARD_DATA_FILE'] = explicit_json
+                else:
+                    app.config['DASHBOARD_DATA_FILE'] = str(cache / 'web_dashboard/dashboard_data.json')
 
-            # PNL_OUTPUT_DIR이 환경변수 또는 고정 릴리스 설정으로 명시된 경우 구버전 클라우드 캐시로 덮어쓰지 않음
-            explicit_pnl = os.environ.get('PNL_OUTPUT_DIR') or (app.config.get('PNL_OUTPUT_DIR') if app.config.get('FIXED_RELEASE_DATA') else None)
-            if explicit_pnl:
-                app.config['PNL_OUTPUT_DIR'] = explicit_pnl
-            else:
-                app.config['PNL_OUTPUT_DIR'] = str(cache / 'output_excel')
+                # PNL_OUTPUT_DIR이 환경변수 또는 고정 릴리스 설정으로 명시된 경우 구버전 클라우드 캐시로 덮어쓰지 않음
+                explicit_pnl = os.environ.get('PNL_OUTPUT_DIR') or (app.config.get('PNL_OUTPUT_DIR') if app.config.get('FIXED_RELEASE_DATA') else None)
+                if explicit_pnl:
+                    app.config['PNL_OUTPUT_DIR'] = explicit_pnl
+                else:
+                    app.config['PNL_OUTPUT_DIR'] = str(cache / 'output_excel')
 
             if result['status'] == 'synced':
                 cloud_read_state['last_success'] = now_kst().isoformat()

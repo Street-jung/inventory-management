@@ -312,3 +312,10 @@
 3. Purpose: identify production stale stage without secrets or raw errors.
 4. Validation: isolated web109 and related18 passed; syntax passed; original master hash unchanged.
 5. Pending: observe Render diagnostic before publishing fixed approved generation.
+
+### 2026-11-19 — 필수2개 매핑 seed 보호·진단 통합 준비(백엔드)
+1. 작업: exact seed의 기존 매핑 충돌/읽기실패를 newer·synced 공통 사전검사에서 거부. 승인본은 재조회/교체 생략, 부재만 SHA/size·파싱·28/39 검증 후 복원.
+2. 파일: app.py·cloud_storage.py·mapping_seed_runtime_probe.py, 로컬 test_mapping_seed_safety.py. raw/JSON/PNL 경로보존·1회 비공개 진단 통합. 배포 허용목록은 코드3개와 개발일지 append만.
+3. 결정: 보호코드+진단 한 번 배포 후 새 worker의 seed 전 기준상태를 기록하고 총괄 검토 뒤 seed. 복귀는 seed 참조 해제→이전 코드→새 worker의 기존 관리자 Drive/generation 재복원이며 이전 메모리/임시파일 복제 아님.
+4. 검증: 실제 변경본 필수문법 통과, 전체웹115개 1회 중113개 통과/격리용 boot skip 플래그로 기존모의2개 실패. 플래그 제거 후 실패2개만 재검증하여 통과(0.907초). 신규6개 보호테스트 전체실행에 포함해 통과. 원본master·고정소스/후보 등10개SHA 불변, 임시 DATA_FILE/수기원장·DNS/socket차단. 최초실패로그 보존/전체 재실행 없음.
+5. 남음: 총괄의 기준HEAD/허용파일SHA 검토→향후 코드배포/새worker진단→총괄판단→필수2개 seed. 운영repo 쓰기/push/배포/환경/Drive쓰기/금융게시/재집계/새후보생성 미실행. 상세 operations_mapping_seed_plan.md.

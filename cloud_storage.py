@@ -344,6 +344,68 @@ def restore_latest(root, store):
         mapping_log(diagnostic)
 
 
+
+def _approved_mapping_seed(files):
+    expected = {
+        'master_data/오키드상품정보.xlsx': ('28ab9778362c8fe15cd4dc4f877f48e4744035ef21ad16dbe36277655caa869c', 138381),
+        'web_dashboard/dashboard_data.json': ('bda98a5fa8c08cbff6f39701806d83802a4d3d67b1845abcb856c38b42785380', 1798866),
+    }
+    return set(files) == set(expected) and all(isinstance(files[k], dict) and
+        (files[k].get('sha256'), files[k].get('size')) == value for k, value in expected.items())
+
+
+def _validate_seed_mapping(content):
+    import tempfile
+    with tempfile.TemporaryDirectory() as folder:
+        candidate = Path(folder) / 'mapping.xlsx'
+        candidate.write_bytes(content)
+        allowed = inventory_allowlist(candidate)
+        if (len(allowed['gaemi']), len(allowed['coupang'])) != (28, 39):
+            raise ValueError('Seed mapping key mismatch')
+
+
+def _seed_existing_mapping(root, files):
+    """Fail closed before any object fetch when the existing mapping conflicts."""
+    import stat
+    key = 'master_data/오키드상품정보.xlsx'
+    path = Path(root) / key
+    safe_path(root, key)
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise ValueError('Seed mapping unreadable') from None
+    if not stat.S_ISREG(mode):
+        raise ValueError('Seed mapping unreadable')
+    try:
+        existing = path.read_bytes()
+    except OSError:
+        raise ValueError('Seed mapping unreadable') from None
+    entry = files[key]
+    if digest(existing) != entry['sha256'] or len(existing) != entry['size']:
+        raise ValueError('Seed mapping conflicts with approved artifact')
+    _validate_seed_mapping(existing)
+    return existing
+
+
+def _seed_preserve_newer_dashboard(root, store, files, existing):
+    key = 'master_data/오키드상품정보.xlsx'
+    path = safe_path(root, key)
+    entry = files[key]
+    if existing is not None:
+        return dict(status='local_newer', restored=0, mapping_seed_only=True)
+    content = store.get(entry['sha256'])
+    if digest(content) != entry['sha256'] or len(content) != entry['size']:
+        raise ValueError('Seed mapping integrity mismatch')
+    _validate_seed_mapping(content)
+    # Do not replace a conflicting file that appeared during the fetch.
+    if _seed_existing_mapping(root, files) is None:
+        atomic_write(path, content)
+        return dict(status='local_newer', restored=1, mapping_seed_only=True)
+    return dict(status='local_newer', restored=0, mapping_seed_only=True)
+
+
 def _restore_latest(root, store, trace):
     """Refresh dashboard/reports/mapping/raw stock, preserving live admin state."""
     root = Path(root)
@@ -358,6 +420,8 @@ def _restore_latest(root, store, trace):
     trace['manifest_status'] = 'received'
     files = manifest.get('files', {})
     trace['mapping_entry'] = files.get('master_data/오키드상품정보.xlsx')
+    mapping_seed_only = _approved_mapping_seed(files)
+    existing_seed_mapping = _seed_existing_mapping(root, files) if mapping_seed_only else None
     dashboard_key = 'web_dashboard/dashboard_data.json'
     if dashboard_key not in files:
         raise ValueError('Cloud manifest has no dashboard')
@@ -368,11 +432,11 @@ def _restore_latest(root, store, trace):
         except (ValueError, OSError):
             current = {}
         if current.get('metadata', {}).get('report_date', '') > manifest.get('report_date', ''):
-            return dict(status='local_newer', restored=0)
+            return _seed_preserve_newer_dashboard(root, store, files, existing_seed_mapping) if mapping_seed_only else dict(status='local_newer', restored=0)
         generated = current.get('metadata', {}).get('generated_at')
         if generated and manifest.get('dashboard_generated_at'):
             if datetime.fromisoformat(generated) > datetime.fromisoformat(manifest['dashboard_generated_at']):
-                return dict(status='local_newer', restored=0)
+                return _seed_preserve_newer_dashboard(root, store, files, existing_seed_mapping) if mapping_seed_only else dict(status='local_newer', restored=0)
     selected = {dashboard_key}
     selected.update(p for p in files if p.startswith('master_data/') and p.endswith('.xlsx'))
     selected.update(p for p in files if p.startswith('output_excel/') and p.endswith(('.xlsx', '.csv')))
@@ -395,19 +459,25 @@ def _restore_latest(root, store, trace):
         content = store.get(entry['sha256'])
         if len(content) != entry['size']:
             raise ValueError('Cloud object length mismatch')
+        if mapping_seed_only and relative == 'master_data/오키드상품정보.xlsx':
+            if digest(content) != entry['sha256']:
+                raise ValueError('Seed mapping integrity mismatch')
+            _validate_seed_mapping(content)
         if relative == dashboard_key:
             parsed = json.loads(content)
             if not isinstance(parsed.get('sales_profit'), dict) or parsed.get('metadata', {}).get('report_date') != manifest['report_date']:
                 raise ValueError('Invalid cloud dashboard')
         pending.append((relative, path, content))
     # Validate every object before writes. Publish dashboard last.
+    if mapping_seed_only:
+        _seed_existing_mapping(root, files)
     trace['stage'] = 'cache_write'
     for relative, path, content in sorted(pending, key=lambda row: row[0] == dashboard_key):
         atomic_write(path, content)
     trace['stage'] = 'complete'
     trace['object_kind'] = 'none'
     return dict(status='synced', restored=len(pending), revision=manifest['revision'],
-                report_date=manifest['report_date'], created_at=manifest['created_at'])
+                report_date=manifest['report_date'], created_at=manifest['created_at'], mapping_seed_only=mapping_seed_only)
 
 
 def restore_archive(destination, store, revision=None):
