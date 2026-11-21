@@ -4672,9 +4672,14 @@ HTML_TEMPLATE = r"""
                     </div>
                 </div>
 
-                <!-- 채널별 6개 상태 카드 그리드 (PC 6열, 태블릿 3열, 모바일 2열) -->
-                <div id="automationChannelCardsGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                <!-- 채널별 5개 상태 카드 그리드 (PC 5열, 태블릿 3열, 모바일 2열). 은행·홈택스는 아래 주간 업로드 행 -->
+                <div id="automationChannelCardsGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                     <!-- Cards dynamically populated by JS -->
+                </div>
+                <!-- 1-2. 홈택스·하나은행 자료 (주 1회 수동 업로드) 기준일 -->
+                <div class="border-t border-slate-100 pt-2.5 space-y-1.5">
+                    <div class="text-[11px] font-bold text-slate-700">홈택스·하나은행 자료 (주 1회 수동 업로드)</div>
+                    <div id="weeklyUploadStatusRow" class="grid grid-cols-1 sm:grid-cols-3 gap-2"></div>
                 </div>
             </div>
 
@@ -13465,8 +13470,8 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 { key: 'smartstore', name: '네이버 스마트스토어', icon: 'fa-store', color: 'text-emerald-600' },
                 { key: 'cafe24', name: '카페24 (자사몰)', icon: 'fa-globe', color: 'text-amber-600' },
                 { key: 'b2b', name: 'B2B / 수기매출', icon: 'fa-file-invoice', color: 'text-sky-600' },
-                { key: 'gaemi_inventory', name: '개미창고 WMS (재고)', icon: 'fa-warehouse', color: 'text-slate-600' },
-                { key: 'bank', name: '하나은행 (입출금)', icon: 'fa-building-columns', color: 'text-teal-600' }
+                { key: 'gaemi_inventory', name: '개미창고 WMS (재고)', icon: 'fa-warehouse', color: 'text-slate-600' }
+                // 하나은행·홈택스는 주 1회 수동 업로드로 전환: 자동수집 카드는 숨기고 아래 weeklyUploadStatusRow 에서 기준일을 표시한다.
             ];
 
             let hasFailed = false;
@@ -13539,11 +13544,81 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 }
             }
 
+            renderWeeklyUploadStatusRow(d);
             const overallTimesEl = document.getElementById('automationOverallTimes');
             if (overallTimesEl) {
                 const attTime = (autoStatus && (autoStatus.success_at || autoStatus.attempted_at)) ? formatKstTime(autoStatus.success_at || autoStatus.attempted_at) : '-';
                 overallTimesEl.innerText = `기준일: ${escapeHtml(overallBaseDate || d?.metadata?.report_date || '-')} · 수집: ${escapeHtml(attTime)}`;
             }
+        }
+
+        // 홈택스·하나은행 주간 수동 업로드: 자료 기준일과 갱신 필요 판정 (결측을 0이나 오늘 날짜로 바꾸지 않는다)
+        const WEEKLY_UPLOAD_STALE_DAYS = 8;
+        function weeklyUploadValidDate(value) {
+            return typeof value === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value) ? value : null;
+        }
+        function weeklyUploadDaysBetween(asOfStr, todayStr) {
+            const a = weeklyUploadValidDate(asOfStr);
+            const t = weeklyUploadValidDate(todayStr);
+            if (!a || !t) return null;
+            const ms = (s) => Date.UTC(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)));
+            return Math.round((ms(t) - ms(a)) / 86400000);
+        }
+        function resolveWeeklyUploadStatus(d, todayStr) {
+            const meta = (d && d.metadata) || {};
+            const us = (meta.upload_status && typeof meta.upload_status === 'object') ? meta.upload_status : null;
+            const defs = [
+                // 대체값은 은행 거래 최종일(bank_as_of)뿐이다. metadata.as_of 는 보고 기준일이지 홈택스 자료 날짜가 아니므로 홈택스는 대체하지 않는다.
+                { key: 'bank', label: '하나은행 거래내역', fallback: meta.bank_as_of },
+                { key: 'hometax_sales', label: '홈택스 매출 세금계산서', fallback: null },
+                { key: 'hometax_purchase', label: '홈택스 매입 세금계산서', fallback: null }
+            ];
+            return defs.map(def => {
+                let asOf = null;
+                let source = 'none';
+                if (us) {
+                    const item = us[def.key];
+                    asOf = weeklyUploadValidDate(item && item.as_of);
+                    if (asOf) source = 'upload_status';
+                } else {
+                    asOf = weeklyUploadValidDate(def.fallback);
+                    if (asOf) source = 'fallback';
+                }
+                const days = asOf ? weeklyUploadDaysBetween(asOf, todayStr) : null;
+                let state = 'unknown';
+                let badgeText = '미확인';
+                let badgeClass = 'bg-slate-100 text-slate-600 border border-slate-300';
+                if (days !== null && days >= 0) {
+                    if (days > WEEKLY_UPLOAD_STALE_DAYS) {
+                        state = 'stale';
+                        badgeText = '갱신 필요';
+                        badgeClass = 'bg-amber-100 text-amber-900 border border-amber-400';
+                    } else {
+                        state = 'ok';
+                        badgeText = '정상';
+                        badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+                    }
+                }
+                return { key: def.key, label: def.label, asOf, source, days, state, badgeText, badgeClass };
+            });
+        }
+        function renderWeeklyUploadStatusRow(d, todayStr) {
+            const el = document.getElementById('weeklyUploadStatusRow');
+            if (!el) return;
+            const today = todayStr || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+            const sourceNote = { upload_status: '주간 업로드 자료 기준', fallback: '은행 거래 최종일 기준 · 업로드 기준일 미확인', none: '업로드 자료 기준일을 확인하지 못함' };
+            el.innerHTML = resolveWeeklyUploadStatus(d, today).map(it => `
+                <div class="bg-slate-50/80 border border-slate-200/90 rounded-xl p-2.5 space-y-1 shadow-2xs">
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="font-bold text-slate-800 text-[11px] truncate" title="${escapeHtml(it.label)}">${escapeHtml(it.label)}</span>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${escapeHtml(it.badgeClass)} whitespace-nowrap shrink-0">${escapeHtml(it.badgeText)}</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[10px]">
+                        <span class="text-slate-400">자료 기준일</span>
+                        <span class="font-mono font-bold text-slate-800">${escapeHtml(it.asOf || '미확인')}</span>
+                    </div>
+                    <div class="text-[10px] text-slate-500 truncate">${escapeHtml(it.days !== null && it.days >= 0 ? it.days + '일 경과 · ' : '')}${escapeHtml(sourceNote[it.source])}</div>
+                </div>`).join('');
         }
 
         function cleanSettlementNote(note) {
