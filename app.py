@@ -4641,22 +4641,56 @@ HTML_TEMPLATE = r"""
                     </div>
                     <span class="text-slate-200 hidden sm:inline">|</span>
                     <div class="flex items-center space-x-1.5">
-                        <span class="text-slate-500">전월 대비(MoM)</span>
-                        <span id="salesMomBadge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">+12.4%</span>
+                        <span id="salesMomLabel" class="text-slate-500">전월 동일기간 대비</span>
+                        <span id="salesMomBadge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-300" title="전월 동일기간 자료 대기">비교 불가</span>
                     </div>
                     <span class="text-slate-200 hidden sm:inline">|</span>
                     <div class="flex items-center space-x-1.5">
                         <span id="salesTotalQtyLabel" class="text-slate-500">총 판매수량</span>
                         <span id="salesTotalQty" class="font-bold font-mono text-slate-900 text-sm">0개</span>
                         <span id="salesSkuCountBadge" class="text-slate-500 font-semibold text-[11px]">(판매 품목 36종)</span>
-                        <span class="text-slate-300">·</span>
-                        <span class="text-slate-400 text-[11px]"><span id="salesDailyLabel">일별</span>: <span id="salesDailyRevenue" class="font-mono text-slate-700 font-semibold">0원</span></span>
                     </div>
+                    <span id="salesDailyLabel" class="hidden"></span>
+                    <span id="salesDailyRevenue" class="hidden"></span>
                 </div>
                 <span id="salesReportPeriod" class="text-[11px] text-slate-400">일별 및 당월 누적 집계</span>
             </div>
 
-            <!-- 1-1. 채널별 자료 기준일 및 최종 갱신 상태 패널 (20년차 식품 MD 실무 판단 지표) -->
+            <!-- 1-0. 일일 핵심 KPI 스트립 (daily_kpi 제공 시 노출) -->
+            <div id="salesDailyKpiRow" class="hidden grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <!-- ① 일매출 카드 -->
+                <div class="bg-white rounded-xl border border-slate-200 p-3 shadow-xs space-y-1">
+                    <div class="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                        <span id="dailyKpiSalesTitle">일매출</span>
+                        <span id="dailyKpiCoupangStatus" class="hidden text-[10px] px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-300 font-medium">쿠팡 일별 미수집</span>
+                    </div>
+                    <div id="dailyKpiRevenue" class="text-lg sm:text-xl font-bold font-mono text-slate-900 leading-tight">0원</div>
+                    <div id="dailyKpiRevenueSub" class="text-[11px] text-slate-400 truncate"></div>
+                </div>
+                <!-- ② 전일 대비 카드 -->
+                <div class="bg-white rounded-xl border border-slate-200 p-3 shadow-xs space-y-1">
+                    <div class="text-[11px] font-semibold text-slate-500">전일 대비</div>
+                    <div id="dailyKpiDodValue" class="text-lg sm:text-xl font-bold font-mono text-slate-900 leading-tight">-</div>
+                    <div id="dailyKpiDodSub" class="text-[11px] text-slate-400 truncate"></div>
+                </div>
+                <!-- ③ 전주 동요일 대비 카드 -->
+                <div class="bg-white rounded-xl border border-slate-200 p-3 shadow-xs space-y-1">
+                    <div class="text-[11px] font-semibold text-slate-500">전주 동요일 대비</div>
+                    <div id="dailyKpiWowValue" class="text-lg sm:text-xl font-bold font-mono text-slate-900 leading-tight">-</div>
+                    <div id="dailyKpiWowSub" class="text-[11px] text-slate-400 truncate"></div>
+                </div>
+                <!-- ④ 일 기여이익 카드 -->
+                <div class="bg-white rounded-xl border border-slate-200 p-3 shadow-xs space-y-1">
+                    <div class="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                        <span>일 기여이익</span>
+                        <span id="dailyKpiProfitBadgeWrap"></span>
+                    </div>
+                    <div id="dailyKpiProfit" class="text-lg sm:text-xl font-bold font-mono text-slate-900 leading-tight">-</div>
+                    <div id="dailyKpiProfitSub" class="text-[11px] text-slate-400 truncate"></div>
+                </div>
+            </div>
+
+            <!-- 1-1. 채널별 자료 기준일 및 최종 갱신 상태 패널 -->
             <div id="channelAutomationStatusPanel" class="bg-white rounded-xl border border-slate-200 p-3 sm:p-3.5 shadow-xs space-y-2.5">
                 <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
                     <div class="flex flex-wrap items-center gap-2">
@@ -4665,21 +4699,15 @@ HTML_TEMPLATE = r"""
                         </div>
                         <span class="font-bold text-xs text-slate-900">채널별 자료 기준일 & 최종 갱신 상태</span>
                         <span id="automationMasterStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">자동 갱신 완료</span>
-                        <span class="text-[11px] text-slate-400 hidden sm:inline">· 20년차 MD 실무 확인: 판매일과 수집시각을 명확히 구분하며, 미수집·실패는 0원으로 왜곡하지 않습니다.</span>
                     </div>
                     <div class="flex items-center gap-2 text-[11px] text-slate-500">
                         <span id="automationOverallTimes">수집 시각: 확인 중...</span>
                     </div>
                 </div>
 
-                <!-- 채널별 5개 상태 카드 그리드 (PC 5열, 태블릿 3열, 모바일 2열). 은행·홈택스는 아래 주간 업로드 행 -->
-                <div id="automationChannelCardsGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                <!-- 채널별 4개 상태 카드 그리드 (PC 4열, 모바일 2열) -->
+                <div id="automationChannelCardsGrid" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-2">
                     <!-- Cards dynamically populated by JS -->
-                </div>
-                <!-- 1-2. 홈택스·하나은행 자료 (주 1회 수동 업로드) 기준일 -->
-                <div class="border-t border-slate-100 pt-2.5 space-y-1.5">
-                    <div class="text-[11px] font-bold text-slate-700">홈택스·하나은행 자료 (주 1회 수동 업로드)</div>
-                    <div id="weeklyUploadStatusRow" class="grid grid-cols-1 sm:grid-cols-3 gap-2"></div>
                 </div>
             </div>
 
@@ -4727,6 +4755,40 @@ HTML_TEMPLATE = r"""
                 </button>
             </div>
 
+            <!-- 2-1. B2B 수기 매출 내역 (사용자 엑셀 입력 → 매일 08:30 갱신 반영, metadata.b2b_manual) -->
+            <div id="b2bManualPanel" class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 shadow-xs space-y-2.5">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-bold text-xs text-slate-900">B2B 수기 매출 내역</span>
+                        <span class="text-[11px] text-slate-400">부가세 제외 · 입력 방법: PC 폴더 raw_data/b2b 에 날짜_b2b_sales.xlsx 로 저장 (템플릿 제공) · 매일 08:30 반영</span>
+                        <span id="b2bManualMeta" class="text-[11px] text-slate-500"></span>
+                    </div>
+                    <div class="flex items-center gap-2 text-[11px] text-slate-500">
+                        <label for="b2bManualMonth" class="text-slate-400">월</label>
+                        <select id="b2bManualMonth" class="border border-slate-300 rounded-lg px-2 py-1 text-[11px] bg-white"></select>
+                    </div>
+                </div>
+                <div id="b2bManualRejectedAlert" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-2.5 text-xs text-amber-900 space-y-1"></div>
+                <div id="b2bManualSummary" class="grid grid-cols-2 sm:grid-cols-4 gap-2"></div>
+                <div id="b2bManualEmpty" class="hidden text-[11px] text-slate-500"></div>
+                <div id="b2bManualMobileList" class="sm:hidden space-y-2"></div>
+                <div class="overflow-x-auto hidden sm:block">
+                    <table class="w-full text-[11px] text-left">
+                        <thead>
+                            <tr class="text-slate-400 border-b border-slate-200">
+                                <th class="py-1.5 pr-2 font-semibold">거래일</th>
+                                <th class="py-1.5 pr-2 font-semibold">업체명</th>
+                                <th class="py-1.5 pr-2 font-semibold">상품내역</th>
+                                <th class="py-1.5 pr-2 font-semibold text-right">거래금액(부가세 제외)</th>
+                                <th class="py-1.5 pr-2 font-semibold">세금계산서</th>
+                                <th class="py-1.5 font-semibold">메모</th>
+                            </tr>
+                        </thead>
+                        <tbody id="b2bManualTbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- 3. 중단 그리드 (일별 매출 추이 그래프 + TOP 10 상품 매출 랭킹) -->
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
                 <!-- 일별 매출 추이 그래프 (7 cols) -->
@@ -4760,6 +4822,26 @@ HTML_TEMPLATE = r"""
                     </div>
                 </div>
             </div>
+
+            <!-- 3-1. 원가 미확인 내역 접이식 (사유: 상품코드 미등록, 원가 누락/수식 오류) -->
+            <details id="costUnverifiedIssuesBox" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs text-amber-900 space-y-2 shadow-xs">
+                <summary id="costUnverifiedIssuesSummary" class="font-bold cursor-pointer text-amber-900 select-none">
+                    원가 미확인 0건 보기
+                </summary>
+                <div class="overflow-x-auto mt-2">
+                    <table class="w-full text-[11px] text-left border-collapse">
+                        <thead>
+                            <tr class="text-amber-800 border-b border-amber-200">
+                                <th class="py-1 px-2 font-semibold">채널</th>
+                                <th class="py-1 px-2 font-semibold font-mono">상품코드</th>
+                                <th class="py-1 px-2 font-semibold">사유</th>
+                            </tr>
+                        </thead>
+                        <tbody id="costUnverifiedIssuesTbody" class="divide-y divide-amber-200/60">
+                        </tbody>
+                    </table>
+                </div>
+            </details>
 
             <!-- 4. 하단 데이터 테이블: 상품별 상세 매출 테이블 + [미판매 품목(0원) 포함 보기] + [📥 매출 CSV 추출] -->
             <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
@@ -4815,6 +4897,12 @@ HTML_TEMPLATE = r"""
         {% endif %}
 
         <section id="tabContent_inventory" class="dashboard-tab-content space-y-3 {{ 'block' if is_share_mode else 'hidden' }}">
+
+        <!-- 재고 자료 수집 상태 (개미창고 WMS · 쿠팡 재고) -->
+        <div id="inventoryCollectionStatusBox" class="bg-white rounded-xl border border-slate-200 p-3 sm:p-3.5 shadow-xs space-y-1.5 hidden">
+            <div class="text-[11px] font-bold text-slate-700">재고 자료 수집 상태</div>
+            <div id="inventoryCollectionStatusRow" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+        </div>
 
         {% if not is_share_mode %}
         <!-- Google Drive 보호 잠금 배너 (부팅 복원 실패 시 자동 표시) -->
@@ -5135,6 +5223,11 @@ HTML_TEMPLATE = r"""
         <!-- 탭 3: 일일 현금흐름 & 정산 알람 (MD 실무자 맞춤형) -->
         <!-- ============================================================= -->
         <section id="tabContent_cashflow" class="dashboard-tab-content hidden space-y-3">
+            <!-- 주간 수동 업로드 자료 (홈택스·하나은행) 기준일 -->
+            <div class="bg-white rounded-xl border border-slate-200 p-3 sm:p-3.5 shadow-xs space-y-1.5">
+                <div class="text-[11px] font-bold text-slate-700">홈택스·하나은행 자료 (주 1회 수동 업로드)</div>
+                <div id="weeklyUploadStatusRow" class="grid grid-cols-1 sm:grid-cols-3 gap-2"></div>
+            </div>
             <!-- 1. 최상단 정산 데드라인 배너 (settlements 데이터) -->
             <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-3">
                 <div class="flex flex-wrap gap-2 items-center justify-between border-b border-slate-100 pb-2.5">
@@ -13073,39 +13166,40 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             };
         }
 
+        function getSalesChannelDisplayName(chFilter) {
+            if (!chFilter || chFilter === 'all') return '전체 채널';
+            if (chFilter === 'coupang_growth' || chFilter === 'rocket_growth' || chFilter === 'coupang') return '쿠팡 그로스';
+            if (chFilter === 'smartstore') return '스마트스토어';
+            if (chFilter === 'cafe24') return '카페24';
+            if (chFilter === 'b2b') return 'B2B';
+            return chFilter;
+        }
+
         function getSalesChannelMetricMeta(chFilter, activeMcChannel, isProvisional, isOptionQty, isUncombinedMc) {
+            const chName = getSalesChannelDisplayName(chFilter);
             if (chFilter === 'cafe24') {
-                const subLbl = activeMcChannel ? activeMcChannel.subtotalLabel : '검증된 부분합';
-                const isFull = activeMcChannel && activeMcChannel.state === 'full_verified';
                 return {
                     amountLabel: '상품결제금액',
                     qtyLabel: '주문수량',
                     aspLabel: '평균 상품단가',
                     sortNote: '상품결제금액 내림차순',
-                    tableTitle: '카페24 상품별 결제 내역 (배송·환불 별도)',
-                    trendTitle: '카페24 일별 상품결제 추이',
-                    footLabel: (skuCnt, orderCnt) => isFull
-                        ? `전건 소계 (${skuCnt}종 · ${orderCnt}건 · 배송/환불 별도)`
-                        : `${subLbl} (${skuCnt}종 · ${orderCnt}건 · 배송/환불 별도)`
+                    tableTitle: `${chName} 상품별 상세 실적`,
+                    trendTitle: `${chName} 일별 상품결제 추이`,
+                    footLabel: (skuCnt, orderCnt) => `${chName} 합계 (조회 ${skuCnt}건) · 배송/환불 별도`
                 };
             }
             if (chFilter === 'smartstore') {
-                const subLbl = activeMcChannel ? activeMcChannel.subtotalLabel : '잠정 부분합';
-                const isFull = activeMcChannel && activeMcChannel.state === 'full_verified';
-                const excCnt = activeMcChannel ? activeMcChannel.excludedCount : 0;
-                const incCnt = activeMcChannel ? activeMcChannel.includedCount : 0;
+                const excCnt = activeMcChannel ? (activeMcChannel.excludedCount || 0) : 0;
                 return {
                     amountLabel: '최종 상품금액',
                     qtyLabel: '주문수량',
                     aspLabel: '평균 상품단가',
                     sortNote: '최종 상품금액 내림차순',
-                    tableTitle: incCnt > 0
-                        ? `스마트스토어 상품별 내역 (${subLbl} · 반영 ${incCnt}건 / 제외 ${excCnt}건)`
-                        : '스마트스토어 상품별 내역',
-                    trendTitle: '스마트스토어 일별 최종 상품금액 추이',
-                    footLabel: (skuCnt, orderCnt) => isFull
-                        ? `전건 소계 (${skuCnt}종 · 반영 ${orderCnt}건)`
-                        : `${subLbl} (${skuCnt}종 · 반영 ${orderCnt}건 · 제외 ${excCnt}건 별도)`
+                    tableTitle: `${chName} 상품별 상세 실적`,
+                    trendTitle: `${chName} 일별 최종 상품금액 추이`,
+                    footLabel: (skuCnt, orderCnt) => excCnt > 0
+                        ? `${chName} 합계 (조회 ${skuCnt}건 · 반영 ${orderCnt}건 · 제외 ${excCnt}건 별도)`
+                        : `${chName} 합계 (조회 ${skuCnt}건)`
                 };
             }
             if (chFilter === 'b2b') {
@@ -13114,37 +13208,30 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     qtyLabel: '판매수량',
                     aspLabel: '평균단가',
                     sortNote: '매출액 내림차순',
-                    tableTitle: 'B2B 상품별 매출 내역',
-                    trendTitle: 'B2B 일별 매출 추이',
-                    footLabel: (skuCnt) => `B2B 합계 (조회 ${skuCnt}건)`
+                    tableTitle: `${chName} 상품별 상세 실적`,
+                    trendTitle: `${chName} 일별 매출 추이`,
+                    footLabel: (skuCnt) => `${chName} 합계 (조회 ${skuCnt}건)`
                 };
             }
-            if (isProvisional || isUncombinedMc) {
-                const isAllUncombined = chFilter === 'all' && isUncombinedMc;
+            if (chFilter === 'coupang_growth') {
                 return {
-                    amountLabel: '잠정매출액 (쿠폰 전)',
+                    amountLabel: isProvisional ? '잠정매출액 (쿠폰 전)' : '순매출액',
                     qtyLabel: isOptionQty ? '옵션 판매수량' : '판매수량',
                     aspLabel: isOptionQty ? '평균 옵션단가' : '평균단가(ASP)',
-                    sortNote: '잠정매출액 내림차순',
-                    tableTitle: isAllUncombined
-                        ? '쿠팡 상품별 상세 실적 (타채널 별도)'
-                        : '쿠팡 그로스 상품별 상세 실적',
-                    trendTitle: isAllUncombined
-                        ? '쿠팡 일별 매출 추이 (타채널 별도)'
-                        : '쿠팡 그로스 일별 매출 추이',
-                    footLabel: (skuCnt) => isAllUncombined
-                        ? `쿠팡 소계 (조회 ${skuCnt}건 · 타채널 별도)`
-                        : `쿠팡 그로스 합계 (조회 ${skuCnt}건)`
+                    sortNote: isProvisional ? '잠정매출액 내림차순' : '순매출액 내림차순',
+                    tableTitle: `${chName} 상품별 상세 실적`,
+                    trendTitle: `${chName} 일별 매출 추이`,
+                    footLabel: (skuCnt) => `${chName} 합계 (조회 ${skuCnt}건)`
                 };
             }
             return {
-                amountLabel: '순매출액',
-                qtyLabel: '판매수량',
-                aspLabel: '평균단가(ASP)',
-                sortNote: '순매출액 내림차순',
-                tableTitle: '상품별 상세 매출 및 판매 실적',
-                trendTitle: '일별 매출 추이',
-                footLabel: (skuCnt) => `합계 (조회 ${skuCnt}건)`
+                amountLabel: (isProvisional || isUncombinedMc) ? '잠정매출액 (쿠폰 전)' : '순매출액',
+                qtyLabel: isOptionQty ? '옵션 판매수량' : '판매수량',
+                aspLabel: isOptionQty ? '평균 옵션단가' : '평균단가(ASP)',
+                sortNote: (isProvisional || isUncombinedMc) ? '잠정매출액 내림차순' : '순매출액 내림차순',
+                tableTitle: `${chName} 상품별 상세 실적`,
+                trendTitle: isUncombinedMc ? '쿠팡 일별 매출 추이 (타채널 별도)' : '일별 매출 추이',
+                footLabel: (skuCnt) => `${chName} 합계 (조회 ${skuCnt}건)`
             };
         }
 
@@ -13275,7 +13362,239 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             }
         }
 
+        function mapDailyRefreshErrorCode(code) {
+            if (!code) return '';
+            const m = {
+                'COUPANG_LOGIN_LOCKED': '쿠팡 자동 로그인 잠김 — 계정 확인 후 해제 필요 (이전 자료 유지)',
+                'COUPANG_SECOND_FACTOR_REQUIRED': '쿠팡 2차 인증 필요 — 사용자 로그인 필요 (이전 자료 유지)',
+                'COUPANG_ACCESS_BLOCKED': '쿠팡 접속 차단(자동화 탐지) — 이전 자료 유지 (사용자 확인 필요)',
+                'COUPANG_LOGIN_UNVERIFIED': '쿠팡 로그인 확인 실패 — 이전 자료 유지 (자동 재시도 안 함)',
+                'COUPANG_MODAL_BLOCKED': '쿠팡 화면 안내창으로 수집 못함',
+                'COUPANG_COLLECTION_FAILED': '쿠팡 수집 실패',
+                'GW.IP_NOT_ALLOWED': '스마트스토어 API 호출 IP 미등록',
+                'http_403': '스마트스토어 인증 거부',
+                'api_collection_failed': '수집 실패'
+            };
+            return m[code] || '수집 실패(코드 확인 필요)';
+        }
+
+        function resolveKeptPreviousDailyRefreshState(code) {
+            const rawReason = mapDailyRefreshErrorCode(code);
+            const ensureRetainedPhrase = (r) => {
+                if (!r) return '이전 자료 유지';
+                if (r.includes('이전 자료 유지') || r.includes('이전 정상본 유지')) return r;
+                return `${r} — 이전 자료 유지`;
+            };
+            if (code === 'COUPANG_SECOND_FACTOR_REQUIRED' || code === 'COUPANG_LOGIN_LOCKED') {
+                return {
+                    state: 'auth_required',
+                    stateLabel: '인증 필요',
+                    badgeClass: 'bg-amber-50 text-amber-800 border border-amber-300',
+                    dotColor: 'bg-amber-500',
+                    detailNote: ensureRetainedPhrase(rawReason)
+                };
+            }
+            if (code === 'COUPANG_LOGIN_UNVERIFIED' || code === 'COUPANG_ACCESS_BLOCKED') {
+                return {
+                    state: 'failed',
+                    stateLabel: '수집 실패',
+                    badgeClass: 'bg-rose-50 text-rose-700 border border-rose-300',
+                    dotColor: 'bg-rose-500',
+                    detailNote: ensureRetainedPhrase(rawReason)
+                };
+            }
+            return {
+                state: 'retained',
+                stateLabel: '이전 자료 유지',
+                badgeClass: 'bg-amber-100 text-amber-900 border border-amber-400 font-semibold',
+                dotColor: 'bg-amber-600',
+                detailNote: ensureRetainedPhrase(rawReason)
+            };
+        }
+
         function resolveChannelAutomationState(chKey, autoStatus, d) {
+            const dr = d?.metadata?.daily_refresh;
+            const drChannels = dr?.channels;
+            if (drChannels && typeof drChannels === 'object') {
+                const drBuiltAt = dr.built_at ? formatKstTime(dr.built_at) : '-';
+                const resolveDrItemTime = (item) => {
+                    if (item && item.collected_at) return formatKstTime(item.collected_at);
+                    return drBuiltAt;
+                };
+                const resolveDrCntStr = (item, isCoupang) => {
+                    if (!item || item.processed_count == null) return '집계 완료';
+                    return isCoupang ? `집계 자료 ${item.processed_count}행` : `${item.processed_count}건`;
+                };
+
+                // 쿠팡 계열: coupang_growth, coupang, coupang_wing
+                if (chKey === 'coupang_growth' || chKey === 'coupang' || chKey === 'coupang_wing') {
+                    const cSales = drChannels.coupang_sales || null;
+                    const cDaily = drChannels.coupang_sales_daily || null;
+                    if (cSales || cDaily) {
+                        const sourceAsOf = (cDaily && cDaily.source_as_of) || (cSales && cSales.source_as_of) || '-';
+                        const capturedAt = (cDaily && resolveDrItemTime(cDaily)) || (cSales && resolveDrItemTime(cSales)) || drBuiltAt;
+                        const sStatus = (cSales && cSales.status) || 'not_collected';
+                        const dStatus = (cDaily && cDaily.status) || 'not_collected';
+                        const dCnt = resolveDrCntStr(cDaily, true);
+                        const sCnt = resolveDrCntStr(cSales, true);
+                        const resolveCoupangErrorCode = (cd, cs) => {
+                            const cdCode = cd && cd.error_code;
+                            const csCode = cs && cs.error_code;
+                            const priorityCodes = [
+                                'COUPANG_SECOND_FACTOR_REQUIRED',
+                                'COUPANG_LOGIN_LOCKED',
+                                'COUPANG_ACCESS_BLOCKED',
+                                'COUPANG_LOGIN_UNVERIFIED',
+                                'COUPANG_MODAL_BLOCKED',
+                                'COUPANG_COLLECTION_FAILED'
+                            ];
+                            if (csCode && priorityCodes.includes(csCode)) return csCode;
+                            if (cdCode && priorityCodes.includes(cdCode)) return cdCode;
+                            if (csCode && csCode !== 'collector_returned_nothing') return csCode;
+                            if (cdCode && cdCode !== 'collector_returned_nothing') return cdCode;
+                            return csCode || cdCode || '';
+                        };
+                        const errCode = resolveCoupangErrorCode(cDaily, cSales);
+
+                        let state = 'uncollected';
+                        let stateLabel = '미수집';
+                        let badgeClass = 'bg-slate-100 text-slate-600 border border-slate-300';
+                        let dotColor = 'bg-slate-400';
+                        let detailNote = '';
+
+                        if (sStatus === 'collected' && dStatus === 'collected') {
+                            state = 'auto_completed';
+                            stateLabel = '자동 갱신 완료';
+                            badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+                            dotColor = 'bg-emerald-500';
+                            detailNote = `${dCnt} (월 누계 · 일별 정상)`;
+                        } else if (sStatus === 'collected' && (dStatus === 'kept_previous' || dStatus === 'not_collected')) {
+                            state = 'retained';
+                            stateLabel = '일부 이전 자료 유지';
+                            badgeClass = 'bg-amber-100 text-amber-900 border border-amber-400 font-semibold';
+                            dotColor = 'bg-amber-600';
+                            const dReason = dStatus === 'kept_previous'
+                                ? (cDaily.error_code ? `일별 이전 자료 유지 (${mapDailyRefreshErrorCode(cDaily.error_code)})` : '일별 이전 자료 유지')
+                                : '일별 미수집';
+                            detailNote = `월 누계 정상 · ${dReason}`;
+                        } else if ((sStatus === 'kept_previous' || sStatus === 'not_collected') && dStatus === 'collected') {
+                            state = 'retained';
+                            stateLabel = '일부 이전 자료 유지';
+                            badgeClass = 'bg-amber-100 text-amber-900 border border-amber-400 font-semibold';
+                            dotColor = 'bg-amber-600';
+                            const sReason = sStatus === 'kept_previous'
+                                ? (cSales.error_code ? `월 누계 이전 자료 유지 (${mapDailyRefreshErrorCode(cSales.error_code)})` : '월 누계 이전 자료 유지')
+                                : '월 누계 미수집';
+                            detailNote = `${sReason} · 일별 정상`;
+                        } else if (sStatus === 'kept_previous' || dStatus === 'kept_previous') {
+                            const kept = resolveKeptPreviousDailyRefreshState(errCode);
+                            state = kept.state;
+                            stateLabel = kept.stateLabel;
+                            badgeClass = kept.badgeClass;
+                            dotColor = kept.dotColor;
+                            detailNote = kept.detailNote;
+                        } else if (sStatus === 'collected_zero' || dStatus === 'collected_zero') {
+                            state = 'auto_completed';
+                            stateLabel = '주문 0건 (정상)';
+                            badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+                            dotColor = 'bg-emerald-500';
+                            const asOfPrefix = (sourceAsOf && sourceAsOf !== '-') ? `${sourceAsOf} ` : '';
+                            detailNote = `${asOfPrefix}주문 0건 · 조회 정상`;
+                        } else {
+                            state = 'uncollected';
+                            stateLabel = '미수집';
+                            badgeClass = 'bg-slate-100 text-slate-600 border border-slate-300';
+                            dotColor = 'bg-slate-400';
+                            detailNote = errCode ? mapDailyRefreshErrorCode(errCode) : '수집 실행 전 대기';
+                        }
+
+                        return {
+                            key: chKey,
+                            state,
+                            stateLabel,
+                            badgeClass,
+                            dotColor,
+                            sourceAsOf,
+                            capturedAt,
+                            detailNote,
+                            isZeroOrder: sStatus === 'collected_zero' || dStatus === 'collected_zero',
+                            errorCode: errCode,
+                            accountScopeVerified: true,
+                            completionVerified: true
+                        };
+                    }
+                }
+
+                // 단일 채널 매핑: smartstore, cafe24, gaemi_inventory, coupang_inventory
+                let drKey = null;
+                if (chKey === 'smartstore') drKey = 'smartstore';
+                else if (chKey === 'cafe24') drKey = 'cafe24';
+                else if (chKey === 'gaemi_inventory' || chKey === 'gaemi') drKey = 'gaemi_inventory';
+                else if (chKey === 'coupang_inventory') drKey = 'coupang_inventory';
+
+                if (drKey && drChannels[drKey]) {
+                    const item = drChannels[drKey];
+                    const isCoupang = drKey.includes('coupang');
+                    const cntStr = resolveDrCntStr(item, isCoupang);
+                    const sourceAsOf = item.source_as_of || '-';
+                    const capturedAt = resolveDrItemTime(item);
+                    const errCode = item.error_code || '';
+
+                    let state = 'uncollected';
+                    let stateLabel = '미수집';
+                    let badgeClass = 'bg-slate-100 text-slate-600 border border-slate-300';
+                    let dotColor = 'bg-slate-400';
+                    let detailNote = '';
+                    let isZeroOrder = false;
+
+                    if (item.status === 'collected') {
+                        state = 'auto_completed';
+                        stateLabel = '자동 갱신 완료';
+                        badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+                        dotColor = 'bg-emerald-500';
+                        if (drKey === 'smartstore') detailNote = `결제 ${cntStr} 확인 (정상 수집)`;
+                        else if (drKey === 'gaemi_inventory') detailNote = `WMS 재고 snapshot (${cntStr}) 수집 완료`;
+                        else if (drKey === 'coupang_inventory') detailNote = `쿠팡 재고 snapshot (${cntStr}) 수집 완료`;
+                        else detailNote = `정상 수집 완료 (${cntStr})`;
+                    } else if (item.status === 'collected_zero') {
+                        state = 'auto_completed';
+                        stateLabel = '주문 0건 (정상)';
+                        badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+                        dotColor = 'bg-emerald-500';
+                        const asOfPrefix = (sourceAsOf && sourceAsOf !== '-') ? `${sourceAsOf} ` : '';
+                        detailNote = `${asOfPrefix}주문 0건 · 조회 정상`;
+                        isZeroOrder = true;
+                    } else if (item.status === 'kept_previous') {
+                        const kept = resolveKeptPreviousDailyRefreshState(errCode);
+                        state = kept.state;
+                        stateLabel = kept.stateLabel;
+                        badgeClass = kept.badgeClass;
+                        dotColor = kept.dotColor;
+                        detailNote = kept.detailNote;
+                    } else {
+                        state = 'uncollected';
+                        stateLabel = '미수집';
+                        badgeClass = 'bg-slate-100 text-slate-600 border border-slate-300';
+                        dotColor = 'bg-slate-400';
+                        detailNote = errCode ? mapDailyRefreshErrorCode(errCode) : '수집 실행 전 대기';
+                    }
+
+                    return {
+                        key: chKey,
+                        state,
+                        stateLabel,
+                        badgeClass,
+                        dotColor,
+                        sourceAsOf,
+                        capturedAt,
+                        detailNote,
+                        isZeroOrder,
+                        errorCode: errCode,
+                        accountScopeVerified: true,
+                        completionVerified: true
+                    };
+                }
+            }
             const sp = (d && d.sales_profit) || {};
             const meta = (d && d.metadata) || {};
             const genMeta = (d && d._generation) || {};
@@ -13335,11 +13654,12 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const isAuthRequired = rawStatus === 'authentication_required' || rawStatus === 'auth_required' ||
                 errorCode === 'auth_required' || errorCode === 'BANK_EXPLICIT_USER_SESSION_REQUIRED' ||
                 errorCode === 'WING_SESSION_EXPIRED' || errorCode === 'BROWSER_SESSION_EXPIRED' ||
+                errorCode === 'COUPANG_SECOND_FACTOR_REQUIRED' || errorCode === 'COUPANG_LOGIN_LOCKED' ||
                 apiErrorCode === 'http_403' || errorCode === 'http_403' ||
                 (!rawAuto && legacyColl.failures && legacyColl.failures.some(f => f.stage === 'authentication' || f.http_status === 403));
 
             const isFailed = rawStatus === 'collection_failed' || rawStatus === 'failed' ||
-                errorCode === 'collection_failed' || errorCode === 'completion_validation_failed' ||
+                errorCode === 'collection_failed' || errorCode === 'completion_validation_failed' || errorCode === 'COUPANG_LOGIN_UNVERIFIED' || errorCode === 'COUPANG_ACCESS_BLOCKED' ||
                 (!rawAuto && legacyColl.failures && legacyColl.failures.length > 0 && !isAuthRequired);
 
             // 건수 표시: Coupang은 원천 집계 행수('집계 자료 ○행'), 타 채널은 '○건', 모르면 '건수 미확인'
@@ -13409,7 +13729,8 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 if (chKey === 'bank') {
                     detailNote = '공동인증서/보안 세션 로그인 필요';
                 } else if (chKey === 'coupang' || chKey === 'coupang_growth' || chKey === 'coupang_wing') {
-                    detailNote = 'Wing 판매자 로그인 세션 만료';
+                    detailNote = errorCode === 'COUPANG_SECOND_FACTOR_REQUIRED' ? '쿠팡 2차 인증 필요 — 사용자 로그인 필요 (이전 자료 유지)'
+                        : (errorCode === 'COUPANG_LOGIN_LOCKED' ? '쿠팡 자동 로그인 잠김 — 계정 확인 후 해제 필요 (이전 자료 유지)' : 'Wing 판매자 로그인 세션 만료');
                 } else if (chKey === 'smartstore') {
                     detailNote = '커머스 세션 만료 (로그인 필요)';
                 } else {
@@ -13420,7 +13741,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 stateLabel = '수집 실패';
                 badgeClass = 'bg-rose-50 text-rose-700 border border-rose-300';
                 dotColor = 'bg-rose-500';
-                detailNote = errorCode ? `오류 코드: ${errorCode}` : '수집 파이프라인 실패 (이전 정상본 유지)';
+                detailNote = errorCode === 'COUPANG_LOGIN_UNVERIFIED' ? '쿠팡 로그인 확인 실패 — 이전 자료 유지 (자동 재시도 안 함)'
+                    : (errorCode === 'COUPANG_ACCESS_BLOCKED' ? '쿠팡 접속 차단(자동화 탐지) — 이전 자료 유지 (사용자 확인 필요)'
+                    : (errorCode ? `오류 코드: ${errorCode}` : '수집 파이프라인 실패 (이전 정상본 유지)'));
             } else if (rawStatus === 'partial') {
                 state = 'retained';
                 stateLabel = '이전 자료 유지';
@@ -13436,6 +13759,15 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 capturedAt = '-';
                 const isManualActive = (typeof isManualSalesActive !== 'undefined' && isManualSalesActive) || (typeof msState !== 'undefined' && msState && msState.isAdmin);
                 detailNote = isManualActive ? '수기 매출 원장 연동 대기' : '외부 수기 매출 대기 (기능 비활성)';
+                // 사용자 엑셀 수기 입력(metadata.b2b_manual)이 반영된 게시본이면 그 상태를 표시 (state 는 기존 값 유지)
+                const b2bView = resolveB2bManualView(d, null);
+                if (b2bView.present) {
+                    stateLabel = b2bView.hasEntries ? '수기 입력' : '입력 없음';
+                    sourceAsOf = b2bView.asOf || '-';
+                    detailNote = b2bView.hasEntries
+                        ? `수기 입력 ${b2bView.rows.length}건 (${b2bView.month}) · 마지막 입력 ${b2bView.asOf || '미확인'}`
+                        : '수기 입력 파일 없음 (0원 아님)';
+                }
             } else {
                 state = 'uncollected';
                 stateLabel = '미수집';
@@ -13469,25 +13801,35 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 { key: 'coupang_growth', name: '쿠팡 그로스/Wing', icon: 'fa-box-open', color: 'text-indigo-600' },
                 { key: 'smartstore', name: '네이버 스마트스토어', icon: 'fa-store', color: 'text-emerald-600' },
                 { key: 'cafe24', name: '카페24 (자사몰)', icon: 'fa-globe', color: 'text-amber-600' },
-                { key: 'b2b', name: 'B2B / 수기매출', icon: 'fa-file-invoice', color: 'text-sky-600' },
-                { key: 'gaemi_inventory', name: '개미창고 WMS (재고)', icon: 'fa-warehouse', color: 'text-slate-600' }
-                // 하나은행·홈택스는 주 1회 수동 업로드로 전환: 자동수집 카드는 숨기고 아래 weeklyUploadStatusRow 에서 기준일을 표시한다.
+                { key: 'b2b', name: 'B2B / 수기매출', icon: 'fa-file-invoice', color: 'text-sky-600' }
             ];
 
             let hasFailed = false;
             let hasAuth = false;
             let hasRetained = false;
-            let allAuto = true;
+            let allNormal = true;
             let allUncollected = true;
             let overallBaseDate = null;
 
             const cardsHtml = channelsDef.map(def => {
                 const info = resolveChannelAutomationState(def.key, autoStatus, d);
-                if (info.state !== 'uncollected') allUncollected = false;
+                if (info.state !== 'uncollected' && (def.key !== 'b2b' || info.stateLabel === '수기 입력')) allUncollected = false;
                 if (info.state === 'failed') hasFailed = true;
                 if (info.state === 'auth_required') hasAuth = true;
                 if (info.state === 'retained') hasRetained = true;
-                if (info.state !== 'auto_completed') allAuto = false;
+
+                // F6-2 정상 채널 종합 판정 (collected_zero 및 B2B 입력 없음/수기 입력 정상 취급)
+                let isNormal = false;
+                if (def.key === 'b2b') {
+                    if (info.state !== 'failed' && info.state !== 'retained' && info.state !== 'auth_required') {
+                        isNormal = true;
+                    }
+                } else {
+                    if (info.state === 'auto_completed' || info.stateLabel === '자동 갱신 완료' || info.stateLabel === '주문 0건 (정상)' || info.isZeroOrder) {
+                        isNormal = true;
+                    }
+                }
+                if (!isNormal) allNormal = false;
 
                 if (!overallBaseDate && info.sourceAsOf && info.sourceAsOf !== '-') {
                     overallBaseDate = info.sourceAsOf;
@@ -13512,7 +13854,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                             <span class="font-mono text-slate-600">${escapeHtml(info.capturedAt)}</span>
                         </div>
                     </div>
-                    <div class="text-[10px] text-slate-500 truncate pt-1 border-t border-slate-200/60" title="${escapeHtml(info.detailNote || '')}">
+                    <div class="text-[10px] text-slate-500 truncate pt-1 border-t border-slate-200/60" title="${escapeHtml(info.errorCode ? info.errorCode + (info.detailNote ? ' · ' + info.detailNote : '') : (info.detailNote || ''))}">
                         ${escapeHtml(info.detailNote || '-')}
                     </div>
                 </div>
@@ -13523,33 +13865,79 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
             const masterBadgeEl = document.getElementById('automationMasterStatusBadge');
             if (masterBadgeEl) {
-                if (allUncollected) {
-                    masterBadgeEl.innerText = '전 채널 미수집';
-                    masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300';
-                } else if (hasFailed) {
+                if (hasFailed) {
                     masterBadgeEl.innerText = '일부 수집 실패';
                     masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-300';
                 } else if (hasAuth) {
                     masterBadgeEl.innerText = '인증 필요 채널 있음';
                     masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300';
                 } else if (hasRetained) {
-                    masterBadgeEl.innerText = '이전 자료 유지';
+                    masterBadgeEl.innerText = '일부 이전 자료 유지';
                     masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-400';
-                } else if (allAuto) {
+                } else if (allNormal) {
                     masterBadgeEl.innerText = '자동 갱신 완료';
                     masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200';
+                } else if (allUncollected) {
+                    masterBadgeEl.innerText = '전 채널 미수집';
+                    masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300';
                 } else {
                     masterBadgeEl.innerText = '수집 검토 진행';
                     masterBadgeEl.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300';
                 }
             }
 
-            renderWeeklyUploadStatusRow(d);
+            renderInventoryCollectionStatusRow(d, autoStatus);
             const overallTimesEl = document.getElementById('automationOverallTimes');
             if (overallTimesEl) {
                 const attTime = (autoStatus && (autoStatus.success_at || autoStatus.attempted_at)) ? formatKstTime(autoStatus.success_at || autoStatus.attempted_at) : '-';
                 overallTimesEl.innerText = `기준일: ${escapeHtml(overallBaseDate || d?.metadata?.report_date || '-')} · 수집: ${escapeHtml(attTime)}`;
             }
+        }
+
+        function renderInventoryCollectionStatusRow(d, autoStatus) {
+            const box = document.getElementById('inventoryCollectionStatusBox');
+            const el = document.getElementById('inventoryCollectionStatusRow');
+            if (!el) return;
+            const effectiveAuto = (typeof currentAutomationStatus !== 'undefined' ? currentAutomationStatus : null) || autoStatus || (d && d._automation_status) || null;
+            const dr = d?.metadata?.daily_refresh;
+            const hasData = Boolean(dr?.channels?.gaemi_inventory || dr?.channels?.coupang_inventory || effectiveAuto?.channels?.gaemi_inventory || effectiveAuto?.channels?.coupang_inventory || d?.collection_status?.gaemi || d?.collection_status?.coupang);
+            if (box) {
+                box.classList.toggle('hidden', !hasData);
+            }
+            if (!hasData) {
+                el.innerHTML = '';
+                return;
+            }
+            const invDefs = [
+                { key: 'gaemi_inventory', name: '개미창고 WMS (재고)' },
+                { key: 'coupang_inventory', name: '쿠팡 윙 (재고)' }
+            ];
+            el.innerHTML = invDefs.map(def => {
+                const info = resolveChannelAutomationState(def.key, effectiveAuto, d);
+                return `
+                <div class="bg-slate-50/80 border border-slate-200/90 rounded-xl p-2.5 flex flex-col justify-between space-y-1.5 shadow-2xs">
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="font-bold text-slate-800 text-[11px] truncate flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full ${escapeHtml(info.dotColor)} shrink-0"></span>
+                            <span class="truncate" title="${escapeHtml(def.name)}">${escapeHtml(def.name)}</span>
+                        </span>
+                        <span class="px-1.5 py-0.2 rounded text-[10px] font-bold ${escapeHtml(info.badgeClass)} whitespace-nowrap shrink-0">${escapeHtml(info.stateLabel)}</span>
+                    </div>
+                    <div class="space-y-0.5 text-[10px]">
+                        <div class="flex items-center justify-between text-slate-600">
+                            <span class="text-slate-400">자료 기준일</span>
+                            <span class="font-mono font-bold text-slate-800">${escapeHtml(info.sourceAsOf)}</span>
+                        </div>
+                        <div class="flex items-center justify-between text-slate-500">
+                            <span class="text-slate-400">수집 시각</span>
+                            <span class="font-mono text-slate-600">${escapeHtml(info.capturedAt)}</span>
+                        </div>
+                    </div>
+                    <div class="text-[10px] text-slate-500 truncate pt-1 border-t border-slate-200/60" title="${escapeHtml(info.errorCode ? info.errorCode + (info.detailNote ? ' · ' + info.detailNote : '') : (info.detailNote || ''))}">
+                        ${escapeHtml(info.detailNote || '-')}
+                    </div>
+                </div>`;
+            }).join('');
         }
 
         // 홈택스·하나은행 주간 수동 업로드: 자료 기준일과 갱신 필요 판정 (결측을 0이나 오늘 날짜로 바꾸지 않는다)
@@ -13619,6 +14007,158 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     </div>
                     <div class="text-[10px] text-slate-500 truncate">${escapeHtml(it.days !== null && it.days >= 0 ? it.days + '일 경과 · ' : '')}${escapeHtml(sourceNote[it.source])}</div>
                 </div>`).join('');
+        }
+
+        // B2B 수기 매출(사용자 엑셀 입력 → metadata.b2b_manual) 표시: 결측·파일 없음을 0으로 바꾸지 않는다
+        let b2bManualSelectedMonth = null;
+        function b2bManualValidDate(value) {
+            return typeof value === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value) ? value : null;
+        }
+        function resolveB2bManualView(d, wantedMonth) {
+            const meta = (d && d.metadata) || {};
+            const raw = (meta.b2b_manual && typeof meta.b2b_manual === 'object') ? meta.b2b_manual : null;
+            const view = { present: false, hasEntries: false, files: null, asOf: null, months: [], month: null, rows: [],
+                totals: { count: 0, amount: 0, issuedCount: 0, issuedAmount: 0, notIssuedCount: 0, notIssuedAmount: 0, amountMissingCount: 0 } };
+            if (!raw) return view;
+            const entries = Array.isArray(raw.entries) ? raw.entries : [];
+            const all = entries.filter(e => e && typeof e === 'object').map(e => {
+                const date = b2bManualValidDate(e.date);
+                const amount = (typeof e.amount === 'number' && Number.isFinite(e.amount)) ? e.amount : null;
+                const taxInvoice = (e.tax_invoice === '발행' || e.tax_invoice === '미발행') ? e.tax_invoice : '미확인';
+                return { date, month: date ? date.slice(0, 7) : '미확인', company: String(e.company == null ? '' : e.company),
+                    item: String(e.item == null ? '' : e.item), amount, taxInvoice, memo: String(e.memo == null ? '' : e.memo) };
+            });
+            const validMonths = Array.from(new Set(all.map(r => r.month).filter(m => m !== '미확인'))).sort().reverse();
+            const months = all.some(r => r.month === '미확인') ? validMonths.concat(['미확인']) : validMonths;
+            const metaMonth = (typeof meta.month === 'string' && /^[0-9]{4}-[0-9]{2}$/.test(meta.month)) ? meta.month : null;
+            let month = null;
+            if (wantedMonth && months.includes(wantedMonth)) month = wantedMonth;
+            else if (metaMonth) month = metaMonth;
+            else if (validMonths.length) month = validMonths[0];
+            if (month && !months.includes(month)) months.unshift(month);
+            const rows = all.filter(r => r.month === month).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+            const t = view.totals;
+            t.count = rows.length;
+            rows.forEach(r => {
+                if (r.amount === null) t.amountMissingCount += 1; else t.amount += r.amount;
+                if (r.taxInvoice === '발행') { t.issuedCount += 1; if (r.amount !== null) t.issuedAmount += r.amount; }
+                else if (r.taxInvoice === '미발행') { t.notIssuedCount += 1; if (r.amount !== null) t.notIssuedAmount += r.amount; }
+            });
+            view.present = true;
+            view.hasEntries = all.length > 0;
+            view.files = Number.isInteger(raw.files) ? raw.files : null;
+            view.asOf = b2bManualValidDate(raw.as_of);
+            view.months = months;
+            view.month = month;
+            view.rows = rows;
+            return view;
+        }
+        function b2bManualWon(value) {
+            return (typeof value === 'number' && Number.isFinite(value)) ? Math.round(value).toLocaleString('ko-KR') + '원' : '미확인';
+        }
+        function renderB2bManualPanel(d) {
+            const panel = document.getElementById('b2bManualPanel');
+            if (!panel) return;
+            const view = resolveB2bManualView(d, b2bManualSelectedMonth);
+            b2bManualSelectedMonth = view.month;
+            const sel = document.getElementById('b2bManualMonth');
+            const meta = document.getElementById('b2bManualMeta');
+            const sum = document.getElementById('b2bManualSummary');
+            const body = document.getElementById('b2bManualTbody');
+            const note = document.getElementById('b2bManualEmpty');
+            const mobile = document.getElementById('b2bManualMobileList');
+            if (sel) {
+                sel.innerHTML = view.months.map(m => `<option value="${escapeHtml(m)}"${m === view.month ? ' selected' : ''}>${escapeHtml(m)}</option>`).join('');
+                sel.disabled = view.months.length === 0;
+                sel.onchange = () => { b2bManualSelectedMonth = sel.value; renderB2bManualPanel(d); };
+            }
+            if (meta) {
+                meta.innerText = view.present
+                    ? `마지막 입력일 ${view.asOf || '미확인'} · 입력 파일 ${view.files === null ? '미확인' : view.files + '개'}`
+                    : '';
+            }
+            const t = view.totals;
+            const card = (label, value, sub) => `
+                <div class="bg-slate-50/80 border border-slate-200/90 rounded-xl p-2.5">
+                    <div class="text-[10px] text-slate-400">${escapeHtml(label)}</div>
+                    <div class="font-mono font-bold text-slate-900 text-sm">${escapeHtml(value)}</div>
+                    <div class="text-[10px] text-slate-500 truncate">${escapeHtml(sub)}</div>
+                </div>`;
+            if (sum) {
+                sum.innerHTML = (view.present && view.rows.length > 0)
+                    ? card('거래금액 합계', b2bManualWon(t.amount), t.amountMissingCount > 0 ? `금액 미확인 ${t.amountMissingCount}건 제외` : '부가세 제외')
+                      + card('거래 건수', `${t.count}건`, view.month || '')
+                      + card('세금계산서 발행', `${t.issuedCount}건`, b2bManualWon(t.issuedAmount))
+                      + card('세금계산서 미발행', `${t.notIssuedCount}건`, b2bManualWon(t.notIssuedAmount))
+                    : '';
+            }
+            if (body) {
+                body.innerHTML = view.rows.map(r => {
+                    const badge = r.taxInvoice === '발행' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : (r.taxInvoice === '미발행' ? 'bg-amber-100 text-amber-900 border border-amber-400' : 'bg-slate-100 text-slate-600 border border-slate-300');
+                    return `<tr class="border-b border-slate-100">
+                        <td class="py-1.5 pr-2 font-mono whitespace-nowrap">${escapeHtml(r.date || '미확인')}</td>
+                        <td class="py-1.5 pr-2 font-semibold text-slate-800">${escapeHtml(r.company || '-')}</td>
+                        <td class="py-1.5 pr-2">${escapeHtml(r.item || '-')}</td>
+                        <td class="py-1.5 pr-2 text-right font-mono whitespace-nowrap">${escapeHtml(b2bManualWon(r.amount))}</td>
+                        <td class="py-1.5 pr-2"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${badge} whitespace-nowrap">${escapeHtml(r.taxInvoice)}</span></td>
+                        <td class="py-1.5 text-slate-500">${escapeHtml(r.memo || '-')}</td>
+                    </tr>`;
+                }).join('');
+            }
+            if (mobile) {
+                // 모바일(sm 미만)은 표 대신 카드 목록: 금액·세금계산서가 가로 스크롤에 가려지지 않게 한다
+                mobile.innerHTML = view.rows.map(r => {
+                    const badge = r.taxInvoice === '발행' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : (r.taxInvoice === '미발행' ? 'bg-amber-100 text-amber-900 border border-amber-400' : 'bg-slate-100 text-slate-600 border border-slate-300');
+                    return `<div class="border border-slate-200 rounded-xl p-2.5 space-y-1">
+                        <div class="flex items-start justify-between gap-2">
+                            <span class="font-semibold text-slate-800 text-xs break-words">${escapeHtml(r.company || '-')}</span>
+                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${badge} whitespace-nowrap shrink-0">${escapeHtml(r.taxInvoice)}</span>
+                        </div>
+                        <div class="text-[11px] text-slate-600 break-words">${escapeHtml(r.item || '-')}</div>
+                        <div class="flex items-center justify-between gap-2 text-[11px]">
+                            <span class="font-mono text-slate-400">${escapeHtml(r.date || '미확인')}</span>
+                            <span class="font-mono font-bold text-slate-900">${escapeHtml(b2bManualWon(r.amount))}</span>
+                        </div>
+                        <div class="text-[10px] text-slate-500 break-words">${escapeHtml(r.memo || '-')}</div>
+                    </div>`;
+                }).join('');
+            }
+            const rejAlert = document.getElementById('b2bManualRejectedAlert');
+            const rejected = (d?.metadata?.daily_refresh?.b2b_manual?.rejected) || (d?.metadata?.b2b_manual?.rejected) || [];
+            if (rejAlert) {
+                if (Array.isArray(rejected) && rejected.length > 0) {
+                    rejAlert.classList.remove('hidden');
+                    const itemsHtml = rejected.map(r => {
+                        const fn = escapeHtml(r.filename || r.file || '-');
+                        const cd = escapeHtml(r.error_code || r.code || '형식 오류');
+                        const ln = (r.row != null) ? `행 ${r.row}` : ((r.line != null) ? `행 ${r.line}` : '');
+                        const desc = [fn, cd, ln].filter(Boolean).join(' · ');
+                        return `<li class="font-mono text-[11px]">${desc}</li>`;
+                    }).join('');
+                    rejAlert.innerHTML = `
+                        <div class="font-bold flex items-center gap-1.5 text-amber-800">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <span>수기 입력 파일 ${rejected.length}개가 형식 오류로 반영되지 않았습니다 (파일명·행 번호만 표시)</span>
+                        </div>
+                        <ul class="list-disc list-inside space-y-0.5 text-amber-900 pl-1">
+                            ${itemsHtml}
+                        </ul>`;
+                } else {
+                    rejAlert.classList.add('hidden');
+                    rejAlert.innerHTML = '';
+                }
+            }
+            if (note) {
+                let msg = '';
+                const guideMsg = '입력 방법: PC 폴더 raw_data/b2b 에 날짜_b2b_sales.xlsx 로 저장 (템플릿 제공) · 매일 08:30 반영';
+                if (!view.present) msg = `B2B 수기 매출 정보가 아직 반영되지 않았습니다 (미확인) · ${guideMsg}`;
+                else if (!view.hasEntries) msg = `수기 입력 없음 — 입력 파일이 없으며 0원이 아닙니다 · ${guideMsg}`;
+                else if (view.rows.length === 0) msg = `${view.month || '선택한 월'}에는 수기 입력이 없습니다.`;
+                note.innerText = msg;
+                note.classList.toggle('hidden', msg === '');
+            }
         }
 
         function cleanSettlementNote(note) {
@@ -13798,8 +14338,26 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     detailDiagHtml = uncollected.join(' · ');
                 }
 
-                if (detailDiagHtml) {
-                    coverageNote = ` · <span id="salesMultichannelSummaryBadge" class="text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px] whitespace-nowrap">${conciseSummary || '채널 검토중'}</span>
+                // F6-3 채널 전체 정상 여부 판정 (F6-2 기준: 전체 정상이면 미표시, 하나라도 비정상이면 '채널 확인 필요')
+                const checkChannels = ['coupang_growth', 'smartstore', 'cafe24', 'b2b'];
+                let isAllChannelsNormal = true;
+                checkChannels.forEach(ch => {
+                    const st = resolveChannelAutomationState(ch, effectiveAutoStatus, d);
+                    if (ch === 'b2b') {
+                        if (st.state === 'failed' || st.state === 'retained' || st.state === 'auth_required') {
+                            isAllChannelsNormal = false;
+                        }
+                    } else {
+                        const isNorm = st.state === 'auto_completed'
+                            || st.stateLabel === '자동 갱신 완료'
+                            || st.stateLabel === '주문 0건 (정상)'
+                            || st.isZeroOrder;
+                        if (!isNorm) isAllChannelsNormal = false;
+                    }
+                });
+
+                if (!isAllChannelsNormal) {
+                    const diagContent = detailDiagHtml ? `
                     <details id="salesDetailDiagnosisBox" class="inline-block align-middle ml-1">
                         <summary class="cursor-pointer text-slate-500 hover:text-slate-800 underline text-[11px] font-normal select-none">
                             상세 진단 ▾
@@ -13807,9 +14365,12 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         <div class="mt-1.5 p-2.5 bg-amber-50/95 rounded-lg border border-amber-200 text-[11px] text-amber-950 leading-relaxed font-normal shadow-2xs text-left max-w-2xl">
                             ${detailDiagHtml}
                         </div>
-                    </details>`;
+                    </details>` : '';
+                    coverageNote = ` · <span id="salesMultichannelSummaryBadge" class="text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px] whitespace-nowrap">채널 확인 필요</span>${diagContent}`;
+                } else {
+                    coverageNote = '';
                 }
-                const provBadge = (sp.provisional || monthly.data_status === 'partial') ? '<span class="text-indigo-700 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 text-[11px] ml-1">잠정집계</span>' : '';
+                const provBadge = (sp.provisional || monthly.data_status === 'partial') ? '<span class="text-indigo-700 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 text-[11px] ml-1" title="월 누계는 대상일까지의 집계">당월 진행중</span>' : '';
 
                 let genBadge = '';
                 const genMeta = d && d._generation;
@@ -13850,85 +14411,220 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const mRevEl = document.getElementById('salesMonthlyRevenue');
             if (mRevEl) mRevEl.innerText = fmtWon(monthly.revenue ?? 0);
 
-            // [P1 개선] daily_kpi 우선 사용 (기준일 as_of vs 대상 판매일 sales_date 분리, scope 반영)
-            const dRevEl = document.getElementById('salesDailyRevenue');
-            const dLabelEl = document.getElementById('salesDailyLabel');
-            const dailySeries = Array.isArray(sp.daily_series) ? sp.daily_series : [];
-            const repDateVal = (dKpi && dKpi.sales_date) || meta.report_date || daily.date || '';
+            // F5-3 원가 미확인(A안) 공통 포맷터: 값 = contribution_profit ?? matched_contribution_profit
+            const formatContributionProfitA = (profit, matchedProfit, unverifiedRev, unverifiedCount) => {
+                const val = profit ?? matchedProfit;
+                if (val === null || val === undefined) {
+                    return {
+                        text: '-',
+                        badgeHtml: '',
+                        hasValue: false,
+                        isMatchedOnly: false,
+                        val: null
+                    };
+                }
+                const isMatchedOnly = (profit === null || profit === undefined) && (matchedProfit !== null && matchedProfit !== undefined);
+                const sign = val < 0 ? '-' : '';
+                const numText = (sign ? '-' : '') + fmtWon(Math.abs(val));
+                const text = isMatchedOnly ? `${numText} (확인분)` : numText;
+                let badgeHtml = '';
+                const uRev = Number(unverifiedRev) || 0;
+                if (uRev > 0) {
+                    const cntText = unverifiedCount ? ` ${unverifiedCount}건` : '';
+                    const titleText = `원가를 확인하지 못한 판매${cntText}의 매출은 기여이익에서 제외`;
+                    badgeHtml = `<span class="px-1.5 py-0.2 rounded text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-300 ml-1 inline-block" title="${escapeHtml(titleText)}">원가 미확인 ${fmtWon(uRev)}원 제외</span>`;
+                }
+                return {
+                    text,
+                    badgeHtml,
+                    hasValue: true,
+                    isMatchedOnly,
+                    val
+                };
+            };
 
-            if (dKpi && dKpi.sales_date) {
-                const sDate = dKpi.sales_date;
-                const scopeTag = dKpi.scope === 'selected_sources_only' ? '(선택원천)' : '';
-                if (dLabelEl) {
-                    dLabelEl.innerText = `${sDate.slice(5)} 실적${scopeTag}`;
-                }
-                if (dRevEl) {
-                    if (dKpi.status === 'confirmed_zero' || dKpi.revenue === 0) {
-                        dRevEl.innerText = '0원';
-                        dRevEl.className = 'font-mono text-slate-700 font-semibold';
-                    } else if (dKpi.revenue !== null && dKpi.revenue !== undefined) {
-                        const isNeg = dKpi.revenue < 0;
-                        dRevEl.innerText = (isNeg ? '-' : '') + fmtWon(Math.abs(dKpi.revenue));
-                        dRevEl.className = isNeg ? 'font-mono text-rose-600 font-bold' : 'font-mono text-slate-700 font-semibold';
-                    } else {
-                        dRevEl.innerText = '일별 미확인';
-                        dRevEl.className = 'text-xs text-slate-400 font-normal';
-                    }
-                }
-            } else {
-                const repDayRow = dailySeries.find(r => r.date === repDateVal);
-                if (dLabelEl) {
-                    dLabelEl.innerText = repDateVal ? `${repDateVal.slice(5)} 실적` : '일별 실적';
-                }
-                if (dRevEl) {
-                    if (repDayRow && repDayRow.revenue !== undefined && repDayRow.revenue !== null) {
-                        const isNeg = repDayRow.revenue < 0;
-                        dRevEl.innerText = (isNeg ? '-' : '') + fmtWon(Math.abs(repDayRow.revenue));
-                        dRevEl.className = isNeg ? 'font-mono text-rose-600 font-bold' : 'font-mono text-slate-700 font-semibold';
-                    } else {
-                        dRevEl.innerText = '일별 미확인';
-                        dRevEl.className = 'text-xs text-slate-400 font-normal';
+            // 원가 미확인 접이식 (d.sales_profit.issues 중 '상품코드 미등록' 또는 '원가 누락/수식 오류')
+            const issues = (sp && sp.issues) || (d && d.sales_profit && d.sales_profit.issues) || [];
+            const costIssues = Array.isArray(issues) ? issues.filter(r => Array.isArray(r) && (r[4] === '상품코드 미등록' || r[4] === '원가 누락/수식 오류')) : [];
+            const issuesBoxEl = document.getElementById('costUnverifiedIssuesBox');
+            const issuesSummaryEl = document.getElementById('costUnverifiedIssuesSummary');
+            const issuesTbodyEl = document.getElementById('costUnverifiedIssuesTbody');
+            if (issuesBoxEl) {
+                if (costIssues.length === 0) {
+                    issuesBoxEl.classList.add('hidden');
+                } else {
+                    issuesBoxEl.classList.remove('hidden');
+                    if (issuesSummaryEl) issuesSummaryEl.innerText = `원가 미확인 ${costIssues.length}건 보기`;
+                    if (issuesTbodyEl) {
+                        const chMap = { 'coupang': '쿠팡 그로스', 'coupang_growth': '쿠팡 그로스', 'smartstore': '스마트스토어', 'cafe24': '카페24', 'b2b': 'B2B' };
+                        issuesTbodyEl.innerHTML = costIssues.map(r => {
+                            const chLabel = chMap[r[0]] || r[0] || '-';
+                            const pCode = r[3] || '-';
+                            const reason = r[4] || '-';
+                            return `<tr class="hover:bg-amber-100/50">
+                                <td class="py-1 px-2 whitespace-nowrap font-medium">${escapeHtml(chLabel)}</td>
+                                <td class="py-1 px-2 font-mono whitespace-nowrap">${escapeHtml(pCode)}</td>
+                                <td class="py-1 px-2">${escapeHtml(reason)}</td>
+                            </tr>`;
+                        }).join('');
                     }
                 }
             }
 
+            // F5-2 일일 KPI 카드 줄 렌더링 (salesDailyKpiRow)
+            const dailyKpiRowEl = document.getElementById('salesDailyKpiRow');
+            if (dailyKpiRowEl) {
+                if (!dKpi) {
+                    dailyKpiRowEl.classList.add('hidden');
+                } else {
+                    dailyKpiRowEl.classList.remove('hidden');
+
+                    // ① 일매출
+                    const sTitleEl = document.getElementById('dailyKpiSalesTitle');
+                    const cStatusEl = document.getElementById('dailyKpiCoupangStatus');
+                    const kpiRevEl = document.getElementById('dailyKpiRevenue');
+                    const kpiRevSubEl = document.getElementById('dailyKpiRevenueSub');
+                    if (sTitleEl) sTitleEl.innerText = dKpi.sales_date ? `${dKpi.sales_date} 일매출` : '일매출';
+                    const oldDailyLbl = document.getElementById('salesDailyLabel');
+                    const oldDailyRev = document.getElementById('salesDailyRevenue');
+                    if (oldDailyLbl) oldDailyLbl.innerText = dKpi.sales_date ? `${dKpi.sales_date.slice(5)} 실적:` : '';
+                    if (oldDailyRev) oldDailyRev.innerText = fmtWon(dKpi.revenue || 0);
+
+                    const isCoupangMissing = dKpi.coupang_daily_status === 'not_collected'
+                        || dKpi.coupang_daily_status === 'kept_previous'
+                        || (typeof dKpi.scope === 'string' && dKpi.scope.includes('쿠팡 미수집'))
+                        || (typeof dKpi.message === 'string' && dKpi.message.includes('쿠팡 일별 미수집'));
+
+                    if (cStatusEl) {
+                        if (isCoupangMissing) {
+                            cStatusEl.classList.remove('hidden');
+                            cStatusEl.innerText = '쿠팡 일별 미수집';
+                        } else {
+                            cStatusEl.classList.add('hidden');
+                        }
+                    }
+
+                    if (kpiRevEl) {
+                        if (dKpi.status === 'confirmed_zero' || dKpi.revenue === 0) {
+                            kpiRevEl.innerText = '0원';
+                            kpiRevEl.className = 'text-lg sm:text-xl font-bold font-mono text-slate-900 leading-tight';
+                        } else if (dKpi.revenue !== null && dKpi.revenue !== undefined) {
+                            const isNeg = dKpi.revenue < 0;
+                            kpiRevEl.innerText = (isNeg ? '-' : '') + fmtWon(Math.abs(dKpi.revenue));
+                            kpiRevEl.className = isNeg ? 'text-lg sm:text-xl font-bold font-mono text-rose-600 leading-tight' : 'text-lg sm:text-xl font-bold font-mono text-slate-900 leading-tight';
+                        } else {
+                            kpiRevEl.innerText = '-';
+                            kpiRevEl.className = 'text-base sm:text-lg font-bold text-slate-400 leading-tight';
+                        }
+                    }
+                    if (kpiRevSubEl) {
+                        kpiRevSubEl.innerText = isCoupangMissing ? '쿠팡 일별 미수집' : (dKpi.message || '');
+                    }
+
+                    // ② 전일 대비 (dod)
+                    const dod = (sp.growth_metrics && sp.growth_metrics.dod) || dKpi.dod;
+                    const dodValEl = document.getElementById('dailyKpiDodValue');
+                    const dodSubEl = document.getElementById('dailyKpiDodSub');
+                    if (dodValEl) {
+                        if (dod && dod.revenue_pct !== null && dod.revenue_pct !== undefined) {
+                            const pct = Number(dod.revenue_pct);
+                            const sign = pct >= 0 ? '+' : '';
+                            dodValEl.innerText = `${sign}${pct.toFixed(1)}%`;
+                            dodValEl.className = pct >= 0
+                                ? 'text-lg sm:text-xl font-bold font-mono text-emerald-600 leading-tight'
+                                : 'text-lg sm:text-xl font-bold font-mono text-rose-600 leading-tight';
+                            if (dodSubEl) {
+                                dodSubEl.innerText = dod.comparison_date ? `${dod.comparison_date} 대비` : (dod.message || '');
+                                dodSubEl.title = dod.message || '';
+                            }
+                        } else {
+                            dodValEl.innerText = '비교 불가';
+                            dodValEl.className = 'text-base sm:text-lg font-bold text-slate-400 leading-tight';
+                            if (dodSubEl) {
+                                dodSubEl.innerText = (dod && dod.message) || '전일 자료 대기';
+                                dodSubEl.title = (dod && dod.message) || '';
+                            }
+                        }
+                    }
+
+                    // ③ 전주 동요일 대비 (wow)
+                    const wow = (sp.growth_metrics && sp.growth_metrics.wow) || dKpi.wow;
+                    const wowValEl = document.getElementById('dailyKpiWowValue');
+                    const wowSubEl = document.getElementById('dailyKpiWowSub');
+                    if (wowValEl) {
+                        if (wow && wow.revenue_pct !== null && wow.revenue_pct !== undefined) {
+                            const pct = Number(wow.revenue_pct);
+                            const sign = pct >= 0 ? '+' : '';
+                            wowValEl.innerText = `${sign}${pct.toFixed(1)}%`;
+                            wowValEl.className = pct >= 0
+                                ? 'text-lg sm:text-xl font-bold font-mono text-emerald-600 leading-tight'
+                                : 'text-lg sm:text-xl font-bold font-mono text-rose-600 leading-tight';
+                            if (wowSubEl) {
+                                wowSubEl.innerText = wow.comparison_date ? `${wow.comparison_date} 대비` : (wow.message || '');
+                                wowSubEl.title = wow.message || '';
+                            }
+                        } else {
+                            wowValEl.innerText = '비교 불가';
+                            wowValEl.className = 'text-base sm:text-lg font-bold text-slate-400 leading-tight';
+                            if (wowSubEl) {
+                                wowSubEl.innerText = (wow && wow.message) || '전주 동요일 자료 대기';
+                                wowSubEl.title = (wow && wow.message) || '';
+                            }
+                        }
+                    }
+
+                    // ④ 일 기여이익 (A안)
+                    const profitValEl = document.getElementById('dailyKpiProfit');
+                    const profitBadgeWrapEl = document.getElementById('dailyKpiProfitBadgeWrap');
+                    const profitSubEl = document.getElementById('dailyKpiProfitSub');
+                    const kpiProfitA = formatContributionProfitA(
+                        dKpi.contribution_profit,
+                        dKpi.matched_contribution_profit,
+                        dKpi.cost_unverified_revenue,
+                        costIssues.length
+                    );
+                    if (profitValEl) {
+                        profitValEl.innerText = kpiProfitA.text;
+                        if (kpiProfitA.val !== null && kpiProfitA.val !== undefined) {
+                            profitValEl.className = kpiProfitA.val < 0
+                                ? 'text-lg sm:text-xl font-bold font-mono text-rose-600 leading-tight'
+                                : 'text-lg sm:text-xl font-bold font-mono text-slate-900 leading-tight';
+                        } else {
+                            profitValEl.className = 'text-base sm:text-lg font-bold text-slate-400 leading-tight';
+                        }
+                    }
+                    if (profitBadgeWrapEl) {
+                        profitBadgeWrapEl.innerHTML = kpiProfitA.badgeHtml;
+                    }
+                    if (profitSubEl) {
+                        profitSubEl.innerText = kpiProfitA.isMatchedOnly ? '원가 미확인 제외 확인분' : '';
+                    }
+                }
+            }
+
+            // F5-1 상단 요약 바 '전월 동일기간 대비'
             const momBadge = document.getElementById('salesMomBadge');
             if (momBadge) {
-                const forecast = sp.monthly_forecast || d.monthly_forecast || {};
-                const projRev = Number(forecast.projected_revenue) || 0;
-                const series = d.monthly_series || (sp && sp.monthly_series) || [];
-                const curMonthStr = monthly.month || meta.month || '';
-
-                const sortedSeries = [...series].sort((a, b) => String(a.month || '').localeCompare(String(b.month || '')));
-                const curIdx = sortedSeries.findIndex(s => s.month === curMonthStr);
-                const prevItem = curIdx > 0 ? sortedSeries[curIdx - 1] : (sortedSeries.length > 1 ? sortedSeries[sortedSeries.length - 2] : null);
-                const prevRev = prevItem ? (Number(prevItem.revenue) || 0) : 0;
-                const prevMonthLabel = prevItem ? `${parseInt(prevItem.month.split('-')[1] || '0', 10)}월` : '전월';
-                const isCurProvisional = sp.provisional || monthly.data_status === 'partial';
-
-                // 쿠팡 판매분석(쿠폰 전) vs 과거 정산(쿠폰 후) 단순 MoM 비교 금지
-                const isAnalysisBasis = monthly.basis === 'coupang_sales_analysis' || sp.basis === 'coupang_sales_analysis';
-                const isIncomparable = sp.mom_growth_pct === null || sp.mom_basis === 'incomparable' || isAnalysisBasis;
-
-                if (isIncomparable) {
-                    momBadge.innerText = '전월비 비교 불가 (판매분석 쿠폰 전 vs 정산 쿠폰 후)';
-                    momBadge.className = 'text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500';
-                } else if (sp.mom_growth_pct !== null && sp.mom_growth_pct !== undefined) {
-                    const sign = sp.mom_growth_pct >= 0 ? '+' : '';
-                    momBadge.innerText = `전월비 ${sign}${sp.mom_growth_pct.toFixed(1)}% (확정실적)`;
-                    momBadge.className = sp.mom_growth_pct >= 0
-                        ? 'text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700'
-                        : 'text-xs font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700';
-                } else if (projRev > 0 && prevRev > 0 && !isAnalysisBasis) {
-                    const growthRate = ((projRev - prevRev) / prevRev) * 100;
-                    const sign = growthRate >= 0 ? '+' : '';
-                    momBadge.innerText = `${sign}${growthRate.toFixed(1)}% (월말예상 vs ${prevMonthLabel}실적)`;
-                    momBadge.className = growthRate >= 0
-                        ? 'text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700'
-                        : 'text-xs font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700';
+                const gm = sp.growth_metrics || (d && d.growth_metrics) || {};
+                const mom = gm.mom;
+                if (mom && typeof mom === 'object' && mom.revenue_pct !== null && mom.revenue_pct !== undefined) {
+                    const pct = Number(mom.revenue_pct);
+                    const sign = pct >= 0 ? '+' : '';
+                    momBadge.innerText = `${sign}${pct.toFixed(1)}%`;
+                    momBadge.className = pct >= 0
+                        ? 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200';
+                    const cp = mom.comparison_period || {};
+                    const curp = mom.current_period || {};
+                    const cpStr = (cp.start && cp.end) ? `${cp.start}~${cp.end}` : '전월 동일기간';
+                    const curpStr = (curp.start && curp.end) ? `${curp.start}~${curp.end}` : '당월 동일기간';
+                    const cRevStr = mom.comparison_revenue != null ? fmtWon(mom.comparison_revenue) : '-';
+                    const curRevStr = mom.current_revenue != null ? fmtWon(mom.current_revenue) : '-';
+                    momBadge.title = `${cpStr} 대비 ${curpStr} (${cRevStr} 대비 ${curRevStr})`;
                 } else {
-                    momBadge.innerText = '전월비 산출 불가 (비교기간 불일치)';
-                    momBadge.className = 'text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500';
+                    momBadge.innerText = '비교 불가';
+                    momBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-300';
+                    momBadge.title = (mom && mom.message) || '전월 동일기간 자료 대기';
                 }
             }
 
@@ -13952,10 +14648,27 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             }
 
             const skuCountBadge = document.getElementById('salesSkuCountBadge');
-            const activeSkuCount = monthly.active_sku_count !== undefined 
-                ? monthly.active_sku_count 
-                : (sp.transactions ? new Set(sp.transactions.filter(t => (t.revenue || t.qty) > 0).map(t => t.product_code || t.code)).size : 0);
-            if (skuCountBadge) skuCountBadge.innerText = `(판매 품목 ${activeSkuCount}종)`;
+            let distinctProdCount = null;
+            if (monthly && monthly.distinct_product_count != null) {
+                distinctProdCount = monthly.distinct_product_count;
+            } else if (dKpi && dKpi.distinct_product_count != null) {
+                distinctProdCount = dKpi.distinct_product_count;
+            } else {
+                const txList = Array.isArray(sp.transactions) ? sp.transactions : (Array.isArray(d.transactions) ? d.transactions : null);
+                if (txList) {
+                    const prodSet = new Set();
+                    txList.forEach(t => {
+                        if (!t || typeof t !== 'object') return;
+                        const code = (t.product_code || t.item_id || '').toString().trim();
+                        if (code) prodSet.add(code);
+                    });
+                    distinctProdCount = prodSet.size;
+                }
+            }
+            if (distinctProdCount === null || distinctProdCount === undefined) {
+                distinctProdCount = monthly.active_sku_count ?? 0;
+            }
+            if (skuCountBadge) skuCountBadge.innerText = `(판매 품목 ${distinctProdCount}종)`;
 
             // 3. 상태 필터 칩 5개 금액 집계 (음수, 0원, null, 검토중 분리)
             const channels = monthly.channels || daily.channels || [];
@@ -14078,16 +14791,57 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 const cpSrc = { api: collStatus.coupang, ...srcStatus.coupang };
                 const cpAuto = resolveChannelAutomationState('coupang_growth', effectiveAutoStatus, d);
                 cpChipEl.innerText = formatChannelChip(chRevs.coupang_growth, cpSrc, '미산출');
-                const cpSubCls = cpAuto.state === 'retained' ? 'text-amber-900 font-semibold' : 'text-indigo-700';
-                const baseStr = cpAuto.sourceAsOf && cpAuto.sourceAsOf !== '-' ? `자료: ${cpAuto.sourceAsOf.slice(5)} · ` : '';
-                setChipSub('salesChipCoupangGrowthSub', mcSales ? '판매분석 잠정 (쿠폰 전 · 원가 미확정)' : `${baseStr}${cpAuto.stateLabel}`, cpSubCls);
+                const hasDr = Boolean(d?.metadata?.daily_refresh?.channels);
+                if (hasDr) {
+                    const baseStr = cpAuto.sourceAsOf && cpAuto.sourceAsOf !== '-' ? `자료: ${cpAuto.sourceAsOf.slice(5)} · ` : '';
+                    const cpDate = (cpAuto.sourceAsOf && cpAuto.sourceAsOf !== '-') ? (cpAuto.sourceAsOf.length > 5 ? cpAuto.sourceAsOf.slice(5) : cpAuto.sourceAsOf) : '';
+                    if (cpAuto.isZeroOrder || cpAuto.stateLabel.includes('0건')) {
+                        const zeroSubText = cpDate ? `${cpDate} 주문 0건 · 정상` : '주문 0건 · 정상';
+                        setChipSub('salesChipCoupangGrowthSub', zeroSubText, 'text-indigo-700');
+                    } else if (cpAuto.state === 'auto_completed') {
+                        setChipSub('salesChipCoupangGrowthSub', `${baseStr}정상`, 'text-indigo-700');
+                    } else if (cpAuto.state === 'retained') {
+                        setChipSub('salesChipCoupangGrowthSub', '이전 자료 유지', 'text-amber-900 font-semibold');
+                    } else if (cpAuto.state === 'uncollected') {
+                        setChipSub('salesChipCoupangGrowthSub', '미수집', 'text-slate-500');
+                    } else {
+                        setChipSub('salesChipCoupangGrowthSub', `${baseStr}${cpAuto.stateLabel}`, 'text-slate-500');
+                    }
+                } else {
+                    const cpSubCls = cpAuto.state === 'retained' ? 'text-amber-900 font-semibold' : 'text-indigo-700';
+                    const baseStr = cpAuto.sourceAsOf && cpAuto.sourceAsOf !== '-' ? `자료: ${cpAuto.sourceAsOf.slice(5)} · ` : '';
+                    setChipSub('salesChipCoupangGrowthSub', mcSales ? '판매분석 잠정 (쿠폰 전 · 원가 미확정)' : `${baseStr}${cpAuto.stateLabel}`, cpSubCls);
+                }
             }
 
             // 스마트스토어 칩 (multichannel_sales 우선 소비 — 기존 과거 참고값 대체 금지)
             const ssChipEl = document.getElementById('salesChipSmartstoreRev');
             if (ssChipEl) {
                 const ssAuto = resolveChannelAutomationState('smartstore', effectiveAutoStatus, d);
-                if (mcSSInfo) {
+                const hasDr = Boolean(d?.metadata?.daily_refresh?.channels);
+                if (hasDr) {
+                    const ssSrc = { api: collStatus.smartstore, ...srcStatus.smartstore };
+                    ssChipEl.className = 'mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight';
+                    const baseStr = ssAuto.sourceAsOf && ssAuto.sourceAsOf !== '-' ? `자료: ${ssAuto.sourceAsOf.slice(5)} · ` : '';
+                    const ssDate = (ssAuto.sourceAsOf && ssAuto.sourceAsOf !== '-') ? (ssAuto.sourceAsOf.length > 5 ? ssAuto.sourceAsOf.slice(5) : ssAuto.sourceAsOf) : '';
+                    if (ssAuto.isZeroOrder || ssAuto.stateLabel.includes('0건')) {
+                        ssChipEl.innerText = formatChannelChip(chRevs.smartstore, ssSrc, '0원');
+                        const zeroSubText = ssDate ? `${ssDate} 주문 0건 · 정상` : '주문 0건 · 정상';
+                        setChipSub('salesChipSmartstoreSub', zeroSubText, 'text-emerald-700');
+                    } else if (ssAuto.state === 'auto_completed') {
+                        ssChipEl.innerText = formatChannelChip(chRevs.smartstore, ssSrc, '미수집');
+                        setChipSub('salesChipSmartstoreSub', `${baseStr}정상`, 'text-emerald-700');
+                    } else if (ssAuto.state === 'retained') {
+                        ssChipEl.innerText = formatChannelChip(chRevs.smartstore, ssSrc, '미수집');
+                        setChipSub('salesChipSmartstoreSub', '이전 자료 유지', 'text-amber-900 font-semibold');
+                    } else if (ssAuto.state === 'uncollected') {
+                        ssChipEl.innerText = '미수집';
+                        setChipSub('salesChipSmartstoreSub', '미수집', 'text-slate-500');
+                    } else {
+                        ssChipEl.innerText = formatChannelChip(chRevs.smartstore, ssSrc, '미수집');
+                        setChipSub('salesChipSmartstoreSub', `${baseStr}${ssAuto.stateLabel}`, 'text-slate-500');
+                    }
+                } else if (mcSSInfo) {
                     ssChipEl.innerText = mcSSInfo.chipText;
                     ssChipEl.className = mcSSInfo.recognizedSubtotal === null
                         ? 'mt-0.5 text-sm sm:text-base font-bold text-slate-900 leading-snug tracking-tight'
@@ -14110,7 +14864,29 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const c24ChipEl = document.getElementById('salesChipCafe24Rev');
             if (c24ChipEl) {
                 const c24Auto = resolveChannelAutomationState('cafe24', effectiveAutoStatus, d);
-                if (mcC24Info) {
+                const hasDr = Boolean(d?.metadata?.daily_refresh?.channels);
+                if (hasDr) {
+                    c24ChipEl.className = 'mt-0.5 text-lg font-bold font-mono text-slate-900 leading-tight';
+                    const baseStr = c24Auto.sourceAsOf && c24Auto.sourceAsOf !== '-' ? `자료: ${c24Auto.sourceAsOf.slice(5)} · ` : '';
+                    const c24Date = (c24Auto.sourceAsOf && c24Auto.sourceAsOf !== '-') ? (c24Auto.sourceAsOf.length > 5 ? c24Auto.sourceAsOf.slice(5) : c24Auto.sourceAsOf) : '';
+                    if (c24Auto.isZeroOrder || c24Auto.stateLabel.includes('0건')) {
+                        c24ChipEl.innerText = formatChannelChip(chRevs.cafe24, { api: collStatus.cafe24, ...srcStatus.cafe24 }, '0원');
+                        const zeroSubText = c24Date ? `${c24Date} 주문 0건 · 정상` : '주문 0건 · 정상';
+                        setChipSub('salesChipCafe24Sub', zeroSubText, 'text-emerald-700');
+                    } else if (c24Auto.state === 'auto_completed') {
+                        c24ChipEl.innerText = formatChannelChip(chRevs.cafe24, { api: collStatus.cafe24, ...srcStatus.cafe24 }, '0원');
+                        setChipSub('salesChipCafe24Sub', `${baseStr}정상`, 'text-emerald-700');
+                    } else if (c24Auto.state === 'retained') {
+                        c24ChipEl.innerText = formatChannelChip(chRevs.cafe24, { api: collStatus.cafe24, ...srcStatus.cafe24 }, '미수집');
+                        setChipSub('salesChipCafe24Sub', '이전 자료 유지', 'text-amber-900 font-semibold');
+                    } else if (c24Auto.state === 'uncollected') {
+                        c24ChipEl.innerText = '미수집';
+                        setChipSub('salesChipCafe24Sub', '미수집', 'text-slate-500');
+                    } else {
+                        c24ChipEl.innerText = formatChannelChip(chRevs.cafe24, { api: collStatus.cafe24, ...srcStatus.cafe24 }, '미수집');
+                        setChipSub('salesChipCafe24Sub', `${baseStr}${c24Auto.stateLabel}`, 'text-slate-500');
+                    }
+                } else if (mcC24Info) {
                     c24ChipEl.innerText = mcC24Info.chipText;
                     c24ChipEl.className = mcC24Info.recognizedSubtotal === null
                         ? 'mt-0.5 text-sm sm:text-base font-bold text-slate-900 leading-snug tracking-tight'
@@ -14138,6 +14914,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
             // B2B 칩 (미수집 null을 0원으로 바꾸거나 은행 입금을 매출 근거로 표기하지 않음 — 실제 0건 증거 시에만 0원)
             const b2bChipEl = document.getElementById('salesChipB2bRev');
+            const b2bManualChip = resolveB2bManualView(d, null);
             const b2bVerifiedZero = !!(mcB2bInfo ? mcB2bInfo.state === 'collected_zero' : (collStatus.b2b?.status === 'success_empty' || srcStatus.b2b?.api?.status === 'success_empty'));
             let b2bUncollected = false;
             if (b2bChipEl) {
@@ -14152,6 +14929,23 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     b2bChipEl.innerText = '0원 (주문 0건)';
                     b2bChipEl.className = 'mt-0.5 text-sm sm:text-base font-bold font-mono text-slate-900 leading-snug';
                     setChipSub('salesChipB2bSub', '정상 조회 0건 · 매출 없음', 'text-slate-500');
+                } else if ((chRevs.b2b === null || chRevs.b2b === undefined) && b2bManualChip.present) {
+                    // 기존 매출 원장 값이 없고 사용자 수기 입력(metadata.b2b_manual)이 있을 때만 칩에 수기 입력 월 합계를 표시 (통합 매출에는 더하지 않음)
+                    b2bUncollected = true;
+                    const mt = b2bManualChip.totals;
+                    if (mt.count > mt.amountMissingCount) {
+                        b2bChipEl.innerText = fmtWon(mt.amount);
+                        b2bChipEl.className = 'mt-0.5 text-base sm:text-lg font-bold font-mono text-slate-900 leading-tight';
+                        setChipSub('salesChipB2bSub', `수기 입력 ${mt.count}건 · ${b2bManualChip.month} · 부가세 제외` + (mt.amountMissingCount > 0 ? ` · 금액 미확인 ${mt.amountMissingCount}건 제외` : ''), 'text-slate-500');
+                    } else if (mt.count > 0) {
+                        b2bChipEl.innerText = '금액 미확인';
+                        b2bChipEl.className = 'mt-0.5 text-sm sm:text-base font-bold text-slate-700 leading-snug tracking-tight';
+                        setChipSub('salesChipB2bSub', `수기 입력 ${mt.count}건 · ${b2bManualChip.month}`, 'text-slate-500');
+                    } else {
+                        b2bChipEl.innerText = '수기 입력 없음';
+                        b2bChipEl.className = 'mt-0.5 text-sm sm:text-base font-bold text-slate-700 leading-snug tracking-tight';
+                        setChipSub('salesChipB2bSub', b2bManualChip.hasEntries ? `${b2bManualChip.month} 입력 없음` : '입력 파일 없음 (0원 아님)', 'text-slate-500');
+                    }
                 } else if (chRevs.b2b === null || chRevs.b2b === undefined) {
                     b2bUncollected = true;
                     const b2bReviewOnly = srcStatus.b2b?.aggregation?.status === 'review_only';
@@ -14165,6 +14959,8 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 }
             }
 
+            renderB2bManualPanel(d);
+
             // 4. 일별 매출 추이 그래프 (daily_series / 다채널 필터 분리 반영)
             const trendWrap = document.getElementById('salesTrendChartContainer');
             let rawTrend = Array.isArray(sp.daily_series) ? sp.daily_series : [];
@@ -14176,7 +14972,11 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const metricMeta = getSalesChannelMetricMeta(currentSalesChannelFilter, activeMcChannel, isProvisionalSales, isOptionQty, isUncombinedMc);
 
             const trendTitleEl = document.getElementById('salesTrendTitle');
-            if (trendTitleEl) trendTitleEl.innerText = metricMeta.trendTitle;
+            if (trendTitleEl) {
+                trendTitleEl.innerText = (currentSalesChannelFilter === 'all' || !currentSalesChannelFilter)
+                    ? '일별 매출 추이'
+                    : metricMeta.trendTitle;
+            }
             const detailTableTitleEl = document.getElementById('salesDetailTableTitle');
             if (detailTableTitleEl) detailTableTitleEl.innerText = metricMeta.tableTitle;
             const colQtyHdr = document.getElementById('salesColQtyHeader');
@@ -14218,11 +15018,13 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 }
             } else {
                 trendList = rawTrend.map(t => {
+                    const hasCoupang = (t.channels || []).some(c => c.channel === 'coupang_growth' || c.channel === 'coupang' || c.channel === 'rocket_growth');
                     if (currentSalesChannelFilter === 'all') {
                         return {
                             ...t,
                             revenue: t.revenue !== undefined ? t.revenue : null,
-                            isConfirmed: t.revenue !== undefined && t.revenue !== null
+                            isConfirmed: t.revenue !== undefined && t.revenue !== null,
+                            hasCoupangDaily: hasCoupang
                         };
                     }
                     const selected = (t.channels || []).find(c => c.channel === currentSalesChannelFilter ||
@@ -14230,7 +15032,8 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     return {
                         ...t,
                         revenue: selected ? selected.revenue : null,
-                        isConfirmed: !!selected
+                        isConfirmed: !!selected,
+                        hasCoupangDaily: hasCoupang
                     };
                 });
             }
@@ -14246,7 +15049,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             if (legendWrap) {
                 legendWrap.innerHTML = `
                     <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-slate-700"></span>${mcSales ? '쿠팡 기준' : '전체(합산)'}</span>
-                    <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-indigo-500"></span>로켓그로스</span>
+                    <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-indigo-500"></span>쿠팡 그로스</span>
                     <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>스마트스토어</span>
                     <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-amber-500"></span>카페24</span>
                     <span class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-teal-500"></span>B2B</span>
@@ -14259,6 +15062,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 if (activeMcChannel) {
                     basisBadge.innerText = activeMcChannel.basisLabel;
                     basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200';
+                } else if (currentSalesChannelFilter === 'all' || !currentSalesChannelFilter) {
+                    basisBadge.innerText = '일별 수집 기준';
+                    basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200';
                 } else {
                     const basis = sp.daily_basis || sp.basis || (rawTrend[0] && rawTrend[0].basis) || '';
                     if (basis.includes('settlement') || basis.includes('정산')) {
@@ -14271,7 +15077,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         basisBadge.innerText = '판매분석 기준 (잠정)';
                         basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200';
                     } else {
-                        basisBadge.innerText = '일별 실적 (잠정)';
+                        basisBadge.innerText = '일별 수집 기준';
                         basisBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200';
                     }
                 }
@@ -14286,7 +15092,11 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 } else if (trendList.length > 0) {
                     const startD = trendList[0].date || '';
                     const endD = trendList[trendList.length - 1].date || '';
-                    subTitleEl.innerText = `${startD} ~ ${endD} (${trendList.length}일간, 당월 누적과 구분)`;
+                    if (currentSalesChannelFilter === 'all' || !currentSalesChannelFilter) {
+                        subTitleEl.innerText = `${startD}~${endD} · 채널 합계(범례 참고)`;
+                    } else {
+                        subTitleEl.innerText = `${startD} ~ ${endD} (${trendList.length}일간, 당월 누적과 구분)`;
+                    }
                 } else {
                     subTitleEl.innerText = '최근 일자별 실적';
                 }
@@ -14321,10 +15131,13 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                             topLabel = '<span class="text-[10px] font-mono text-transparent">.</span>';
                         }
 
-                        let tooltipText = `${t.date}: ${hasData ? fmtWon(rev) : '미수집 / 미확인'}`;
+                        const isCoupangMissing = (currentSalesChannelFilter === 'all' || currentSalesChannelFilter === 'coupang_growth') && t.hasCoupangDaily === false;
+                        const coupangTitleNote = isCoupangMissing ? ' (쿠팡 일별 미수집)' : '';
+                        const tooltipText = `${t.date}: ${hasData ? fmtWon(rev) : '미수집 / 미확인'}${coupangTitleNote}`;
+                        const barTitle = isCoupangMissing ? `쿠팡 일별 미수집 (${t.date}: ${hasData ? fmtWon(rev) : '0원'})` : tooltipText;
 
                         return `
-                            <div class="flex-1 flex flex-col items-center group relative min-w-[20px] max-w-[36px]">
+                            <div class="flex-1 flex flex-col items-center group relative min-w-[20px] max-w-[36px]" title="${escapeHtml(barTitle)}">
                                 <div class="opacity-0 group-hover:opacity-100 transition absolute -top-8 px-2 py-1 bg-slate-900 text-white rounded text-[10px] font-mono whitespace-nowrap z-20 pointer-events-none shadow-md">
                                     ${tooltipText}
                                 </div>
@@ -14452,12 +15265,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     const ch = t.channel || 'coupang_growth';
                     const key = `${code}__${ch}`;
                     if (!prodMap[key]) {
-                        let chLabel = '로켓그로스';
-                        if (ch === 'smartstore') chLabel = '스마트스토어';
-                        else if (ch === 'cafe24') chLabel = '자사몰(카페24)';
-                        else if (ch === 'b2b') chLabel = 'B2B';
-                        else if (ch === 'coupang_growth' || ch === 'rocket_growth' || ch === 'coupang') chLabel = '로켓그로스';
-                        else chLabel = ch;
+                        let chLabel = getSalesChannelDisplayName(ch);
 
                         prodMap[key] = {
                             code: code,
@@ -14591,7 +15399,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             if (dtTbody) {
                 if (detailRows.length === 0) {
                     const emptyRowMsg = (currentSalesChannelFilter === 'b2b' && b2bUncollected && !activeMcChannel)
-                        ? '미수집 — B2B 매출 원장 미연동 (은행 입금은 매출로 자동 집계하지 않음)'
+                        ? (b2bManualChip.present ? "B2B 수기 매출은 위 'B2B 수기 매출 내역' 패널에서 확인하세요 (상품별 내역 없음)" : '미수집 — B2B 매출 원장 미연동 (은행 입금은 매출로 자동 집계하지 않음)')
                         : (activeMcChannel
                             ? `${activeMcChannel.chipText} — ${activeMcChannel.subText} (상세 내역은 상단 '상세 진단'에서 확인)`
                             : '해당 조건에 부합하는 상품별 매출 데이터가 없습니다.');
@@ -14722,10 +15530,17 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
                     const costCellText = sumCost !== null ? fmtWon(sumCost) : '<span class="text-slate-400">미산출</span>';
                     const feesCellText = sumFees !== null ? fmtWon(sumFees) : '<span class="text-slate-400">미산출</span>';
-                    let profitCellHtml = '<span class="text-slate-400">미산출</span>';
-                    if (sumProfit !== null) {
-                        const profColor = sumProfit < 0 ? 'text-rose-600' : 'text-emerald-700';
-                        profitCellHtml = `<span class="${profColor}">${fmtWon(sumProfit)} ${avgMarginPct !== '-' ? `(${avgMarginPct}%)` : ''}</span>`;
+                    const activeSummary = (currentSalesChannelFilter === 'all' ? sp.monthly : (sp.channels && sp.channels[currentSalesChannelFilter])) || {};
+                    const tfootProfitA = formatContributionProfitA(
+                        sumProfit !== null ? sumProfit : activeSummary.contribution_profit,
+                        activeSummary.matched_contribution_profit,
+                        activeSummary.cost_unverified_revenue,
+                        costIssues.length
+                    );
+                    let profitCellHtml = '<span class="text-slate-400">-</span>';
+                    if (tfootProfitA.hasValue) {
+                        const profColor = (tfootProfitA.val < 0) ? 'text-rose-600' : 'text-emerald-700';
+                        profitCellHtml = `<span class="${profColor}">${tfootProfitA.text} ${avgMarginPct !== '-' ? `(${avgMarginPct}%)` : ''}</span>${tfootProfitA.badgeHtml ? ' ' + tfootProfitA.badgeHtml : ''}`;
                     }
                     const footLabelText = metricMeta.footLabel(detailRows.length, mcIncludedOrderCount || detailRows.length);
 
@@ -14761,6 +15576,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
         function renderCashFlowTab(d, autoStatus = null) {
             if (!d) return;
+            renderWeeklyUploadStatusRow(d);
             const cf = d.cash_flow || {};
             const monthly = cf.monthly || {};
             const unclass = d.unclassified || {};
