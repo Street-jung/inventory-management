@@ -2442,8 +2442,33 @@ SHARE_INVENTORY_TEMPLATE = '''<!doctype html>
 
 _MASTER_COST_CACHE = None
 
+def published_inventory_cost_map():
+    """Read the inventory-owned published prices without any network request."""
+    try:
+        if is_generation_configured():
+            reader = get_generation_reader()
+            record = reader.resolve() if reader else None
+            data = record.dashboard_data if record else {}
+        else:
+            path = get_effective_dashboard_data_path()
+            data = json.loads(Path(path).read_text(encoding='utf-8')) if Path(path).is_file() else {}
+        refresh = (data.get('metadata') or {}).get('inventory_refresh') or {}
+        if 'cost_map' not in refresh:
+            return None  # older generation: local workbook remains the fallback
+        value = refresh['cost_map']
+        if not isinstance(value, dict):
+            return {}
+        return {str(code).strip().upper(): float(cost) for code, cost in value.items()
+                if isinstance(cost, (int, float)) and not isinstance(cost, bool) and 0 <= cost < float('inf')}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
 def get_master_cost_map():
     global _MASTER_COST_CACHE
+    published = published_inventory_cost_map()
+    if published is not None:
+        return published
     if _MASTER_COST_CACHE is not None:
         return _MASTER_COST_CACHE
     try:
@@ -2862,8 +2887,8 @@ def get_summary():
     )
 
     cost_map = get_master_cost_map()
-    total_stock_cost = 0
-    no_sales_stock_cost = 0
+    total_stock_cost = 0 if cost_map else None
+    no_sales_stock_cost = 0 if cost_map else None
 
     master_summaries = []
     total_gaemi_stock = 0
@@ -3283,8 +3308,8 @@ def get_summary():
             "is_coupang_no_sales": bool(metrics_available and c_physical_total > 0 and coupang_daily <= 0),
             "doc": total_runway,
             "doc_str": total_runway_str,
-            "unit_cost": cost_map.get(norm_code, 0.0),
-            "total_cost": int(round(master_physical_total * cost_map.get(norm_code, 0.0))),
+            "unit_cost": cost_map.get(norm_code),
+            "total_cost": int(round(master_physical_total * cost_map[norm_code])) if norm_code in cost_map else None,
             "status": status,
             "status_color": status_color,
             "action_cta": action_cta,
@@ -3293,11 +3318,17 @@ def get_summary():
             "options": option_details,
             "recent_orders": recent_orders
         })
-        unit_cost = cost_map.get(norm_code, 0.0)
-        item_total_cost = int(round(master_physical_total * unit_cost))
-        total_stock_cost += item_total_cost
-        if is_no_sales:
-            no_sales_stock_cost += item_total_cost
+        unit_cost = cost_map.get(norm_code)
+        if unit_cost is None and master_physical_total > 0:
+            total_stock_cost = None
+            if is_no_sales:
+                no_sales_stock_cost = None
+        elif unit_cost is not None:
+            item_total_cost = int(round(master_physical_total * unit_cost))
+            if total_stock_cost is not None:
+                total_stock_cost += item_total_cost
+            if is_no_sales and no_sales_stock_cost is not None:
+                no_sales_stock_cost += item_total_cost
 
     # 액션보드 핵심: 위험도 순(Risk Score) 강제 정렬
     master_summaries.sort(key=lambda x: x["risk_score"], reverse=True)
