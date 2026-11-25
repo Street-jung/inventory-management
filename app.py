@@ -26,7 +26,7 @@ import webbrowser
 import urllib.request
 import urllib.error
 import http.cookiejar
-from functools import wraps
+from functools import wraps, lru_cache
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from flask import Flask, render_template_string, request, jsonify, Response, send_file, make_response
@@ -966,6 +966,101 @@ def is_s_product_code(code):
         return False
     c = str(code).strip().upper()
     return c.startswith("S") or c in get_active_b2b_mappings()
+
+def gaemi_stock_for_inbound(m, gaemi_inv):
+    """Return mapped WMS stock, or None when no source row can establish a baseline."""
+    items = get_matching_gaemi_items(m, gaemi_inv)
+    return sum(max(0, int(item.get("stock", 0) or 0)) for _, item in items) if items else None
+
+
+@lru_cache(maxsize=24)
+def _read_inbound_history_file(path_str, mtime_ns, size, kind):
+    """Read one immutable local snapshot; stat fields invalidate the small cache."""
+    path = Path(path_str)
+    if kind == "generation":
+        data = json.loads(path.read_text(encoding="utf-8"))
+        snapshot_date = (data.get("inventory_snapshot_status") or {}).get("gaemi", {}).get("snapshot_date")
+        snapshot = (data.get("inventory_snapshots_v2") or {}).get("gaemi")
+        return snapshot_date, snapshot if isinstance(snapshot, dict) else None
+    try:
+        from .cloud_storage import read_inventory_sheets
+    except ImportError:
+        from cloud_storage import read_inventory_sheets
+    for _, rows in read_inventory_sheets(path):
+        snapshot = parse_gaemi_rows(rows)
+        if snapshot:
+            return path.name[:10], snapshot
+    return None, None
+
+
+def historical_gaemi_baseline(m, arrival_date):
+    """Find the newest locally readable WMS snapshot strictly before arrival."""
+    raw_root = app.config.get("INVENTORY_RAW_DIR")
+    raw_dirs = ([Path(raw_root)] if raw_root else [
+        Path(BASE_DIR).parent / "raw_data" / "inventory",
+        Path(BASE_DIR) / "raw_data" / "inventory",
+        Path("C:/AI/경영관리/raw_data/inventory"),
+    ])
+    candidates = []
+    for folder in raw_dirs:
+        if not folder.is_dir():
+            continue
+        for path in folder.iterdir():
+            if path.suffix.lower() not in (".xlsx", ".xls", ".csv") or not any(
+                marker in path.name.lower() for marker in ("gaemi", "3pl", "개미")
+            ):
+                continue
+            try:
+                snapshot_date = date.fromisoformat(path.name[:10]).isoformat()
+                if snapshot_date < arrival_date:
+                    stat = path.stat()
+                    candidates.append((snapshot_date, 1, str(path), stat.st_mtime_ns, stat.st_size, "raw"))
+            except (OSError, ValueError):
+                continue
+    cache_root = app.config.get("GENERATION_CACHE_ROOT") or os.environ.get("GENERATION_CACHE_ROOT")
+    if cache_root:
+        for path in (Path(cache_root) / "generations").glob("*/dashboard_data.json"):
+            try:
+                stat = path.stat()
+                snapshot_date, _ = _read_inbound_history_file(str(path), stat.st_mtime_ns, stat.st_size, "generation")
+                if snapshot_date and date.fromisoformat(snapshot_date).isoformat() < arrival_date:
+                    candidates.append((snapshot_date, 0, str(path), stat.st_mtime_ns, stat.st_size, "generation"))
+            except (OSError, ValueError, TypeError):
+                continue
+    newest_valid_date = None
+    for snapshot_date, _, path_str, mtime_ns, size, kind in sorted(candidates, reverse=True):
+        if newest_valid_date and snapshot_date < newest_valid_date:
+            break
+        try:
+            _, snapshot = _read_inbound_history_file(path_str, mtime_ns, size, kind)
+            if snapshot:
+                newest_valid_date = snapshot_date
+                stock = gaemi_stock_for_inbound(m, snapshot)
+                if stock is not None:
+                    return stock, snapshot_date
+        except (OSError, ValueError, TypeError, KeyError):
+            continue
+    return None, None
+
+
+def update_inbound_baseline(record, old_qty, old_date, gaemi_inv):
+    """Capture WMS stock only when an inbound plan is newly entered or changed."""
+    qty = max(0, int(record.get("in_transit_qty") or 0))
+    date = normalize_date_str(record.get("expected_arrival_date") or "")
+    if qty == old_qty and date == old_date:
+        return
+    if not qty or not date:
+        record.pop("in_transit_baseline_stock", None)
+        record.pop("in_transit_baseline_at", None)
+        return
+    baseline = gaemi_stock_for_inbound(record, gaemi_inv)
+    if baseline is None:
+        record.pop("in_transit_baseline_stock", None)
+        record.pop("in_transit_baseline_at", None)
+    else:
+        record["in_transit_baseline_stock"] = baseline
+        record["in_transit_baseline_at"] = now_kst().isoformat()
+
 
 def get_matching_gaemi_items(m, gaemi_inv):
     """
@@ -2010,6 +2105,10 @@ def _inventory_metric(value):
     return _clean_int_cell(value)
 
 
+def _inventory_sales_metric(value):
+    return 0 if isinstance(value, str) and value.strip() == "-" else _inventory_metric(value)
+
+
 def _inventory_add(a, b):
     return None if a is None or b is None else a + b
 
@@ -2152,8 +2251,8 @@ def parse_coupang_rows(rows):
         is_return = ("반품" in grade) or ("return" in grade.lower())
         stock = _clean_int_cell(r[col_stock]) if len(r) > col_stock else 0
         inbound = _clean_int_cell(r[col_inbound]) if len(r) > col_inbound else 0
-        sales7 = _inventory_metric(r[col_sales7]) if len(r) > col_sales7 else None
-        sales30 = _inventory_metric(r[col_sales30]) if len(r) > col_sales30 else None
+        sales7 = _inventory_sales_metric(r[col_sales7]) if len(r) > col_sales7 else None
+        sales30 = _inventory_sales_metric(r[col_sales30]) if len(r) > col_sales30 else None
         doc = _inventory_metric(r[col_doc]) if len(r) > col_doc else None
 
         if sales7 is None or sales30 is None:
@@ -2671,6 +2770,7 @@ def get_summary():
             "sales_codes": effective_sales_codes,
             "has_custom_sales_codes": has_explicit_sales,
             "gaemi_total": g_total,
+            "csv_gaemi_total": csv_g_total if raw_gaemi_items else None,
             "gaemi_details": ", ".join(g_details) if g_details else ("보유 재고 0개" if raw_gaemi_items else "등록 정보 없음"),
             "gaemi_lots": gaemi_lots,
             "csv_gaemi_lots": csv_lots,
@@ -2801,11 +2901,29 @@ def get_summary():
         eff_prepare_limit = eff_lead_time + eff_buffer
         eff_exp_warn = int(custom_exp_warn) if custom_exp_warn not in (None, "") else default_exp_warn
 
-        in_transit_qty = max(0, int(m.get("in_transit_qty") or 0))
+        recorded_in_transit_qty = max(0, int(m.get("in_transit_qty") or 0))
+        in_transit_qty = recorded_in_transit_qty
         expected_arrival_date = (m.get("expected_arrival_date") or "").strip()
         lot_sync_note = (m.get("lot_sync_note") or "").strip()
 
         calc = base_calc_map.get(norm_code, {})
+        inbound_state = "pending" if in_transit_qty else "none"
+        inbound_baseline_date = None
+        arrival_date = normalize_date_str(expected_arrival_date)
+        if in_transit_qty and arrival_date and arrival_date < today_kst().isoformat():
+            baseline = m.get("in_transit_baseline_stock")
+            current_wms = calc.get("csv_gaemi_total")
+            if baseline is None:
+                baseline, inbound_baseline_date = historical_gaemi_baseline(m, arrival_date)
+            else:
+                inbound_baseline_date = str(m.get("in_transit_baseline_at") or "")[:10] or None
+            if baseline is None or current_wms is None:
+                inbound_state = "manual_review"
+            elif current_wms - int(baseline) >= in_transit_qty * 0.5:
+                inbound_state = "cleared"
+                in_transit_qty = 0
+            else:
+                inbound_state = "delayed"
 
         g_total = calc.get("gaemi_total", 0)
         g_details = calc.get("gaemi_details", "")
@@ -3096,6 +3214,9 @@ def get_summary():
             "effective_prepare_limit": eff_prepare_limit,
             "effective_expiry_warn": eff_exp_warn,
             "in_transit_qty": in_transit_qty,
+            "recorded_in_transit_qty": recorded_in_transit_qty,
+            "inbound_state": inbound_state,
+            "inbound_baseline_date": inbound_baseline_date,
             "expected_arrival_date": expected_arrival_date,
             "days_to_arrival": days_to_arrival,
             "effective_total_with_transit": effective_total_stock,
@@ -3808,6 +3929,7 @@ def admin_save_product():
 
         if target_idx == -1:
             # 신규 단품 추가
+            old_inbound_qty, old_arrival_date = 0, ""
             new_id = orig_id or f"P_{seller_code}"
             existing_ids = {str(x.get("id", "")) for x in masters}
             if new_id in existing_ids:
@@ -3843,6 +3965,8 @@ def admin_save_product():
             action_label = "신규 등록"
         else:
             record = masters[target_idx]
+            old_inbound_qty = max(0, int(record.get("in_transit_qty") or 0))
+            old_arrival_date = normalize_date_str(record.get("expected_arrival_date") or "")
             old_code_upper = str(record.get("seller_code", "")).strip().upper()
             record["seller_code"] = seller_code
             record["name"] = name
@@ -3901,6 +4025,8 @@ def admin_save_product():
                     if str(binfo.get("base_code", "")).strip().upper() == old_code_upper:
                         binfo["base_code"] = norm_new_code
             action_label = "수정"
+
+        update_inbound_baseline(record, old_inbound_qty, old_arrival_date, app_state["gaemi_inventory"])
 
         # CSV 개미 로트별 소비기한 오버라이드 저장
         csv_lot_expiries = body.get("csv_lot_expiries") or {}
@@ -4138,6 +4264,8 @@ def admin_bulk_save_products():
             m = by_id.get(str(row.get("id", ""))) or by_code.get(str(row.get("seller_code", "")).strip().upper())
             if not m:
                 continue
+            old_inbound_qty = max(0, int(m.get("in_transit_qty") or 0))
+            old_arrival_date = normalize_date_str(m.get("expected_arrival_date") or "")
             if "name" in row and str(row["name"]).strip():
                 m["name"] = str(row["name"]).strip()
             if "product_type" in row and row["product_type"] in ("수입", "사입"):
@@ -4160,6 +4288,7 @@ def admin_bulk_save_products():
                 m["note"] = str(row["note"] or "").strip()
             if "is_active" in row:
                 m["is_active"] = bool(row["is_active"])
+            update_inbound_baseline(m, old_inbound_qty, old_arrival_date, app_state["gaemi_inventory"])
             updated_count += 1
 
         if isinstance(lot_updates, dict):
@@ -4382,7 +4511,7 @@ HTML_TEMPLATE = r"""
         #salesTrendLegend > span, #btnToggleZeroSales { white-space: nowrap; }
         @media (max-width: 640px) {
             #mainTabBar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-            #mainTabBar button { min-width: 0; justify-content: center; }
+            #mainTabBar button { min-width: 0; justify-content: center; white-space: nowrap; }
             .dashboard-tab-content { min-width: 0; }
             .dashboard-tab-content > div { min-width: 0; }
             .detail-view-toggle { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 12px; }
@@ -4495,16 +4624,16 @@ HTML_TEMPLATE = r"""
     {% if not is_share_mode %}
     <!-- 상단 미니멀 헤더 -->
     <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
-            <div class="flex items-center space-x-3 min-w-0">
+        <div class="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center space-x-2.5 sm:space-x-3 min-w-0">
                 <div class="h-8 px-1 flex items-center justify-center shrink-0">
                     <img src="/logo.png" alt="일쩜오도 로고" class="h-7 w-auto object-contain">
                 </div>
                 <div class="min-w-0">
                     <h1 id="headerMainTitle" class="text-sm sm:text-base font-bold tracking-tight text-slate-900 truncate">일쩜오도 경영관리 대시보드</h1>
                     <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
-                        <span title="데이터 파일(개미창고·쿠팡·매출) 최종 업로드 시간 (KST)">
-                            업데이트 <span id="headerLastUpdated" class="font-mono text-slate-700 font-semibold">확인 중...</span>
+                        <span id="headerLastUpdated" class="font-mono text-slate-700 font-semibold" title="데이터 최종 갱신 시간 (KST)">
+                            데이터 갱신 확인 중...
                         </span>
                         <span class="text-slate-300">·</span>
                         <span id="driveSyncBadge" class="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500" title="Google Drive 영구 저장소 연동 상태">
@@ -4600,25 +4729,25 @@ HTML_TEMPLATE = r"""
         <!-- 4대 메인 탭 네비게이션 (모바일 가로 스크롤 지원 & PIN 기반 보안 잠금) -->
         <nav id="mainTabBar" class="grid grid-cols-2 sm:flex items-center gap-1.5 p-1 bg-slate-200/80 rounded-xl text-xs font-semibold text-slate-600">
             <!-- ① 일일 상품 매출 (첫 화면, Default) -->
-            <button type="button" onclick="switchDashboardTab('sales')" id="tabBtn_sales" class="dashboard-tab-btn active px-3.5 py-2 rounded-lg transition flex items-center gap-2 whitespace-nowrap bg-white text-slate-900 shadow-xs cursor-pointer">
+            <button type="button" onclick="switchDashboardTab('sales')" id="tabBtn_sales" class="dashboard-tab-btn active px-2 sm:px-3.5 py-2 rounded-lg transition flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap text-[11px] sm:text-xs bg-white text-slate-900 shadow-xs cursor-pointer min-w-0">
                 <i class="fa-solid fa-chart-line text-indigo-600"></i>
-                <span>일일 상품 매출</span>
+                <span class="truncate">일일 상품 매출</span>
             </button>
             <!-- ② 일일 재고현황 -->
-            <button type="button" onclick="switchDashboardTab('inventory')" id="tabBtn_inventory" class="dashboard-tab-btn px-3.5 py-2 rounded-lg transition flex items-center gap-2 whitespace-nowrap text-slate-600 hover:text-slate-900 hover:bg-white/60 cursor-pointer">
+            <button type="button" onclick="switchDashboardTab('inventory')" id="tabBtn_inventory" class="dashboard-tab-btn px-2 sm:px-3.5 py-2 rounded-lg transition flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap text-[11px] sm:text-xs text-slate-600 hover:text-slate-900 hover:bg-white/60 cursor-pointer min-w-0">
                 <i class="fa-solid fa-boxes-stacked text-slate-700"></i>
-                <span>일일 재고현황</span>
+                <span class="truncate">일일 재고현황</span>
             </button>
             <!-- ③ 일일 현금흐름 -->
-            <button type="button" onclick="switchDashboardTab('cashflow')" id="tabBtn_cashflow" class="dashboard-tab-btn px-3.5 py-2 rounded-lg transition flex items-center gap-2 whitespace-nowrap text-slate-600 hover:text-slate-900 hover:bg-white/60 cursor-pointer">
+            <button type="button" onclick="switchDashboardTab('cashflow')" id="tabBtn_cashflow" class="dashboard-tab-btn px-2 sm:px-3.5 py-2 rounded-lg transition flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap text-[11px] sm:text-xs text-slate-600 hover:text-slate-900 hover:bg-white/60 cursor-pointer min-w-0">
                 <i class="fa-solid fa-money-bill-transfer text-emerald-600"></i>
-                <span>일일 현금흐름</span>
+                <span class="truncate">일일 현금흐름</span>
                 <span id="tabBadgeUnclassified" class="hidden px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500 text-white leading-none">0</span>
             </button>
             <!-- ④ 월 손익결산 -->
-            <button type="button" onclick="switchDashboardTab('pnl')" id="tabBtn_pnl" class="dashboard-tab-btn px-3.5 py-2 rounded-lg transition flex items-center gap-2 whitespace-nowrap text-slate-600 hover:text-slate-900 hover:bg-white/60 cursor-pointer">
+            <button type="button" onclick="switchDashboardTab('pnl')" id="tabBtn_pnl" class="dashboard-tab-btn px-2 sm:px-3.5 py-2 rounded-lg transition flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap text-[11px] sm:text-xs text-slate-600 hover:text-slate-900 hover:bg-white/60 cursor-pointer min-w-0">
                 <i class="fa-solid fa-file-invoice-dollar text-violet-600"></i>
-                <span>월 손익결산</span>
+                <span class="truncate">월 손익결산</span>
             </button>
         </nav>
 
@@ -4901,6 +5030,7 @@ HTML_TEMPLATE = r"""
         <!-- 재고 자료 수집 상태 (개미창고 WMS · 쿠팡 재고) -->
         <div id="inventoryCollectionStatusBox" class="bg-white rounded-xl border border-slate-200 p-3 sm:p-3.5 shadow-xs space-y-1.5 hidden">
             <div class="text-[11px] font-bold text-slate-700">재고 자료 수집 상태</div>
+            <div id="inventoryStaleSourceBadges" class="hidden flex flex-wrap gap-1.5 min-w-0" aria-label="당일 미갱신 자료"></div>
             <div id="inventoryCollectionStatusRow" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
         </div>
 
@@ -5139,8 +5269,8 @@ HTML_TEMPLATE = r"""
         </div>
 
         {% if not is_share_mode %}
-        <!-- 4. CSV 수기 업데이트 존 -->
-        <div class="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+        <!-- 4. CSV 파일 업로드 존 (F-I2: 일반 화면에서 숨김, 관리자 모드에서만 노출) -->
+        <div id="manualUploadSection" class="bg-white rounded-xl border border-slate-200 p-4 space-y-3 admin-only hidden">
             <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
                 <div class="flex items-center space-x-2">
                     <i class="fa-solid fa-cloud-arrow-up text-slate-600 text-sm"></i>
@@ -7147,6 +7277,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
         const LEGACY_COL_WIDTHS_STORAGE_KEY = 'iljeomodo_col_widths_v1';
         let currentColumnOrder = [...DEFAULT_COLUMN_ORDER];
         let customColWidths = {};
+        let currentSummaryData = null;
         
         // localStorage에서 저장된 열 순서 & 너비 불러오기 (v7 11열 보드 전용, v1 호환 지원)
         try {
@@ -7355,13 +7486,16 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
         function updateAdminUI() {
             const btnUnlock = document.getElementById('btnAdminUnlock');
             const toolbar = document.getElementById('adminToolbarBtns');
+            const uploadSection = document.getElementById('manualUploadSection');
             if (isAdminMode) {
                 if (btnUnlock) btnUnlock.classList.add('hidden');
                 if (toolbar) toolbar.classList.remove('hidden');
+                if (uploadSection) uploadSection.classList.remove('hidden');
             } else {
                 closeAdminMenu();
                 if (btnUnlock) btnUnlock.classList.remove('hidden');
                 if (toolbar) toolbar.classList.add('hidden');
+                if (uploadSection) uploadSection.classList.add('hidden');
             }
             if (typeof updateTabLockUI === 'function') {
                 updateTabLockUI();
@@ -8016,7 +8150,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     <div class="min-w-0 break-words leading-relaxed">
                         <span class="font-bold">발주 완료 · 입고 예정:</span>
                         <span>
-                            ${m.expected_arrival_date ? `<strong>${escapeHtml(m.expected_arrival_date)}</strong>에 ` : ''}<strong>+${m.in_transit_qty.toLocaleString()}개</strong> 입고 예정입니다.
+                            ${m.expected_arrival_date ? `<strong>${escapeHtml(m.expected_arrival_date)}</strong>에 ` : ''}<strong>+${m.in_transit_qty.toLocaleString()}개</strong> ${m.inbound_state === 'delayed' ? '입고 지연' : m.inbound_state === 'manual_review' ? '입고 확인 필요' : '입고 예정'}입니다.
                             ${m.daily_sales > 0
                                 ? `(${m.master_physical_total > 0 ? `현재 실물 <strong>${escapeHtml(m.total_runway_str)}</strong>` : '현재 실물 <strong>0개</strong>'} → 입고 반영 시 총 <strong>${escapeHtml(m.effective_runway_str)}</strong>)`
                                 : `(입고 반영 시 가용재고 <strong>${(m.master_physical_total + m.in_transit_qty).toLocaleString()}개</strong> 확보)`}
@@ -8047,7 +8181,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         <div class="text-[10px] font-semibold text-slate-500">총 가용재고</div>
                         <div class="font-bold font-mono text-sm text-slate-900 mt-0.5">${m.master_physical_total.toLocaleString()}개</div>
                         ${m.in_transit_qty > 0
-                            ? `<div class="text-[10px] font-semibold text-teal-700 truncate">🚢 예정 +${m.in_transit_qty.toLocaleString()}개</div>`
+                            ? `<div class="text-[10px] font-semibold text-teal-700 truncate">🚢 ${m.inbound_state === 'delayed' ? '입고 지연' : m.inbound_state === 'manual_review' ? '입고 확인 필요' : '예정'} +${m.in_transit_qty.toLocaleString()}개</div>`
                             : `<div class="text-[10px] text-slate-400">전체 창고 합산</div>`}
                     </div>
                     <div class="bg-slate-50/70 border border-slate-200 rounded-xl px-3 py-2">
@@ -8084,7 +8218,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         <span>기한경고 <strong>${m.effective_expiry_warn || 120}일</strong></span>
                         <span class="text-slate-300">·</span>
                         <span><i class="fa-regular fa-hourglass-half text-slate-400 mr-1"></i>기본 소비기한 ${shelfLifeMonths ? `<strong class="text-slate-900">제조일로부터 ${shelfLifeMonths}개월</strong>` : '<span class="text-slate-400">미등록</span>'}</span>
-                        ${m.in_transit_qty > 0 ? `<span class="text-slate-300">·</span><span class="text-teal-700 font-semibold">입고예정 +${m.in_transit_qty.toLocaleString()}개 (${escapeHtml(m.expected_arrival_date || '미정')})</span>` : ''}
+                        ${m.in_transit_qty > 0 ? `<span class="text-slate-300">·</span><span class="text-teal-700 font-semibold">${m.inbound_state === 'delayed' ? '입고 지연' : m.inbound_state === 'manual_review' ? '입고 확인 필요' : '입고예정'} +${m.in_transit_qty.toLocaleString()}개 (${escapeHtml(m.expected_arrival_date || '미정')})</span>` : ''}
                     </div>
                     ${m.note ? `
                         <div class="pt-1.5 border-t border-slate-200/80 break-words text-slate-700">
@@ -8631,6 +8765,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             try {
                 const res = await fetch('/api/summary');
                 const data = await res.json();
+                currentSummaryData = data;
                 allMasterData = data.masters || [];
                 if (data.settings) {
                     globalSettings = data.settings;
@@ -8659,13 +8794,8 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 }
                 updateDriveSyncBadge(data.drive_sync);
 
-                // 1. 헤더 재고 업데이트 일시 표기 (데이터 파일 업로드 시간 · KST)
-                const headerLastUpdatedEl = document.getElementById('headerLastUpdated');
-                if (headerLastUpdatedEl) {
-                    headerLastUpdatedEl.innerText = data.stats.last_updated
-                        ? `${data.stats.last_updated} (KST)`
-                        : '파일 업로드 대기 중';
-                }
+                // 1. 헤더 재고 업데이트 일시 표기 (자동 갱신 · 수동 업로드 분리)
+                renderHeaderLastUpdated(data, currentDashboardData);
 
                 // 2. 통합 Action KPI 통계 갱신
                 document.getElementById('statUrgentOrders').innerText = (data.stats.urgent_order_count || 0);
@@ -8676,13 +8806,25 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 if (elNoSales) elNoSales.innerText = (data.stats.no_sales_count || 0);
                 const elNoSalesCost = document.getElementById('statNoSalesCost');
                 if (elNoSalesCost) {
-                    const nCost = data.stats.no_sales_stock_cost || 67045337;
-                    elNoSalesCost.innerText = `약 ${Math.round(nCost / 10000).toLocaleString()}만`;
-                    elNoSalesCost.title = `판매 정체(21종) 묶인 재고 원가 합계: ${fmtWon(nCost)}`;
+                    const rawNCost = data.stats ? data.stats.no_sales_stock_cost : null;
+                    if (rawNCost !== null && rawNCost !== undefined && !isNaN(Number(rawNCost))) {
+                        const nCost = Number(rawNCost);
+                        if (nCost === 0) {
+                            elNoSalesCost.innerText = '0원';
+                            elNoSalesCost.title = '판매 정체 묶인 재고 원가 합계: 0원';
+                        } else {
+                            elNoSalesCost.innerText = `약 ${Math.round(nCost / 10000).toLocaleString()}만`;
+                            elNoSalesCost.title = `판매 정체 묶인 재고 원가 합계: ${fmtWon(nCost)}`;
+                        }
+                    } else {
+                        elNoSalesCost.innerText = '-';
+                        elNoSalesCost.title = '판매 정체 묶인 재고 원가 미산출';
+                    }
                 }
                 const elNoSalesTitle = document.getElementById('statNoSalesTitle');
                 if (elNoSalesTitle) {
-                    elNoSalesTitle.innerText = `판매 정체 (${data.stats.no_sales_count || 21}종)`;
+                    const nsCount = (data.stats && data.stats.no_sales_count !== null && data.stats.no_sales_count !== undefined) ? data.stats.no_sales_count : '-';
+                    elNoSalesTitle.innerText = `판매 정체 (${nsCount}종)`;
                 }
                 document.getElementById('statSafeStock').innerText = (data.stats.safe_count || 0);
                 const inboundCnt = data.stats.in_transit_count || 0;
@@ -8725,9 +8867,20 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 document.getElementById('statTotalStock').innerText = data.stats.total_physical_stock.toLocaleString() + '개';
                 const elTotalStockCost = document.getElementById('statTotalStockCost');
                 if (elTotalStockCost) {
-                    const tCost = data.stats.total_stock_cost || 142998067;
-                    elTotalStockCost.innerText = `원가 약 ${(tCost / 100000000).toFixed(2)}억 원`;
-                    elTotalStockCost.title = `총 가용재고 실물 원가 합계: ${fmtWon(tCost)}`;
+                    const rawTCost = data.stats ? data.stats.total_stock_cost : null;
+                    if (rawTCost !== null && rawTCost !== undefined && !isNaN(Number(rawTCost))) {
+                        const tCost = Number(rawTCost);
+                        if (tCost === 0) {
+                            elTotalStockCost.innerText = '원가 0원';
+                            elTotalStockCost.title = '총 가용재고 실물 원가 합계: 0원';
+                        } else {
+                            elTotalStockCost.innerText = `원가 약 ${(tCost / 100000000).toFixed(2)}억 원`;
+                            elTotalStockCost.title = `총 가용재고 실물 원가 합계: ${fmtWon(tCost)}`;
+                        }
+                    } else {
+                        elTotalStockCost.innerText = '원가 미산출';
+                        elTotalStockCost.title = '총 가용재고 실물 원가 미산출';
+                    }
                 }
                 const elSales7 = document.getElementById('statTotalSales7d');
                 if (elSales7) {
@@ -8748,32 +8901,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     elSalesSub.innerText = `(쿠팡 7일 ${c7Text} / 30일 ${c30Text} + 타채널 7일 ${o7Text} / 30일 ${o30Text})`;
                 }
 
-                // 4. 하단 소스 상태 배지
-                const ut = data.stats.upload_timestamps || {};
-                const elGaemiStatus = document.getElementById('gaemiStatusText');
-                if (elGaemiStatus && data.stats.has_gaemi_data) {
-                    elGaemiStatus.innerText = "✅ 개미창고 소비기한 & 재고 로드됨" + (ut.gaemi ? ` (${ut.gaemi})` : "");
-                    elGaemiStatus.className = "text-[10px] text-slate-700 font-semibold";
-                }
-                const elCoupangStatus = document.getElementById('coupangStatusText');
-                if (elCoupangStatus && data.stats.has_coupang_data) {
-                    const missGrade = data.stats.coupang_missing_grade_count || 0;
-                    const retOptCnt = data.stats.coupang_return_option_count || 0;
-                    const tsSuffix = ut.coupang ? ` (${ut.coupang})` : "";
-                    if (missGrade > 0) {
-                        elCoupangStatus.innerText = `⚠️ 등급(반품) 미포함 ${missGrade}건 · 파일 재업로드 시 반품 자동 분리${tsSuffix}`;
-                        elCoupangStatus.className = "text-[10px] text-amber-700 font-bold";
-                    } else {
-                        const retBadgeTxt = retOptCnt > 0 ? ` · 🔄 반품옵션 ${retOptCnt}건` : "";
-                        elCoupangStatus.innerText = `✅ 쿠팡 윙 재고 로드됨${retBadgeTxt}${tsSuffix}`;
-                        elCoupangStatus.className = "text-[10px] text-slate-700 font-semibold";
-                    }
-                }
-                const elSalesStatus = document.getElementById('salesStatusText');
-                if (elSalesStatus && data.stats.has_sales_data) {
-                    elSalesStatus.innerText = "✅ 쿠팡외 통합 매출 로드됨" + (ut.sales ? ` (${ut.sales})` : "");
-                    elSalesStatus.className = "text-[10px] text-slate-700 font-semibold";
-                }
+                // 4. 하단 소스 상태 배지 및 재고 수집 상태 행 갱신
+                renderBottomSourceStatusBadges(data, currentDashboardData);
+                renderInventoryCollectionStatusRow(currentDashboardData, currentAutomationStatus, data);
 
                 // 5. 공개 연동 주소 저장
                 if (data.public_url) {
@@ -8838,7 +8968,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     <p class="text-[11px] text-slate-500">옵션 ${(m.options || []).length}개 · 보유재고 ${number(m.master_physical_total)}개</p></div>
                     <div class="flex flex-wrap gap-1"><span class="px-2 py-1 rounded-lg border text-[11px] ${theme.pill}">${escapeHtml(m.status || '상태 확인')}</span>
                     ${m.action_cta && m.action_cta !== m.status ? `<span class="text-[11px] text-slate-600">${escapeHtml(m.action_cta)}</span>` : ''}
-                    ${m.in_transit_qty > 0 ? `<span class="text-[11px] text-teal-700">입고 예정 +${number(m.in_transit_qty)}개</span>` : ''}</div>
+                    ${m.in_transit_qty > 0 ? `<span class="text-[11px] text-teal-700">${m.inbound_state === 'delayed' ? '입고 지연' : m.inbound_state === 'manual_review' ? '입고 확인 필요' : '입고 예정'} +${number(m.in_transit_qty)}개</span>` : ''}</div>
                     <div class="mobile-metrics text-slate-600">
                         <div><p class="text-[11px]">가용재고 합계</p><strong class="text-base text-slate-900">${number(stock)}개</strong>
                         <p class="text-[11px]">개미 ${number(m.gaemi_total)} / 쿠팡 ${isCoupangLinked(m) ? number(m.coupang_physical_total) : '미연결'}</p>
@@ -8999,7 +9129,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 const barPercent = metricsUnavailable ? 0 : (isOutOfStockTotal && !hasInboundCover) ? 8 : ((isStagnantTotal || (hasInboundCover && m.daily_sales <= 0)) ? 100 : Math.min(100, Math.max(8, (barMetric / barBase) * 100)));
 
                 const inTransitHtml = (m.in_transit_qty && m.in_transit_qty > 0)
-                    ? `<div class="text-[11px] font-semibold text-teal-700 mt-0.5 whitespace-nowrap" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 +${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
+                    ? `<div class="text-[11px] font-semibold text-teal-700 mt-0.5 whitespace-nowrap" title="예상 입고일: ${escapeHtml(m.expected_arrival_date || '미정')}">🚢 ${m.inbound_state === 'delayed' ? '입고 지연 ' : m.inbound_state === 'manual_review' ? '입고 확인 필요 ' : ''}+${m.in_transit_qty.toLocaleString()}${m.expected_arrival_date ? ' (' + escapeHtml(m.expected_arrival_date.slice(5)) + ')' : ''}</div>`
                     : '';
 
                 const hasCoupangLink = isCoupangLinked(m);
@@ -9792,7 +9922,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             document.getElementById('ep_lead_time_days').value = (item.lead_time_days !== null && item.lead_time_days !== undefined) ? item.lead_time_days : '';
             document.getElementById('ep_safety_buffer_days').value = (item.safety_buffer_days !== null && item.safety_buffer_days !== undefined) ? item.safety_buffer_days : '';
             document.getElementById('ep_expiry_warn_days').value = (item.expiry_warn_days !== null && item.expiry_warn_days !== undefined) ? item.expiry_warn_days : '';
-            document.getElementById('ep_in_transit_qty').value = item.in_transit_qty || 0;
+            document.getElementById('ep_in_transit_qty').value = item.recorded_in_transit_qty ?? item.in_transit_qty ?? 0;
             document.getElementById('ep_expected_arrival_date').value = item.expected_arrival_date || '';
             document.getElementById('ep_shelf_life_months').value = (item.shelf_life_months !== null && item.shelf_life_months !== undefined && Number(item.shelf_life_months) > 0) ? item.shelf_life_months : '';
             document.getElementById('ep_default_expiry_date').value = item.default_expiry_date || '';
@@ -10342,7 +10472,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         </td>
                         <td class="p-1.5"><input type="text" list="categorySuggestions" class="ac-b-cat w-full px-2 py-1 border border-slate-300 rounded" value="${escapeHtml(m.category || '')}"></td>
                         <td class="p-1.5"><input type="number" min="0" class="ac-b-lt w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-right" placeholder="기본" value="${(m.lead_time_days !== null && m.lead_time_days !== undefined) ? m.lead_time_days : ''}"></td>
-                        <td class="p-1.5"><input type="number" min="0" class="ac-b-transit w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-right" value="${m.in_transit_qty || 0}"></td>
+                        <td class="p-1.5"><input type="number" min="0" class="ac-b-transit w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-right" value="${m.recorded_in_transit_qty ?? m.in_transit_qty ?? 0}"></td>
                         <td class="p-1.5"><input type="date" class="ac-b-arr w-full px-1.5 py-1 border border-slate-300 rounded font-mono text-[11px]" value="${escapeHtml(m.expected_arrival_date || '')}"></td>
                         <td class="p-1.5">
                             <div class="flex items-center gap-1">
@@ -12920,6 +13050,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 renderSalesTab(data, autoStatus);
                 renderCashFlowTab(data, autoStatus);
                 renderPnLTab(data, autoStatus);
+                renderInventoryCollectionStatusRow(data, autoStatus, currentSummaryData);
+                renderHeaderLastUpdated(currentSummaryData, data);
+                renderBottomSourceStatusBadges(currentSummaryData, data);
 
                 // 미분류 배지 표시 (탭 버튼)
                 const unclassCount = data.unclassified ? (data.unclassified.count || 0) : 0;
@@ -13373,9 +13506,11 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 'COUPANG_COLLECTION_FAILED': '쿠팡 수집 실패',
                 'GW.IP_NOT_ALLOWED': '스마트스토어 API 호출 IP 미등록',
                 'http_403': '스마트스토어 인증 거부',
-                'api_collection_failed': '수집 실패'
+                'api_collection_failed': '수집 실패',
+                'stale_file': '재고 파일이 오래됨',
+                'server_validation_failed': '서버 검증 제외'
             };
-            return m[code] || '수집 실패(코드 확인 필요)';
+            return m[code] || m[String(code).toLowerCase()] || m[String(code).toUpperCase()] || '수집 실패(코드 확인 필요)';
         }
 
         function resolveKeptPreviousDailyRefreshState(code) {
@@ -13894,48 +14029,393 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             }
         }
 
-        function renderInventoryCollectionStatusRow(d, autoStatus) {
+        // [F-I1] 재고 스냅샷 기준일 및 수집 상태 표시 (오래됨 임계값: 2일 이상)
+        const INVENTORY_STALE_DAYS_THRESHOLD = 2;
+
+        function getTodayKstStr() {
+            try {
+                const parts = new Intl.DateTimeFormat('en-CA', {
+                    timeZone: 'Asia/Seoul',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit'
+                }).format(new Date());
+                return parts;
+            } catch (_) {
+                return new Date().toISOString().slice(0, 10);
+            }
+        }
+
+        function inventoryDaysBetween(dateStr, todayStr) {
+            if (!dateStr || !todayStr) return null;
+            const d1 = String(dateStr).trim().slice(0, 10);
+            const d2 = String(todayStr).trim().slice(0, 10);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(d1) || !/^\d{4}-\d{2}-\d{2}$/.test(d2)) return null;
+            const ms1 = Date.UTC(Number(d1.slice(0, 4)), Number(d1.slice(5, 7)) - 1, Number(d1.slice(8, 10)));
+            const ms2 = Date.UTC(Number(d2.slice(0, 4)), Number(d2.slice(5, 7)) - 1, Number(d2.slice(8, 10)));
+            return Math.round((ms2 - ms1) / 86400000);
+        }
+
+        function formatKstShort(isoOrStr) {
+            if (!isoOrStr) return '';
+            const str = String(isoOrStr).trim();
+            try {
+                const dt = new Date(str);
+                if (!isNaN(dt.getTime())) {
+                    const parts = new Intl.DateTimeFormat('ko-KR', {
+                        timeZone: 'Asia/Seoul',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    }).formatToParts(dt);
+                    const m = parts.find(p => p.type === 'month')?.value || '';
+                    const d = parts.find(p => p.type === 'day')?.value || '';
+                    const h = parts.find(p => p.type === 'hour')?.value || '';
+                    const min = parts.find(p => p.type === 'minute')?.value || '';
+                    if (m && d && h && min) {
+                        return `${m}-${d} ${h}:${min}`;
+                    }
+                }
+            } catch (_) {}
+            const m1 = str.match(/(\d{4}-)?(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+            if (m1) return `${m1[2]}-${m1[3]} ${m1[4]}:${m1[5]}`;
+            const m2 = str.match(/(\d{2})[/-](\d{2})[ ]+(\d{2}):(\d{2})/);
+            if (m2) return `${m2[1]}-${m2[2]} ${m2[3]}:${m2[4]}`;
+            return str.slice(0, 16);
+        }
+
+        function formatMonthDay(isoOrDateStr) {
+            if (!isoOrDateStr) return '';
+            const str = String(isoOrDateStr).trim();
+            const m = str.match(/(\d{4}-)?(\d{2})-(\d{2})/);
+            if (m) return `${m[2]}-${m[3]}`;
+            const m2 = str.match(/(\d{2})[/-](\d{2})/);
+            if (m2) return `${m2[1]}-${m2[2]}`;
+            return str;
+        }
+
+        function formatHourMin(isoOrTimeStr) {
+            if (!isoOrTimeStr) return '';
+            const str = String(isoOrTimeStr).trim();
+            try {
+                const dt = new Date(str);
+                if (!isNaN(dt.getTime())) {
+                    const parts = new Intl.DateTimeFormat('ko-KR', {
+                        timeZone: 'Asia/Seoul',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    }).formatToParts(dt);
+                    const h = parts.find(p => p.type === 'hour')?.value || '';
+                    const min = parts.find(p => p.type === 'minute')?.value || '';
+                    if (h && min) return `${h}:${min}`;
+                }
+            } catch (_) {}
+            const m = str.match(/(?:[ T]|^)(\d{2}):(\d{2})/);
+            if (m) return `${m[1]}:${m[2]}`;
+            return '';
+        }
+
+        function renderHeaderLastUpdated(summaryData, dashboardData) {
+            const el = document.getElementById('headerLastUpdated');
+            if (!el) return;
+            const s = summaryData || (typeof currentSummaryData !== 'undefined' ? currentSummaryData : null);
+            const d = dashboardData || (typeof currentDashboardData !== 'undefined' ? currentDashboardData : null);
+
+            const autoIso = d?.metadata?.daily_refresh?.built_at || d?._generation?.published_at || d?.metadata?.published_at || null;
+            const manualStr = s?.stats?.data_uploaded_at || s?.stats?.last_updated || null;
+
+            // F-I2: 값 우선순위: metadata.daily_refresh.built_at (또는 _generation 게시 시각) -> 없으면 stats.data_uploaded_at. 둘 다 없으면 '파일 업로드 대기 중'
+            const targetTs = autoIso || manualStr;
+            if (targetTs) {
+                const formatted = formatKstShort(targetTs);
+                el.innerText = `데이터 갱신 ${formatted}`;
+            } else {
+                el.innerText = '파일 업로드 대기 중';
+            }
+        }
+
+        function renderBottomSourceStatusBadges(summaryData, dashboardData) {
+            const s = summaryData || (typeof currentSummaryData !== 'undefined' ? currentSummaryData : null);
+            const d = dashboardData || (typeof currentDashboardData !== 'undefined' ? currentDashboardData : null);
+            if (!s || !s.stats) return;
+
+            const ut = s.stats.upload_timestamps || {};
+
+            // 1. 개미창고 상태 배지
+            const elGaemiStatus = document.getElementById('gaemiStatusText');
+            if (elGaemiStatus && s.stats.has_gaemi_data) {
+                let dateSuffix = '';
+                const snapGaemi = d?.inventory_snapshot_status?.gaemi?.snapshot_date || d?.inventory_snapshots?.gaemi?.snapshot_date;
+                if (snapGaemi) {
+                    dateSuffix = ` (${formatMonthDay(snapGaemi)} 기준)`;
+                } else if (ut.gaemi) {
+                    dateSuffix = ` (${ut.gaemi}, 업로드 기준)`;
+                }
+                elGaemiStatus.innerText = "✅ 개미창고 소비기한 & 재고 로드됨" + dateSuffix;
+                elGaemiStatus.className = "text-[10px] text-slate-700 font-semibold";
+            }
+
+            // 2. 쿠팡 윙 재고 상태 배지
+            const elCoupangStatus = document.getElementById('coupangStatusText');
+            if (elCoupangStatus && s.stats.has_coupang_data) {
+                const missGrade = s.stats.coupang_missing_grade_count || 0;
+                const retOptCnt = s.stats.coupang_return_option_count || 0;
+                let dateSuffix = '';
+                const snapCoupang = d?.inventory_snapshot_status?.coupang?.snapshot_date || d?.inventory_snapshots?.coupang?.snapshot_date;
+                if (snapCoupang) {
+                    dateSuffix = ` (${formatMonthDay(snapCoupang)} 기준)`;
+                } else if (ut.coupang) {
+                    dateSuffix = ` (${ut.coupang}, 업로드 기준)`;
+                }
+
+                if (missGrade > 0) {
+                    elCoupangStatus.innerText = `⚠️ 등급(반품) 미포함 ${missGrade}건 · 파일 재업로드 시 반품 자동 분리${dateSuffix}`;
+                    elCoupangStatus.className = "text-[10px] text-amber-700 font-bold";
+                } else {
+                    const retBadgeTxt = retOptCnt > 0 ? ` · 🔄 반품옵션 ${retOptCnt}건` : "";
+                    elCoupangStatus.innerText = `✅ 쿠팡 윙 재고 로드됨${retBadgeTxt}${dateSuffix}`;
+                    elCoupangStatus.className = "text-[10px] text-slate-700 font-semibold";
+                }
+            }
+
+            // 3. 타채널 통합 매출 상태 배지
+            const elSalesStatus = document.getElementById('salesStatusText');
+            if (elSalesStatus && s.stats.has_sales_data) {
+                elSalesStatus.innerText = "✅ 쿠팡외 통합 매출 로드됨" + (ut.sales ? ` (${ut.sales})` : "");
+                elSalesStatus.className = "text-[10px] text-slate-700 font-semibold";
+            }
+        }
+
+        function resolveInventorySourceCardInfo(sourceKey, d, effectiveAuto, summaryData) {
+            const isGaemi = sourceKey === 'gaemi' || sourceKey === 'gaemi_inventory';
+            const sKey = isGaemi ? 'gaemi' : 'coupang';
+            const chKey = isGaemi ? 'gaemi_inventory' : 'coupang_inventory';
+            const name = isGaemi ? '개미창고 WMS (재고)' : '쿠팡 윙 (재고)';
+
+            const snapStatus = d?.inventory_snapshot_status?.[sKey] || null;
+            const snapLegacy = d?.inventory_snapshots?.[sKey] || null;
+            const ut = summaryData?.stats?.upload_timestamps || (typeof currentSummaryData !== 'undefined' ? currentSummaryData?.stats?.upload_timestamps : null) || {};
+            const utVal = ut[sKey] || null;
+
+            let rawDate = null;
+            let rawTime = null;
+            let isManualUploadFallback = false;
+
+            if (snapStatus && snapStatus.snapshot_date) {
+                rawDate = snapStatus.snapshot_date;
+                rawTime = snapStatus.observed_at || snapStatus.collected_at || null;
+            } else if (snapLegacy && snapLegacy.snapshot_date) {
+                rawDate = snapLegacy.snapshot_date;
+                rawTime = snapLegacy.observed_at || snapLegacy.collected_at || null;
+            } else if (utVal) {
+                isManualUploadFallback = true;
+                rawDate = utVal;
+                rawTime = utVal;
+            }
+
+            let sourceAsOfDisplay = '-';
+            let formattedDateMmDd = '';
+            if (rawDate) {
+                formattedDateMmDd = formatMonthDay(rawDate);
+                if (isManualUploadFallback) {
+                    sourceAsOfDisplay = `${formattedDateMmDd} (업로드 기준)`;
+                } else {
+                    sourceAsOfDisplay = formattedDateMmDd;
+                }
+            }
+
+            let capturedAtDisplay = '-';
+            if (rawTime) {
+                const hm = formatHourMin(rawTime);
+                capturedAtDisplay = hm ? `${hm}` : formatKstShort(rawTime);
+            } else if (!isManualUploadFallback && effectiveAuto?.channels?.[chKey]) {
+                const autoCh = effectiveAuto.channels[chKey];
+                const at = autoCh.success_at || autoCh.attempted_at;
+                if (at) capturedAtDisplay = formatHourMin(at) || formatKstShort(at);
+            }
+
+            const todayKst = getTodayKstStr();
+            const daysDiff = inventoryDaysBetween(rawDate, todayKst);
+            const isStale = (daysDiff !== null && daysDiff >= INVENTORY_STALE_DAYS_THRESHOLD);
+
+            const invRefSrc = d?.metadata?.inventory_refresh?.sources?.[sKey] || null;
+            const drCh = d?.metadata?.daily_refresh?.channels?.[chKey] || effectiveAuto?.channels?.[chKey] || null;
+
+            let stateLabel = '';
+            let badgeClass = '';
+            let dotColor = 'bg-slate-400';
+            let detailNote = '-';
+            let hasCollectionMeta = false;
+
+            if (invRefSrc) {
+                hasCollectionMeta = true;
+                if (invRefSrc.status === 'included') {
+                    stateLabel = '이번 게시 반영';
+                    badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+                    dotColor = 'bg-emerald-500';
+                    detailNote = '이번 게시 반영';
+                } else if (invRefSrc.status === 'kept_live' || invRefSrc.status === 'kept_previous') {
+                    const reason = invRefSrc.code ? mapDailyRefreshErrorCode(invRefSrc.code) : '';
+                    stateLabel = '이전 값 유지';
+                    badgeClass = 'bg-amber-100 text-amber-900 border border-amber-400 font-semibold';
+                    dotColor = 'bg-amber-600';
+                    detailNote = reason ? `이전 값 유지 (${reason})` : '이전 값 유지';
+                }
+            } else if (drCh) {
+                hasCollectionMeta = true;
+                if (drCh.status === 'collected') {
+                    stateLabel = '이번 게시 반영';
+                    badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+                    dotColor = 'bg-emerald-500';
+                    detailNote = '이번 게시 반영';
+                } else if (drCh.status === 'kept_previous' || drCh.status === 'kept_live') {
+                    const reason = drCh.error_code ? mapDailyRefreshErrorCode(drCh.error_code) : '';
+                    stateLabel = '이전 값 유지';
+                    badgeClass = 'bg-amber-100 text-amber-900 border border-amber-400 font-semibold';
+                    dotColor = 'bg-amber-600';
+                    detailNote = reason ? `이전 값 유지 (${reason})` : '이전 값 유지';
+                } else if (drCh.status === 'uncollected' || drCh.status === 'failed') {
+                    const reason = drCh.error_code ? mapDailyRefreshErrorCode(drCh.error_code) : '수집 실패';
+                    stateLabel = '수집 실패';
+                    badgeClass = 'bg-rose-50 text-rose-700 border border-rose-300';
+                    dotColor = 'bg-rose-500';
+                    detailNote = reason;
+                }
+            }
+
+            if (!hasCollectionMeta) {
+                if (isStale) {
+                    stateLabel = `오래된 자료 (${daysDiff}일 전)`;
+                    badgeClass = 'bg-amber-100 text-amber-800 border border-amber-300 font-bold';
+                    dotColor = 'bg-amber-500';
+                } else if (rawDate) {
+                    stateLabel = '정상 로드';
+                    badgeClass = 'bg-slate-100 text-slate-700 border border-slate-300';
+                    dotColor = 'bg-slate-500';
+                } else {
+                    stateLabel = '미수집';
+                    badgeClass = 'bg-slate-100 text-slate-500 border border-slate-200';
+                    dotColor = 'bg-slate-300';
+                }
+                detailNote = '-';
+            }
+
+            return {
+                sourceKey: sKey,
+                name,
+                rawDate,
+                formattedDateMmDd,
+                daysDiff,
+                isStale,
+                sourceAsOf: sourceAsOfDisplay,
+                capturedAt: capturedAtDisplay,
+                stateLabel,
+                badgeClass,
+                dotColor,
+                detailNote,
+                hasData: Boolean(rawDate || snapStatus || snapLegacy || utVal || invRefSrc || drCh),
+                isManualUploadFallback
+            };
+        }
+
+        function resolveInventoryStaleSourceBadges(d, gaemiInfo, coupangInfo, todayKst, summaryData) {
+            const salesUploadDate = summaryData?.stats?.upload_timestamps?.sales || null;
+            const sources = [
+                ['개미창고 재고', gaemiInfo.rawDate],
+                ['쿠팡 재고', coupangInfo.rawDate],
+                ['매출', salesUploadDate]
+            ];
+            return sources.filter(([, date]) => {
+                const days = inventoryDaysBetween(date, todayKst);
+                return days !== null && days !== 0;
+            }).map(([name, date]) => `${name} ${formatMonthDay(date)} ${name === '매출' ? '업로드 기준' : '기준'}`);
+        }
+
+        function renderInventoryCollectionStatusRow(d, autoStatus, summaryData) {
             const box = document.getElementById('inventoryCollectionStatusBox');
             const el = document.getElementById('inventoryCollectionStatusRow');
             if (!el) return;
+
             const effectiveAuto = (typeof currentAutomationStatus !== 'undefined' ? currentAutomationStatus : null) || autoStatus || (d && d._automation_status) || null;
-            const dr = d?.metadata?.daily_refresh;
-            const hasData = Boolean(dr?.channels?.gaemi_inventory || dr?.channels?.coupang_inventory || effectiveAuto?.channels?.gaemi_inventory || effectiveAuto?.channels?.coupang_inventory || d?.collection_status?.gaemi || d?.collection_status?.coupang);
-            if (box) {
-                box.classList.toggle('hidden', !hasData);
+            const effectiveSummary = summaryData || (typeof currentSummaryData !== 'undefined' ? currentSummaryData : null) || null;
+
+            const gaemiInfo = resolveInventorySourceCardInfo('gaemi', d, effectiveAuto, effectiveSummary);
+            const coupangInfo = resolveInventorySourceCardInfo('coupang', d, effectiveAuto, effectiveSummary);
+            const staleBadges = document.getElementById('inventoryStaleSourceBadges');
+            if (staleBadges) {
+                const labels = resolveInventoryStaleSourceBadges(d, gaemiInfo, coupangInfo, getTodayKstStr(), effectiveSummary);
+                staleBadges.innerHTML = labels.map(label =>
+                    `<span class="inline-flex max-w-full min-w-0 rounded-md bg-amber-50 border border-amber-200 px-2 py-1 text-[11px] font-semibold text-amber-900 break-words">${escapeHtml(label)}</span>`
+                ).join('');
+                staleBadges.classList.toggle('hidden', labels.length === 0);
             }
-            if (!hasData) {
+
+            const hasAnyData = gaemiInfo.hasData || coupangInfo.hasData;
+
+            if (box) {
+                box.classList.toggle('hidden', !hasAnyData);
+            }
+            if (!hasAnyData) {
                 el.innerHTML = '';
                 return;
             }
-            const invDefs = [
-                { key: 'gaemi_inventory', name: '개미창고 WMS (재고)' },
-                { key: 'coupang_inventory', name: '쿠팡 윙 (재고)' }
-            ];
-            el.innerHTML = invDefs.map(def => {
-                const info = resolveChannelAutomationState(def.key, effectiveAuto, d);
+
+            const bothHaveDate = Boolean(gaemiInfo.formattedDateMmDd && coupangInfo.formattedDateMmDd);
+            const isDateMismatched = bothHaveDate && (gaemiInfo.formattedDateMmDd !== coupangInfo.formattedDateMmDd);
+
+            const cards = [gaemiInfo, coupangInfo];
+
+            el.innerHTML = cards.map(info => {
+                const isHighlightDiff = isDateMismatched && (info.daysDiff !== null && (
+                    (info.sourceKey === 'coupang' && coupangInfo.formattedDateMmDd !== gaemiInfo.formattedDateMmDd && (coupangInfo.daysDiff || 0) >= (gaemiInfo.daysDiff || 0)) ||
+                    (info.sourceKey === 'gaemi' && gaemiInfo.formattedDateMmDd !== coupangInfo.formattedDateMmDd && (gaemiInfo.daysDiff || 0) > (coupangInfo.daysDiff || 0))
+                ));
+
+                const borderClass = isHighlightDiff ? 'border-amber-400 bg-amber-50/40 ring-1 ring-amber-300' : 'border-slate-200/90 bg-slate-50/80';
+                const asOfClass = isHighlightDiff ? 'font-mono font-extrabold text-amber-800' : 'font-mono font-bold text-slate-800';
+
+                let staleBadgeHtml = '';
+                if (info.isStale) {
+                    staleBadgeHtml = `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 whitespace-nowrap shrink-0">오래된 자료 (${info.daysDiff}일 전)</span>`;
+                }
+
+                const stateBadgeHtml = (info.stateLabel && !info.isStale) || (info.stateLabel && info.stateLabel !== `오래된 자료 (${info.daysDiff}일 전)`)
+                    ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${escapeHtml(info.badgeClass)} whitespace-nowrap shrink-0">${escapeHtml(info.stateLabel)}</span>`
+                    : '';
+
+                const showCapturedAt = info.capturedAt && info.capturedAt !== '-';
+                const showDetailNote = info.detailNote && info.detailNote !== '-';
+
                 return `
-                <div class="bg-slate-50/80 border border-slate-200/90 rounded-xl p-2.5 flex flex-col justify-between space-y-1.5 shadow-2xs">
-                    <div class="flex items-center justify-between gap-1">
-                        <span class="font-bold text-slate-800 text-[11px] truncate flex items-center gap-1.5">
+                <div class="${borderClass} rounded-xl p-2.5 flex flex-col justify-between space-y-1.5 shadow-2xs min-w-0">
+                    <div class="flex flex-wrap items-center justify-between gap-1">
+                        <span class="font-bold text-slate-800 text-[11px] flex items-center gap-1.5 min-w-0">
                             <span class="w-1.5 h-1.5 rounded-full ${escapeHtml(info.dotColor)} shrink-0"></span>
-                            <span class="truncate" title="${escapeHtml(def.name)}">${escapeHtml(def.name)}</span>
+                            <span class="truncate" title="${escapeHtml(info.name)}">${escapeHtml(info.name)}</span>
                         </span>
-                        <span class="px-1.5 py-0.2 rounded text-[10px] font-bold ${escapeHtml(info.badgeClass)} whitespace-nowrap shrink-0">${escapeHtml(info.stateLabel)}</span>
+                        <div class="flex flex-wrap items-center gap-1 shrink-0">
+                            ${staleBadgeHtml}
+                            ${stateBadgeHtml}
+                        </div>
                     </div>
                     <div class="space-y-0.5 text-[10px]">
                         <div class="flex items-center justify-between text-slate-600">
                             <span class="text-slate-400">자료 기준일</span>
-                            <span class="font-mono font-bold text-slate-800">${escapeHtml(info.sourceAsOf)}</span>
+                            <span class="${asOfClass}">${escapeHtml(info.sourceAsOf)}</span>
                         </div>
+                        ${showCapturedAt ? `
                         <div class="flex items-center justify-between text-slate-500">
-                            <span class="text-slate-400">수집 시각</span>
+                            <span class="text-slate-400">관측 시각</span>
                             <span class="font-mono text-slate-600">${escapeHtml(info.capturedAt)}</span>
-                        </div>
+                        </div>` : ''}
                     </div>
-                    <div class="text-[10px] text-slate-500 truncate pt-1 border-t border-slate-200/60" title="${escapeHtml(info.errorCode ? info.errorCode + (info.detailNote ? ' · ' + info.detailNote : '') : (info.detailNote || ''))}">
-                        ${escapeHtml(info.detailNote || '-')}
-                    </div>
+                    ${showDetailNote ? `
+                    <div class="text-[10px] text-slate-500 truncate pt-1 border-t border-slate-200/60" title="${escapeHtml(info.detailNote)}">
+                        ${escapeHtml(info.detailNote)}
+                    </div>` : ''}
                 </div>`;
             }).join('');
         }
