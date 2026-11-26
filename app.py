@@ -4815,6 +4815,7 @@ HTML_TEMPLATE = r"""
                 </div>
                 <span id="salesReportPeriod" class="text-[11px] text-slate-400">일별 및 당월 누적 집계</span>
             </div>
+            <div id="salesCancelExclusion" class="hidden text-[11px] text-slate-600 px-1"></div>
 
             <!-- 1-0. 일일 핵심 KPI 스트립 (daily_kpi 제공 시 노출) -->
             <div id="salesDailyKpiRow" class="hidden grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -14731,6 +14732,14 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const daily = sp.daily || {};
             const monthly = sp.monthly || {};
             const meta = d.metadata || {};
+            const cancelEl = document.getElementById('salesCancelExclusion');
+            const excluded = sp.cancel_exclusion;
+            if (cancelEl) {
+                cancelEl.classList.toggle('hidden', !excluded || !excluded.count);
+                if (excluded && excluded.count) {
+                    cancelEl.textContent = `취소 ${fmtNum(excluded.count)}건 ${fmtWon(excluded.amount || 0)} 제외`;
+                }
+            }
 
             // 1. 기간 표시 및 수집 상태 안내
             const periodEl = document.getElementById('salesReportPeriod');
