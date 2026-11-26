@@ -4786,8 +4786,33 @@ HTML_TEMPLATE = r"""
         <!-- 탭 1: 일일 상품 매출 (첫 화면, MD 실무자 맞춤형) -->
         <!-- ============================================================= -->
         <section id="tabContent_sales" class="dashboard-tab-content space-y-3">
+            <style>#tabContent_sales #salesDailyKpiRow,#tabContent_sales #s5LegacyDetail{display:none!important}#tabContent_sales #s5Trends,#tabContent_sales #salesTrendChartContainer{min-width:0;max-width:100%}#s5SalesAlert summary{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#s5ProductDetails{max-width:100%}</style>
+            <details id="s5SalesAlert" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900">
+                <summary class="cursor-pointer font-semibold"><span id="s5SalesAlertText">수집 상태 확인 필요</span> · 채널 상태와 진단 보기</summary>
+                <div id="s5SalesAlertBody" class="space-y-3 pt-3"></div>
+            </details>
+            <div id="s5DailyHero" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5">
+                    <div class="text-xs font-semibold text-slate-500">어제 매출 <span id="s5DailyDate"></span></div>
+                    <div id="s5DailyRevenue" class="text-3xl sm:text-4xl font-bold font-mono text-slate-900 mt-2">-</div>
+                    <div id="s5DailyCoupangMissing" class="hidden text-[11px] text-slate-500 mt-1">쿠팡 미포함(미수집)</div>
+                    <div id="s5DailyRevenueCompare" class="hidden text-xs mt-2 text-slate-600"></div>
+                </div>
+                <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5">
+                    <div class="text-xs font-semibold text-slate-500">어제 기여이익 <span id="s5DailyMargin" class="hidden"></span></div>
+                    <div id="s5DailyProfit" class="text-3xl sm:text-4xl font-bold font-mono text-slate-900 mt-2">-</div>
+                    <div id="s5DailyProfitCompare" class="hidden text-xs mt-2 text-slate-600"></div>
+                </div>
+            </div>
+            <div id="s5MonthlyOverview" class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div><div class="text-xs font-semibold text-slate-500">이번 달 누적 매출</div><div id="s5MonthlyRevenue" class="text-2xl font-bold font-mono text-indigo-700 mt-1">-</div><div id="s5MonthlyCompare" class="hidden text-xs mt-1"></div></div>
+                    <div><div class="text-xs font-semibold text-slate-500">월말 예상 매출 <span class="text-[10px] text-indigo-600">예측</span></div><div id="s5ForecastRevenue" class="text-2xl font-bold font-mono text-indigo-700 mt-1">-</div><div id="s5ForecastCompare" class="hidden text-xs mt-1"></div></div>
+                </div>
+                <div id="s5ChannelShare" class="hidden"><div class="text-xs font-semibold text-slate-500 mb-2">채널 비중</div><div id="s5ChannelShareBar" class="flex h-3 rounded-full overflow-hidden bg-slate-100"></div><div id="s5ChannelShareLegend" class="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-600 mt-2"></div></div>
+            </div>
             <!-- 1. 상단 요약 바 -->
-            <div class="bg-white rounded-xl border border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div id="s5LegacySummary" class="bg-white rounded-xl border border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600">
                     <div class="flex items-center space-x-1.5">
                         <span id="salesMonthlyRevenueLabel" class="text-slate-500">이달 누적 매출</span>
@@ -4951,16 +4976,16 @@ HTML_TEMPLATE = r"""
             </div>
 
             <!-- 3. 중단 그리드 (일별 매출 추이 그래프 + TOP 10 상품 매출 랭킹) -->
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
+            <div id="s5Trends" class="grid grid-cols-1 gap-3">
                 <!-- 일별 매출 추이 그래프 (7 cols) -->
-                <div class="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-xs">
+                <div class="bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-xs min-w-0">
                     <div class="flex flex-wrap gap-2 items-center justify-between">
                         <div class="flex flex-wrap items-center gap-2">
                             <span id="salesTrendTitle" class="font-bold text-xs text-slate-900">일별 매출 추이</span>
-                            <span id="salesTrendBasisBadge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">기준</span>
-                            <span class="text-[11px] text-slate-400" id="salesTrendSubtitle">최근 일자별 실적</span>
+                            <span id="salesTrendBasisBadge" style="display:none" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">기준</span>
+                            <span class="text-[11px] text-slate-400" style="display:none" id="salesTrendSubtitle">최근 일자별 실적</span>
                         </div>
-                        <div class="flex items-center gap-2 flex-wrap text-[10px] text-slate-500" id="salesTrendLegend">
+                        <div class="flex items-center gap-2 flex-wrap text-[10px] text-slate-500" style="display:none" id="salesTrendLegend">
                             <!-- 범례 -->
                         </div>
                     </div>
@@ -4970,7 +4995,7 @@ HTML_TEMPLATE = r"""
                 </div>
 
                 <!-- TOP 10 상품 매출 랭킹 (5 cols) -->
-                <div class="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-xs flex flex-col justify-between">
+                <div class="bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-xs flex flex-col justify-between min-w-0">
                     <div class="flex flex-wrap gap-2 items-center justify-between border-b border-slate-100 pb-2">
                         <div class="flex flex-wrap items-center gap-2">
                             <span id="salesTopProductsTitle" class="font-bold text-xs text-slate-900">TOP 10 베스트셀러 상품</span>
@@ -4978,7 +5003,7 @@ HTML_TEMPLATE = r"""
                         </div>
                         <span class="text-[10px] text-slate-400">당월 누적</span>
                     </div>
-                    <div id="salesTopProductsContainer" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    <div id="salesTopProductsContainer" class="space-y-2">
                         <!-- TOP 10 -->
                     </div>
                 </div>
@@ -5005,7 +5030,7 @@ HTML_TEMPLATE = r"""
             </details>
 
             <!-- 4. 하단 데이터 테이블: 상품별 상세 매출 테이블 + [미판매 품목(0원) 포함 보기] + [📥 매출 CSV 추출] -->
-            <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+            <div id="s5LegacyDetail" class="hidden bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
                 <div class="p-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
                     <div class="flex flex-wrap items-center gap-2">
                         <span id="salesDetailTableTitle" class="font-bold text-xs text-slate-900">상품별 상세 매출 및 판매 실적</span>
@@ -5054,6 +5079,29 @@ HTML_TEMPLATE = r"""
                     </table>
                 </div>
             </div>
+            <details id="s5ProductDetails" class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                <summary class="cursor-pointer p-4 font-bold text-sm text-slate-900">전체 상품표 <span id="s5ProductCount" class="text-xs text-slate-500 font-normal"></span> 펼쳐 보기</summary>
+                <div class="border-t border-slate-100 p-3 flex flex-wrap items-center gap-2">
+                    <label class="text-xs text-slate-600" for="s5ProductChannel">채널</label>
+                    <select id="s5ProductChannel" onchange="renderS5ProductTable()" class="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white">
+                        <option value="all">전체 합산</option><option value="coupang">쿠팡</option><option value="smartstore">스마트스토어</option><option value="cafe24">카페24</option>
+                    </select>
+                    <label class="text-xs text-slate-600 ml-1" for="s5ProductSort">정렬</label>
+                    <select id="s5ProductSort" onchange="renderS5ProductTable()" class="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white">
+                        <option value="revenue">매출액</option><option value="quantity">판매수량</option><option value="profit">기여이익</option><option value="margin">이익률</option><option value="runway">런웨이</option>
+                    </select>
+                    <button type="button" onclick="exportSalesCsv()" class="ml-auto px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold">매출 CSV 추출</button>
+                </div>
+                <div class="overflow-x-auto max-w-full">
+                    <table class="min-w-[900px] w-full text-left text-xs border-collapse">
+                        <thead class="bg-slate-50 text-slate-600"><tr>
+                            <th class="p-2">마스터상품명</th><th class="p-2 text-right">판매수량</th><th class="p-2 text-right">매출액</th><th class="p-2 text-right">평균단가</th>
+                            <th class="p-2 text-right">매출원가</th><th class="p-2 text-right">수수료/물류비</th><th class="p-2 text-right">기여이익(율)</th><th class="p-2 text-right">가용재고(런웨이)</th>
+                        </tr></thead>
+                        <tbody id="s5ProductBody" class="divide-y divide-slate-100"></tbody>
+                    </table>
+                </div>
+            </details>
         </section>
         {% endif %}
 
@@ -14724,6 +14772,131 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             }).join('') || '<p class="p-3 text-xs text-slate-400">해당 조건의 내역이 없습니다.</p>';
         }
 
+        let s5SalesData = null;
+        function renderS5ProductTable() {
+            if (!s5SalesData || typeof document.querySelector !== 'function') return;
+            const body = document.getElementById('s5ProductBody');
+            if (!body) return;
+            const channel = document.getElementById('s5ProductChannel')?.value || 'all';
+            const sort = document.getElementById('s5ProductSort')?.value || 'revenue';
+            const rows = new Map();
+            ((s5SalesData.sales_profit || {}).transactions || []).forEach(t => {
+                const ch = t.channel || '';
+                if (channel !== 'all' && !(channel === 'coupang' ? ['coupang', 'coupang_growth', 'rocket_growth'].includes(ch) : ch === channel)) return;
+                const code = String(t.product_code || t.item_id || '').trim();
+                if (!code) return;
+                if (!rows.has(code)) rows.set(code, { code, name: t.master_name || t.product_name || code,
+                    qty: 0, revenue: 0, cost: 0, fees: 0, profit: 0, costKnown: true, feesKnown: true, profitKnown: true });
+                const r = rows.get(code);
+                r.qty += Number(t.quantity || 0);
+                r.revenue += Number(t.revenue || 0);
+                for (const [field, known, source] of [['cost', 'costKnown', 'cost'], ['fees', 'feesKnown', 'fees'], ['profit', 'profitKnown', 'contribution_profit']]) {
+                    if (t[source] === null || t[source] === undefined) r[known] = false;
+                    else r[field] += Number(t[source]);
+                }
+            });
+            const list = [...rows.values()].map(r => {
+                const master = findMasterByCode(r.code);
+                r.name = master?.name || master?.seller_name || r.name;
+                r.stock = master?.master_physical_total ?? master?.total_available_stock ?? null;
+                r.runway = Number.isFinite(Number(master?.effective_runway)) && master?.effective_runway != null ? Number(master.effective_runway) : null;
+                r.runwayText = master?.effective_runway_str || (r.runway !== null ? `${r.runway}일` : '-');
+                r.margin = r.profitKnown && r.revenue > 0 ? r.profit / r.revenue * 100 : null;
+                return r;
+            });
+            list.sort((a, b) => {
+                const value = r => sort === 'quantity' ? r.qty : sort === 'profit' ? (r.profitKnown ? r.profit : null)
+                    : sort === 'margin' ? r.margin : sort === 'runway' ? r.runway : r.revenue;
+                const av = value(a), bv = value(b);
+                if (av === null) return bv === null ? a.name.localeCompare(b.name) : 1;
+                if (bv === null) return -1;
+                return (sort === 'runway' ? av - bv : bv - av) || a.name.localeCompare(b.name);
+            });
+            const count = document.getElementById('s5ProductCount');
+            if (count) count.textContent = `${list.length}종`;
+            body.innerHTML = list.length ? list.map(r => `<tr>
+                <td class="p-2 font-medium text-slate-900">${escapeHtml(r.name)}</td>
+                <td class="p-2 text-right font-mono whitespace-nowrap">${fmtNum(r.qty)}</td>
+                <td class="p-2 text-right font-mono whitespace-nowrap">${fmtWon(r.revenue)}</td>
+                <td class="p-2 text-right font-mono whitespace-nowrap">${r.qty > 0 ? fmtWon(Math.round(r.revenue / r.qty)) : '-'}</td>
+                <td class="p-2 text-right font-mono whitespace-nowrap">${r.costKnown ? fmtWon(r.cost) : '미산출'}</td>
+                <td class="p-2 text-right font-mono whitespace-nowrap">${r.feesKnown ? fmtWon(r.fees) : '미산출'}</td>
+                <td class="p-2 text-right font-mono whitespace-nowrap">${r.profitKnown ? `${fmtWon(r.profit)} (${r.margin === null ? '-' : r.margin.toFixed(1) + '%'})` : '미산출'}</td>
+                <td class="p-2 text-right font-mono whitespace-nowrap">${r.stock === null ? '-' : `${fmtNum(r.stock)}개`} (${escapeHtml(r.runwayText)})</td>
+            </tr>`).join('') : '<tr><td colspan="8" class="p-5 text-center text-slate-500">해당 채널의 상품 내역이 없습니다.</td></tr>';
+        }
+
+        function renderS5SalesOverview(d) {
+            if (typeof document.querySelector !== 'function') return;
+            const root = document.querySelector('#tabContent_sales');
+            if (!root) return;
+            s5SalesData = d;
+            const sp = d.sales_profit || {}, kpi = sp.daily_kpi || {}, monthly = sp.monthly || {};
+            const put = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+            const show = (id, visible, value) => { const el = document.getElementById(id); if (!el) return; el.classList.toggle('hidden', !visible); if (visible && value !== undefined) el.textContent = value; };
+            const pct = (value, base) => base > 0 && Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${(value / base * 100).toFixed(1)}%` : null;
+            const salesDay = kpi.sales_date || d.metadata?.report_date || '';
+            put('s5DailyDate', salesDay ? `(${salesDay})` : '');
+            put('s5DailyRevenue', kpi.revenue == null ? '-' : fmtWon(kpi.revenue));
+            const profit = kpi.contribution_profit ?? kpi.matched_contribution_profit;
+            put('s5DailyProfit', profit == null ? '-' : `${fmtWon(profit)}${kpi.contribution_profit == null ? ' (확인분)' : ''}`);
+            show('s5DailyMargin', kpi.contribution_profit != null && kpi.revenue > 0,
+                 kpi.contribution_profit != null && kpi.revenue > 0 ? `· 이익률 ${(kpi.contribution_profit / kpi.revenue * 100).toFixed(1)}%` : '');
+            const completeDay = ['collected', 'collected_zero'].includes(kpi.coupang_daily_status);
+            show('s5DailyCoupangMissing', !completeDay);
+            const dayNumber = (dateText) => { const n = String(dateText).split('-').map(Number); return Date.UTC(n[0], n[1] - 1, n[2]); };
+            const dayMs = salesDay ? dayNumber(salesDay) : NaN;
+            const earlier = (sp.daily_series || []).filter(r => r.date && r.date.slice(0, 7) === salesDay.slice(0, 7)
+                && dayNumber(r.date) < dayMs && new Date(dayNumber(r.date)).getUTCDay() === new Date(dayMs).getUTCDay());
+            const expectedPeers = salesDay ? Math.floor((Number(salesDay.slice(8)) - 1) / 7) : 0;
+            const completePeers = earlier.length === expectedPeers && earlier.every(r => (r.channels || []).some(c => ['coupang', 'coupang_growth', 'rocket_growth'].includes(c.channel)));
+            if (completeDay && completePeers && earlier.length && kpi.revenue != null && earlier.every(r => r.revenue != null)) {
+                const avg = earlier.reduce((sum, r) => sum + r.revenue, 0) / earlier.length;
+                const change = pct(kpi.revenue - avg, avg);
+                show('s5DailyRevenueCompare', !!change, change ? `이번 달 같은 요일 평균 ${fmtWon(Math.round(avg))} 대비 ${change}` : '');
+                if (kpi.contribution_profit != null && earlier.every(r => r.contribution_profit != null)) {
+                    const avgProfit = earlier.reduce((sum, r) => sum + r.contribution_profit, 0) / earlier.length;
+                    const pChange = pct(kpi.contribution_profit - avgProfit, Math.abs(avgProfit));
+                    show('s5DailyProfitCompare', !!pChange, pChange ? `같은 요일 평균 ${fmtWon(Math.round(avgProfit))} 대비 ${pChange}` : '');
+                } else show('s5DailyProfitCompare', false);
+            } else { show('s5DailyRevenueCompare', false); show('s5DailyProfitCompare', false); }
+            put('s5MonthlyRevenue', monthly.revenue == null ? '-' : fmtWon(monthly.revenue));
+            const mom = sp.growth_metrics?.mom;
+            show('s5MonthlyCompare', mom?.revenue_pct != null, mom?.revenue_pct != null ? `전월 같은 기간 대비 ${mom.revenue_pct >= 0 ? '+' : ''}${Number(mom.revenue_pct).toFixed(1)}%` : '');
+            const forecast = sp.monthly_forecast?.projected_revenue;
+            put('s5ForecastRevenue', forecast == null ? '-' : fmtWon(forecast));
+            const month = monthly.month || salesDay.slice(0, 7);
+            const [year, number] = month.split('-').map(Number);
+            const previousMonth = `${number === 1 ? year - 1 : year}-${String(number === 1 ? 12 : number - 1).padStart(2, '0')}`;
+            const previous = (sp.monthly_series || d.monthly_series || []).find(m => m.month === previousMonth);
+            const fChange = forecast != null && previous?.revenue != null ? pct(forecast - previous.revenue, previous.revenue) : null;
+            show('s5ForecastCompare', !!fChange, fChange ? `전월 실적 ${fmtWon(previous.revenue)} 대비 ${fChange}` : '');
+            const colors = { coupang_growth: 'bg-indigo-500', smartstore: 'bg-emerald-500', cafe24: 'bg-amber-500', b2b: 'bg-sky-500' };
+            const names = { coupang_growth: '쿠팡', smartstore: '스마트스토어', cafe24: '카페24', b2b: 'B2B' };
+            const shares = new Map();
+            (monthly.channels || []).forEach(c => { const key = ['coupang', 'rocket_growth'].includes(c.channel) ? 'coupang_growth' : c.channel; if (names[key] && c.revenue != null) shares.set(key, (shares.get(key) || 0) + c.revenue); });
+            const shareTotal = [...shares.values()].reduce((sum, value) => sum + value, 0);
+            show('s5ChannelShare', shareTotal > 0);
+            const bar = document.getElementById('s5ChannelShareBar'), legend = document.getElementById('s5ChannelShareLegend');
+            if (bar) bar.innerHTML = [...shares].map(([key, value]) => `<span class="${colors[key]}" style="width:${value / shareTotal * 100}%" title="${names[key]} ${fmtWon(value)}"></span>`).join('');
+            if (legend) legend.innerHTML = [...shares].map(([key, value]) => `<span>${names[key]} ${((value / shareTotal) * 100).toFixed(1)}%</span>`).join('');
+            const alertBody = document.getElementById('s5SalesAlertBody');
+            if (alertBody) for (const id of ['s5LegacySummary', 'channelAutomationStatusPanel', 'salesChannelFilterChips', 'costUnverifiedIssuesBox']) {
+                const node = document.getElementById(id); if (node && node.parentElement !== alertBody) alertBody.appendChild(node);
+            }
+            const cancel = document.getElementById('salesCancelExclusion'), monthBox = document.getElementById('s5MonthlyOverview');
+            if (cancel && monthBox && cancel.parentElement !== monthBox) monthBox.appendChild(cancel);
+            const warnings = [];
+            if (!completeDay) warnings.push('쿠팡 일별 미수집');
+            if (document.getElementById('salesMultichannelSummaryBadge')) warnings.push('채널 상태 확인');
+            if (!(document.getElementById('costUnverifiedIssuesBox')?.classList.contains('hidden') ?? true)) warnings.push('원가 미확인');
+            show('s5SalesAlert', warnings.length > 0);
+            put('s5SalesAlertText', warnings.join(' · '));
+            const b2bPanel = document.getElementById('b2bManualPanel');
+            if (b2bPanel) b2bPanel.classList.toggle('hidden', !resolveB2bManualView(d, b2bManualSelectedMonth).hasEntries);
+            renderS5ProductTable();
+        }
+
         function renderSalesTab(d) {
             if (!d) return;
             const effectiveAutoStatus = (typeof currentAutomationStatus !== 'undefined' ? currentAutomationStatus : null) || (d && d._automation_status) || null;
@@ -15565,6 +15738,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             else if (currentSalesChannelFilter === 'b2b') chartBarColor = 'bg-teal-500';
             else if (currentSalesChannelFilter === 'coupang_growth') chartBarColor = 'bg-indigo-500';
 
+            if (trendList.length > 14) trendList = trendList.slice(-14);
             const legendWrap = document.getElementById('salesTrendLegend');
             if (legendWrap) {
                 legendWrap.innerHTML = `
@@ -15640,11 +15814,11 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
                         const posHeightPct = isPos ? Math.min(100, Math.max(10, Math.round((rev / maxPosRev) * 100))) : 0;
                         const negHeightPct = isNeg ? Math.min(100, Math.max(15, Math.round((Math.abs(rev) / maxNegRev) * 100))) : 0;
-                        const dateShort = (t.date || '').slice(5);
+                        const dateShort = (t.date || '').slice(-2);
 
                         let topLabel = '<span class="text-[10px] font-mono text-slate-300">-</span>';
                         if (isPos) {
-                            topLabel = `<span class="text-[11px] font-mono font-bold text-slate-700 truncate">${rev >= 10000 ? Math.round(rev / 10000) + '만' : fmtNum(rev)}</span>`;
+                            topLabel = `<span class="text-[10px] font-mono font-bold text-slate-700 whitespace-nowrap">${rev >= 10000 ? Math.round(rev / 10000) + '만' : fmtNum(rev)}</span>`;
                         } else if (isZero) {
                             topLabel = '<span class="text-[10px] font-mono text-slate-400">0</span>';
                         } else if (isNeg) {
@@ -15657,14 +15831,15 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         const barTitle = isCoupangMissing ? `쿠팡 일별 미수집 (${t.date}: ${hasData ? fmtWon(rev) : '0원'})` : tooltipText;
 
                         return `
-                            <div class="flex-1 flex flex-col items-center group relative min-w-[20px] max-w-[36px]" title="${escapeHtml(barTitle)}">
+                            <div class="flex-1 flex flex-col items-center group relative" style="min-width:44px" title="${escapeHtml(barTitle)}" data-sales-date="${escapeHtml(t.date || '')}">
                                 <div class="opacity-0 group-hover:opacity-100 transition absolute -top-8 px-2 py-1 bg-slate-900 text-white rounded text-[10px] font-mono whitespace-nowrap z-20 pointer-events-none shadow-md">
                                     ${tooltipText}
                                 </div>
                                 ${topLabel}
+                                ${isCoupangMissing ? '<span class="text-[8px] leading-none text-slate-500 whitespace-nowrap tracking-tight">쿠팡 미포함</span>' : ''}
                                 <!-- 양수 막대 영역 (기준선 위) -->
                                 <div class="w-full h-24 flex items-end justify-center">
-                                    ${isPos ? `<div class="${chartBarColor} w-full rounded-t-sm transition-all group-hover:brightness-95" style="height: ${posHeightPct}%;"></div>` : ''}
+                                    ${isPos ? `<div class="${isCoupangMissing ? 'bg-slate-300' : chartBarColor} w-full rounded-t-sm transition-all group-hover:brightness-95" style="height: ${posHeightPct}%;"></div>` : ''}
                                     ${!hasData ? `<div class="w-full h-full border-b border-dashed border-slate-200"></div>` : ''}
                                 </div>
                                 <!-- 기준선 (0선) -->
@@ -15674,16 +15849,22 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                     ${isNeg ? `<div class="bg-rose-500 w-full rounded-b-sm transition-all group-hover:brightness-95" style="height: ${negHeightPct}%;"></div>` : ''}
                                 </div>
                                 ${isNeg ? `<span class="text-[10px] font-mono font-bold text-rose-600 truncate">-${Math.abs(rev) >= 10000 ? Math.round(Math.abs(rev) / 10000) + '만' : fmtNum(Math.abs(rev))}</span>` : ''}
-                                <span class="text-[10px] font-mono text-slate-500 whitespace-nowrap">${dateShort}</span>
+                                <span class="text-[10px] font-mono text-slate-500 whitespace-nowrap">${dateShort}일</span>
                             </div>
                         `;
                     }).join('');
 
                     trendWrap.innerHTML = `
-                        <div class="flex items-end justify-between gap-1 w-full h-full pt-1 px-1 overflow-x-auto">
+                        <div class="flex items-end gap-2 w-full h-full pt-1 px-1 overflow-x-auto" id="salesTrendScroller">
                             ${barsHtml}
                         </div>
                     `;
+                    const trendScroller = trendWrap.firstElementChild;
+                    if (trendScroller) {
+                        const toLatest = () => { trendScroller.scrollLeft = trendScroller.scrollWidth - trendScroller.clientWidth; };
+                        toLatest();
+                        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(toLatest));
+                    }
                 }
             }
 
@@ -16081,6 +16262,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 }
             }
             renderMobileDetailList('sales');
+            if (typeof renderS5SalesOverview === 'function') renderS5SalesOverview(d);
         }
 
         function getTxCategoryType(t) {
