@@ -4786,7 +4786,7 @@ HTML_TEMPLATE = r"""
         <!-- 탭 1: 일일 상품 매출 (첫 화면, MD 실무자 맞춤형) -->
         <!-- ============================================================= -->
         <section id="tabContent_sales" class="dashboard-tab-content space-y-3">
-            <style>#tabContent_sales #salesDailyKpiRow,#tabContent_sales #s5LegacyDetail{display:none!important}#tabContent_sales #s5Trends,#tabContent_sales #salesTrendChartContainer{min-width:0;max-width:100%}#s5SalesAlert summary{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#s5ProductDetails{max-width:100%}</style>
+            <style>#tabContent_sales #salesDailyKpiRow,#tabContent_sales #s5LegacyDetail{display:none!important}#tabContent_sales #s5Trends,#tabContent_sales #salesTrendChartContainer{min-width:0;max-width:100%}#salesTrendScroller{display:flex;gap:8px;width:100%;height:100%;overflow-x:auto;align-items:flex-end;padding-left:16px;padding-right:8px;box-sizing:border-box}#salesTrendScroller>[data-sales-date]{flex:1 0 44px}#s5SalesAlert summary{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#s5ProductDetails{max-width:100%}#s5ProductTableWrap{max-height:65vh;overflow:auto}#s5ProductTable thead th{position:sticky;top:0;z-index:1;background:#f8fafc}#s5ProductTable tbody tr{border-bottom:1px solid #e2e8f0}#s5ProductTable tbody td:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}#s5ProductTable .s5-product-name{font-weight:700;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}#s5ProductCards{display:none}@media(max-width:639px){ #s5ProductTableWrap{display:none}#s5ProductCards{display:grid;gap:10px;padding:12px}#s5ProductCards article{border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;min-width:0}#s5ProductCards h3{font-weight:700;line-height:1.4;overflow-wrap:anywhere}#s5ProductCards dl{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}#s5ProductCards dt{font-size:11px;color:#64748b}#s5ProductCards dd{font-size:12px;font-variant-numeric:tabular-nums;margin:2px 0 0;overflow-wrap:anywhere}}</style>
             <details id="s5SalesAlert" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900">
                 <summary class="cursor-pointer font-semibold"><span id="s5SalesAlertText">수집 상태 확인 필요</span> · 채널 상태와 진단 보기</summary>
                 <div id="s5SalesAlertBody" class="space-y-3 pt-3"></div>
@@ -4999,7 +4999,7 @@ HTML_TEMPLATE = r"""
                     <div class="flex flex-wrap gap-2 items-center justify-between border-b border-slate-100 pb-2">
                         <div class="flex flex-wrap items-center gap-2">
                             <span id="salesTopProductsTitle" class="font-bold text-xs text-slate-900">TOP 10 베스트셀러 상품</span>
-                            <span class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700">판매량순</span>
+                            <span class="px-1.5 py-0.2 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700">매출순</span>
                         </div>
                         <span class="text-[10px] text-slate-400">당월 누적</span>
                     </div>
@@ -5092,8 +5092,8 @@ HTML_TEMPLATE = r"""
                     </select>
                     <button type="button" onclick="exportSalesCsv()" class="ml-auto px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold">매출 CSV 추출</button>
                 </div>
-                <div class="overflow-x-auto max-w-full">
-                    <table class="min-w-[900px] w-full text-left text-xs border-collapse">
+                <div id="s5ProductTableWrap" class="max-w-full">
+                    <table id="s5ProductTable" class="min-w-[900px] w-full text-left text-xs border-collapse">
                         <thead class="bg-slate-50 text-slate-600"><tr>
                             <th class="p-2">마스터상품명</th><th class="p-2 text-right">판매수량</th><th class="p-2 text-right">매출액</th><th class="p-2 text-right">평균단가</th>
                             <th class="p-2 text-right">매출원가</th><th class="p-2 text-right">수수료/물류비</th><th class="p-2 text-right">기여이익(율)</th><th class="p-2 text-right">가용재고(런웨이)</th>
@@ -5101,6 +5101,7 @@ HTML_TEMPLATE = r"""
                         <tbody id="s5ProductBody" class="divide-y divide-slate-100"></tbody>
                     </table>
                 </div>
+                <div id="s5ProductCards" aria-label="전체 상품 카드"></div>
             </details>
         </section>
         {% endif %}
@@ -13052,17 +13053,22 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
         function exportSalesCsvFallback() {
             const sp = (currentDashboardData && currentDashboardData.sales_profit) || {};
-            const headers = ['상품코드', '상품명', '채널', '판매수량', '매출액(원)', '매출원가(원)', '추정수수료(원)', '기여이익(원)'];
+            const transactions = Array.isArray(sp.transactions) ? sp.transactions : [];
+            const headers = ['상품코드', '상품명', '채널', '판매수량', '매출액(원)', '매출원가(원)', '추정수수료(원)', '기여이익(원)', '원래 상품명', '옵션코드'];
             const rows = [];
-            if (sp.daily_history && sp.daily_history.length > 0) {
+            if (transactions.length > 0) {
+                transactions.forEach(t => rows.push([t.product_code || '', t.display_name || t.product_name || '',
+                    t.channel || '', t.quantity ?? '', t.revenue ?? '', t.cost ?? '', t.fees ?? '',
+                    t.contribution_profit ?? '', t.product_name || '', t.option_code || '']));
+            } else if (sp.daily_history && sp.daily_history.length > 0) {
                 sp.daily_history.forEach(h => {
                     (h.channels || []).forEach(ch => {
-                        rows.push([h.date, `일자별 집계 (${ch.channel})`, ch.channel, ch.row_count || 1, ch.revenue || 0, ch.matched_cost || 0, ch.fees || 0, ch.matched_contribution_profit || 0]);
+                        rows.push([h.date, `일자별 집계 (${ch.channel})`, ch.channel, ch.row_count || 1, ch.revenue || 0, ch.matched_cost || 0, ch.fees || 0, ch.matched_contribution_profit || 0, '', '']);
                     });
                 });
             } else if (allMasterData && allMasterData.length > 0) {
                 allMasterData.forEach(m => {
-                    rows.push([m.seller_code, m.seller_name, '통합', m.master_7d_total_out || 0, 0, m.cost_price || 0, 0, 0]);
+                    rows.push([m.seller_code, m.seller_name, '통합', m.master_7d_total_out || 0, 0, m.cost_price || 0, 0, 0, m.seller_name, '']);
                 });
             }
             const dateStr = new Date().toISOString().slice(0, 10);
@@ -14785,9 +14791,10 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                 if (channel !== 'all' && !(channel === 'coupang' ? ['coupang', 'coupang_growth', 'rocket_growth'].includes(ch) : ch === channel)) return;
                 const code = String(t.product_code || t.item_id || '').trim();
                 if (!code) return;
-                if (!rows.has(code)) rows.set(code, { code, name: t.master_name || t.product_name || code,
+                if (!rows.has(code)) rows.set(code, { code, name: t.master_name || t.product_name || code, displayName: '',
                     qty: 0, revenue: 0, cost: 0, fees: 0, profit: 0, costKnown: true, feesKnown: true, profitKnown: true });
                 const r = rows.get(code);
+                if (t.display_name) r.displayName = t.display_name;
                 r.qty += Number(t.quantity || 0);
                 r.revenue += Number(t.revenue || 0);
                 for (const [field, known, source] of [['cost', 'costKnown', 'cost'], ['fees', 'feesKnown', 'fees'], ['profit', 'profitKnown', 'contribution_profit']]) {
@@ -14797,7 +14804,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             });
             const list = [...rows.values()].map(r => {
                 const master = findMasterByCode(r.code);
-                r.name = master?.name || master?.seller_name || r.name;
+                r.name = r.displayName || master?.name || master?.seller_name || r.name;
                 r.stock = master?.master_physical_total ?? master?.total_available_stock ?? null;
                 r.runway = Number.isFinite(Number(master?.effective_runway)) && master?.effective_runway != null ? Number(master.effective_runway) : null;
                 r.runwayText = master?.effective_runway_str || (r.runway !== null ? `${r.runway}일` : '-');
@@ -14814,16 +14821,29 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             });
             const count = document.getElementById('s5ProductCount');
             if (count) count.textContent = `${list.length}종`;
+            const profitText = r => r.profitKnown ? `${fmtWon(r.profit)} (${r.margin === null ? '-' : r.margin.toFixed(1) + '%'})` : '미산출';
+            const stockText = r => `${r.stock === null ? '-' : `${fmtNum(r.stock)}개`} (${escapeHtml(r.runwayText)})`;
+            const profitClass = r => r.margin !== null && r.margin < 10 ? 'text-rose-700 font-bold' : 'text-slate-900';
+            const runwayClass = r => r.runway !== null && r.runway < 30 ? 'text-rose-700 font-bold' : 'text-slate-900';
             body.innerHTML = list.length ? list.map(r => `<tr>
-                <td class="p-2 font-medium text-slate-900">${escapeHtml(r.name)}</td>
+                <td class="p-2 text-slate-900"><span class="s5-product-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span></td>
                 <td class="p-2 text-right font-mono whitespace-nowrap">${fmtNum(r.qty)}</td>
                 <td class="p-2 text-right font-mono whitespace-nowrap">${fmtWon(r.revenue)}</td>
                 <td class="p-2 text-right font-mono whitespace-nowrap">${r.qty > 0 ? fmtWon(Math.round(r.revenue / r.qty)) : '-'}</td>
                 <td class="p-2 text-right font-mono whitespace-nowrap">${r.costKnown ? fmtWon(r.cost) : '미산출'}</td>
                 <td class="p-2 text-right font-mono whitespace-nowrap">${r.feesKnown ? fmtWon(r.fees) : '미산출'}</td>
-                <td class="p-2 text-right font-mono whitespace-nowrap">${r.profitKnown ? `${fmtWon(r.profit)} (${r.margin === null ? '-' : r.margin.toFixed(1) + '%'})` : '미산출'}</td>
-                <td class="p-2 text-right font-mono whitespace-nowrap">${r.stock === null ? '-' : `${fmtNum(r.stock)}개`} (${escapeHtml(r.runwayText)})</td>
+                <td class="p-2 text-right font-mono whitespace-nowrap ${profitClass(r)}">${profitText(r)}</td>
+                <td class="p-2 text-right font-mono whitespace-nowrap ${runwayClass(r)}">${stockText(r)}</td>
             </tr>`).join('') : '<tr><td colspan="8" class="p-5 text-center text-slate-500">해당 채널의 상품 내역이 없습니다.</td></tr>';
+            const cards = document.getElementById('s5ProductCards');
+            if (cards) cards.innerHTML = list.length ? list.map(r => `<article>
+                <h3>${escapeHtml(r.name)}</h3>
+                <dl>
+                    <div><dt>매출액 · 판매수량</dt><dd>${fmtWon(r.revenue)} · ${fmtNum(r.qty)}개</dd></div>
+                    <div><dt>기여이익(율)</dt><dd class="${profitClass(r)}">${profitText(r)}</dd></div>
+                    <div><dt>가용재고(런웨이)</dt><dd class="${runwayClass(r)}">${stockText(r)}</dd></div>
+                </dl>
+            </article>`).join('') : '<p class="p-3 text-xs text-slate-500">해당 채널의 상품 내역이 없습니다.</p>';
         }
 
         function renderS5SalesOverview(d) {
@@ -14878,8 +14898,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             const shareTotal = [...shares.values()].reduce((sum, value) => sum + value, 0);
             show('s5ChannelShare', shareTotal > 0);
             const bar = document.getElementById('s5ChannelShareBar'), legend = document.getElementById('s5ChannelShareLegend');
-            if (bar) bar.innerHTML = [...shares].map(([key, value]) => `<span class="${colors[key]}" style="width:${value / shareTotal * 100}%" title="${names[key]} ${fmtWon(value)}"></span>`).join('');
-            if (legend) legend.innerHTML = [...shares].map(([key, value]) => `<span>${names[key]} ${((value / shareTotal) * 100).toFixed(1)}%</span>`).join('');
+            const orderedShares = [...shares].sort((a, b) => b[1] - a[1]);
+            if (bar) bar.innerHTML = orderedShares.map(([key, value]) => `<span class="${colors[key]}" style="width:${value / shareTotal * 100}%" title="${names[key]} ${fmtWon(value)}"></span>`).join('');
+            if (legend) legend.innerHTML = orderedShares.map(([key, value]) => `<span>${names[key]} ${fmtWon(value)} (${((value / shareTotal) * 100).toFixed(1)}%)</span>`).join('');
             const alertBody = document.getElementById('s5SalesAlertBody');
             if (alertBody) for (const id of ['s5LegacySummary', 'channelAutomationStatusPanel', 'salesChannelFilterChips', 'costUnverifiedIssuesBox']) {
                 const node = document.getElementById(id); if (node && node.parentElement !== alertBody) alertBody.appendChild(node);
@@ -15738,7 +15759,18 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             else if (currentSalesChannelFilter === 'b2b') chartBarColor = 'bg-teal-500';
             else if (currentSalesChannelFilter === 'coupang_growth') chartBarColor = 'bg-indigo-500';
 
-            if (trendList.length > 14) trendList = trendList.slice(-14);
+            if (!activeMcChannel && trendList.length > 0) {
+                const monthKey = monthly.month || String(dKpi?.sales_date || trendList[trendList.length - 1].date || '').slice(0, 7);
+                const inMonth = trendList.filter(t => String(t.date || '').startsWith(monthKey + '-'));
+                if (inMonth.length > 0) {
+                    const byDate = new Map(inMonth.map(t => [t.date, t]));
+                    const lastDay = Number(inMonth[inMonth.length - 1].date.slice(-2));
+                    trendList = Array.from({length: lastDay}, (_, index) => {
+                        const date = `${monthKey}-${String(index + 1).padStart(2, '0')}`;
+                        return byDate.get(date) || {date, revenue: null, isConfirmed: false, hasCoupangDaily: null};
+                    });
+                }
+            }
             const legendWrap = document.getElementById('salesTrendLegend');
             if (legendWrap) {
                 legendWrap.innerHTML = `
@@ -15805,6 +15837,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     const maxPosRev = Math.max(...trendList.filter(t => t.revenue != null && t.revenue > 0).map(t => t.revenue), 1);
                     const maxNegRev = Math.max(...trendList.filter(t => t.revenue != null && t.revenue < 0).map(t => Math.abs(t.revenue)), 1);
 
+                    const latestDate = trendList[trendList.length - 1].date;
                     const barsHtml = trendList.map(t => {
                         const rev = t.revenue;
                         const hasData = rev !== null && rev !== undefined;
@@ -15826,12 +15859,13 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         }
 
                         const isCoupangMissing = (currentSalesChannelFilter === 'all' || currentSalesChannelFilter === 'coupang_growth') && t.hasCoupangDaily === false;
+                        const isLatest = t.date === latestDate;
                         const coupangTitleNote = isCoupangMissing ? ' (쿠팡 일별 미수집)' : '';
                         const tooltipText = `${t.date}: ${hasData ? fmtWon(rev) : '미수집 / 미확인'}${coupangTitleNote}`;
                         const barTitle = isCoupangMissing ? `쿠팡 일별 미수집 (${t.date}: ${hasData ? fmtWon(rev) : '0원'})` : tooltipText;
 
                         return `
-                            <div class="flex-1 flex flex-col items-center group relative" style="min-width:44px" title="${escapeHtml(barTitle)}" data-sales-date="${escapeHtml(t.date || '')}">
+                            <div class="flex-1 flex flex-col items-center group relative" style="min-width:44px" title="${escapeHtml(barTitle)}" data-sales-date="${escapeHtml(t.date || '')}" data-sales-latest="${isLatest}">
                                 <div class="opacity-0 group-hover:opacity-100 transition absolute -top-8 px-2 py-1 bg-slate-900 text-white rounded text-[10px] font-mono whitespace-nowrap z-20 pointer-events-none shadow-md">
                                     ${tooltipText}
                                 </div>
@@ -15839,7 +15873,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                 ${isCoupangMissing ? '<span class="text-[8px] leading-none text-slate-500 whitespace-nowrap tracking-tight">쿠팡 미포함</span>' : ''}
                                 <!-- 양수 막대 영역 (기준선 위) -->
                                 <div class="w-full h-24 flex items-end justify-center">
-                                    ${isPos ? `<div class="${isCoupangMissing ? 'bg-slate-300' : chartBarColor} w-full rounded-t-sm transition-all group-hover:brightness-95" style="height: ${posHeightPct}%;"></div>` : ''}
+                                    ${isPos ? `<div class="${isCoupangMissing ? 'bg-slate-300' : isLatest ? 'bg-violet-600' : chartBarColor} ${isLatest && isCoupangMissing ? 'ring-2 ring-violet-600' : ''} w-full rounded-t-sm transition-all group-hover:brightness-95" style="height: ${posHeightPct}%;"></div>` : ''}
                                     ${!hasData ? `<div class="w-full h-full border-b border-dashed border-slate-200"></div>` : ''}
                                 </div>
                                 <!-- 기준선 (0선) -->
@@ -15875,8 +15909,9 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             if (Array.isArray(rawTop)) {
                 topProducts = rawTop;
             } else if (rawTop && typeof rawTop === 'object') {
-                topProducts = rawTop.by_revenue || rawTop.by_quantity || [];
+                topProducts = rawTop.by_revenue || [];
             }
+            topProducts = [...topProducts].sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
 
             if (topWrap) {
                 if (!topProducts || topProducts.length === 0) {
@@ -15892,7 +15927,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     topWrap.innerHTML = topProducts.slice(0, 10).map((p, idx) => {
                         const rankClass = rankBadges[idx] || 'bg-slate-50 text-slate-500 border-slate-200';
                         const matchedMaster = findMasterByCode(p.product_code || p.code);
-                        const pName = escapeHtml(p.master_name || matchedMaster?.name || matchedMaster?.seller_name || p.product_name || p.name || '-');
+                        const pName = escapeHtml(p.display_name || p.master_name || matchedMaster?.name || matchedMaster?.seller_name || p.product_name || p.name || '-');
                         const pQty = p.quantity !== undefined ? p.quantity : (p.qty || 0);
                         const pRev = p.revenue || 0;
                         const barWidth = Math.max(6, Math.round(((pRev || pQty || 1) / maxTopRev) * 100));
