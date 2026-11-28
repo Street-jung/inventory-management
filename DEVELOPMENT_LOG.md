@@ -374,3 +374,10 @@
 3. 설계: 사용자 3차 요청(11-27). 표시명은 PC 쪽 export 가 sales_profit.transactions/top_products 에 display_name 을 더해 다음 게시(11-28 08:30)부터 보임.
 4. 시험: 소스 저장소 오프라인 가드 종료 0 — scripts 356 OK(skipped 9), tests 566 OK, web 195 OK, 보호 파일 불변, 비밀값 노출 0, 외부 호출 위반 0. 총괄 로컬 미리보기(오늘 게시 세대 + 새 export 후보)로 확인.
 5. 남은 일: Render 배포 후 라이브 확인.
+
+## 2026-11-28 — 릴리스: 매출 탭 일별 추이 월 선택 버튼(01 S-6)
+1. 기능: 일별 매출 추이 위에 월 버튼(일별 자료가 있는 달만, 기본 이번 달). 다른 달은 1일~말일, 미수집일은 0 이 아닌 미수집 표시.
+2. 파일: app.py(소스 저장소 web_dashboard\app.py 바이트 그대로, SHA256 앞 8자리 89B543E5). 데이터·환경변수·render.yaml·cloud_storage.py 미변경.
+3. 설계: 사용자 결정 11-27(월 선택 버튼). 게시 키 sales_profit.daily_series_by_month(PC 쪽 export). 9월 스마트스토어·카페24 API 보충과 쿠팡 9·10월 일별 파일 수집 뒤 11-28 재게시(rev 01c07583).
+4. 시험: 소스 저장소 오프라인 가드 종료 0 — scripts 356 OK(skipped 9), tests 579 OK, web 196 OK. 총괄 로컬 미리보기(재게시 데이터) 모바일 390: 9·10·11월 버튼, 9월 30개·11월 27개 막대, 넘침 0.
+5. 남은 일: Render 배포 후 라이브 확인.

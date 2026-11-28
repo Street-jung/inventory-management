@@ -4786,7 +4786,7 @@ HTML_TEMPLATE = r"""
         <!-- 탭 1: 일일 상품 매출 (첫 화면, MD 실무자 맞춤형) -->
         <!-- ============================================================= -->
         <section id="tabContent_sales" class="dashboard-tab-content space-y-3">
-            <style>#tabContent_sales #salesDailyKpiRow,#tabContent_sales #s5LegacyDetail{display:none!important}#tabContent_sales #s5Trends,#tabContent_sales #salesTrendChartContainer{min-width:0;max-width:100%}#salesTrendScroller{display:flex;gap:8px;width:100%;height:100%;overflow-x:auto;align-items:flex-end;padding-left:16px;padding-right:8px;box-sizing:border-box}#salesTrendScroller>[data-sales-date]{flex:1 0 44px}#s5SalesAlert summary{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#s5ProductDetails{max-width:100%}#s5ProductTableWrap{max-height:65vh;overflow:auto}#s5ProductTable thead th{position:sticky;top:0;z-index:1;background:#f8fafc}#s5ProductTable tbody tr{border-bottom:1px solid #e2e8f0}#s5ProductTable tbody td:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}#s5ProductTable .s5-product-name{font-weight:700;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}#s5ProductCards{display:none}@media(max-width:639px){ #s5ProductTableWrap{display:none}#s5ProductCards{display:grid;gap:10px;padding:12px}#s5ProductCards article{border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;min-width:0}#s5ProductCards h3{font-weight:700;line-height:1.4;overflow-wrap:anywhere}#s5ProductCards dl{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}#s5ProductCards dt{font-size:11px;color:#64748b}#s5ProductCards dd{font-size:12px;font-variant-numeric:tabular-nums;margin:2px 0 0;overflow-wrap:anywhere}}</style>
+            <style>#tabContent_sales #salesDailyKpiRow,#tabContent_sales #s5LegacyDetail{display:none!important}#tabContent_sales #s5Trends,#tabContent_sales #salesTrendChartContainer{min-width:0;max-width:100%}#s5Trends{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;max-width:100%}#s5Trends>div{min-width:0;max-width:100%}#salesTrendChartContainer{width:100%;overflow:hidden}#salesTrendScroller{display:flex;gap:8px;width:100%;height:100%;overflow-x:auto;align-items:flex-end;padding-left:16px;padding-right:8px;box-sizing:border-box}#salesTrendScroller>[data-sales-date]{flex:1 0 44px}#s5SalesAlert summary{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#s5ProductDetails{max-width:100%}#s5ProductTableWrap{max-height:65vh;overflow:auto}#s5ProductTable thead th{position:sticky;top:0;z-index:1;background:#f8fafc}#s5ProductTable tbody tr{border-bottom:1px solid #e2e8f0}#s5ProductTable tbody td:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}#s5ProductTable .s5-product-name{font-weight:700;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}#s5ProductCards{display:none}@media(max-width:639px){ #s5ProductTableWrap{display:none}#s5ProductCards{display:grid;gap:10px;padding:12px}#s5ProductCards article{border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;min-width:0}#s5ProductCards h3{font-weight:700;line-height:1.4;overflow-wrap:anywhere}#s5ProductCards dl{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}#s5ProductCards dt{font-size:11px;color:#64748b}#s5ProductCards dd{font-size:12px;font-variant-numeric:tabular-nums;margin:2px 0 0;overflow-wrap:anywhere}}</style>
             <details id="s5SalesAlert" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900">
                 <summary class="cursor-pointer font-semibold"><span id="s5SalesAlertText">수집 상태 확인 필요</span> · 채널 상태와 진단 보기</summary>
                 <div id="s5SalesAlertBody" class="space-y-3 pt-3"></div>
@@ -4989,6 +4989,7 @@ HTML_TEMPLATE = r"""
                             <!-- 범례 -->
                         </div>
                     </div>
+                    <div id="salesTrendMonthButtons" class="flex gap-1.5 overflow-x-auto max-w-full" role="group" aria-label="일별 매출 월 선택"></div>
                     <div id="salesTrendChartContainer" class="h-44 w-full flex items-end">
                         <!-- Bars -->
                     </div>
@@ -14918,8 +14919,17 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             renderS5ProductTable();
         }
 
+        function selectSalesTrendMonth(month) {
+            if (!/^\d{4}-\d{2}$/.test(month)) return;
+            renderSalesTab._trendMonth = month;
+            const data = currentDashboardData || s5SalesData;
+            if (data) renderSalesTab(data);
+        }
+
         function renderSalesTab(d) {
             if (!d) return;
+            let salesTrendMonthSelected = renderSalesTab._trendMonth || null;
+            let salesTrendCurrentMonth = renderSalesTab._currentMonth || null;
             const effectiveAutoStatus = (typeof currentAutomationStatus !== 'undefined' ? currentAutomationStatus : null) || (d && d._automation_status) || null;
             renderChannelAutomationStatusPanel(effectiveAutoStatus, d);
             const sp = d.sales_profit || {};
@@ -15677,10 +15687,27 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
             // 4. 일별 매출 추이 그래프 (daily_series / 다채널 필터 분리 반영)
             const trendWrap = document.getElementById('salesTrendChartContainer');
-            let rawTrend = Array.isArray(sp.daily_series) ? sp.daily_series : [];
+            const trendHistory = sp.daily_series_by_month || {};
+            const currentTrendMonth = monthly.month || String((sp.daily_kpi || {}).sales_date || '').slice(0, 7);
+            const availableMonths = Object.keys(trendHistory).filter(key => /^\d{4}-\d{2}$/.test(key)
+                && Array.isArray(trendHistory[key]) && trendHistory[key].some(item => item.revenue !== null && item.revenue !== undefined)).sort();
+            if (salesTrendCurrentMonth !== currentTrendMonth) {
+                salesTrendMonthSelected = currentTrendMonth;
+                salesTrendCurrentMonth = currentTrendMonth;
+            }
+            if (!availableMonths.includes(salesTrendMonthSelected)) salesTrendMonthSelected = availableMonths.includes(currentTrendMonth)
+                ? currentTrendMonth : availableMonths[availableMonths.length - 1] || currentTrendMonth;
+            renderSalesTab._trendMonth = salesTrendMonthSelected;
+            renderSalesTab._currentMonth = salesTrendCurrentMonth;
+            const monthButtons = document.getElementById('salesTrendMonthButtons');
+            if (monthButtons) monthButtons.innerHTML = availableMonths.map(key =>
+                `<button type="button" onclick="selectSalesTrendMonth('${key}')" aria-pressed="${key === salesTrendMonthSelected}" class="shrink-0 px-2.5 py-1 rounded-lg border text-xs ${key === salesTrendMonthSelected ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'}">${Number(key.slice(5))}월</button>`).join('');
+            let rawTrend = Array.isArray(trendHistory[salesTrendMonthSelected])
+                ? trendHistory[salesTrendMonthSelected] : (Array.isArray(sp.daily_series) ? sp.daily_series : []);
             rawTrend = [...rawTrend].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+            const showingPastTrend = !!salesTrendMonthSelected && salesTrendMonthSelected !== currentTrendMonth;
 
-            const activeMcChannel = (currentSalesChannelFilter === 'cafe24') ? mcC24Info
+            const activeMcChannel = showingPastTrend ? null : (currentSalesChannelFilter === 'cafe24') ? mcC24Info
                 : (currentSalesChannelFilter === 'smartstore' ? mcSSInfo
                 : (currentSalesChannelFilter === 'b2b' ? mcB2bInfo : null));
             const metricMeta = getSalesChannelMetricMeta(currentSalesChannelFilter, activeMcChannel, isProvisionalSales, isOptionQty, isUncombinedMc);
@@ -15702,7 +15729,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
 
             let trendList = [];
             let mcTrendEmptyMsg = '';
-            if (currentSalesChannelFilter === 'b2b' && b2bUncollected && !activeMcChannel) {
+            if (!showingPastTrend && currentSalesChannelFilter === 'b2b' && b2bUncollected && !activeMcChannel) {
                 trendList = [];
                 mcTrendEmptyMsg = 'B2B 매출 원장이 아직 연동되지 않았습니다. (은행 입금은 매출로 자동 집계하지 않음)';
             } else if (activeMcChannel) {
@@ -15760,11 +15787,13 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
             else if (currentSalesChannelFilter === 'coupang_growth') chartBarColor = 'bg-indigo-500';
 
             if (!activeMcChannel && trendList.length > 0) {
-                const monthKey = monthly.month || String(dKpi?.sales_date || trendList[trendList.length - 1].date || '').slice(0, 7);
+                const monthKey = salesTrendMonthSelected || monthly.month || String(dKpi?.sales_date || trendList[trendList.length - 1].date || '').slice(0, 7);
                 const inMonth = trendList.filter(t => String(t.date || '').startsWith(monthKey + '-'));
                 if (inMonth.length > 0) {
                     const byDate = new Map(inMonth.map(t => [t.date, t]));
-                    const lastDay = Number(inMonth[inMonth.length - 1].date.slice(-2));
+                    const lastDay = showingPastTrend
+                        ? new Date(Number(monthKey.slice(0, 4)), Number(monthKey.slice(5, 7)), 0).getDate()
+                        : Number(inMonth[inMonth.length - 1].date.slice(-2));
                     trendList = Array.from({length: lastDay}, (_, index) => {
                         const date = `${monthKey}-${String(index + 1).padStart(2, '0')}`;
                         return byDate.get(date) || {date, revenue: null, isConfirmed: false, hasCoupangDaily: null};
@@ -15837,7 +15866,8 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     const maxPosRev = Math.max(...trendList.filter(t => t.revenue != null && t.revenue > 0).map(t => t.revenue), 1);
                     const maxNegRev = Math.max(...trendList.filter(t => t.revenue != null && t.revenue < 0).map(t => Math.abs(t.revenue)), 1);
 
-                    const latestDate = trendList[trendList.length - 1].date;
+                    const latestDate = [...trendList].reverse().find(t => t.revenue !== null && t.revenue !== undefined)?.date
+                        || trendList[trendList.length - 1].date;
                     const barsHtml = trendList.map(t => {
                         const rev = t.revenue;
                         const hasData = rev !== null && rev !== undefined;
