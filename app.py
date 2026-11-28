@@ -4993,6 +4993,7 @@ HTML_TEMPLATE = r"""
                     <div id="salesTrendChartContainer" class="h-44 w-full flex items-end">
                         <!-- Bars -->
                     </div>
+                    <div id="salesTrendDayDetail" class="text-xs text-slate-700 leading-relaxed min-w-0" style="white-space:normal;overflow-wrap:anywhere" aria-live="polite">미수집</div>
                 </div>
 
                 <!-- TOP 10 상품 매출 랭킹 (5 cols) -->
@@ -14922,8 +14923,47 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
         function selectSalesTrendMonth(month) {
             if (!/^\d{4}-\d{2}$/.test(month)) return;
             renderSalesTab._trendMonth = month;
+            renderSalesTab._trendDate = null;
             const data = currentDashboardData || s5SalesData;
             if (data) renderSalesTab(data);
+        }
+
+        function renderSalesTrendDayDetail(day) {
+            const detail = document.getElementById('salesTrendDayDetail');
+            if (!detail) return;
+            const weekday = ['일', '월', '화', '수', '목', '금', '토'];
+            const parts = /^\d{4}-(\d{2})-(\d{2})$/.exec(day || '');
+            const label = parts ? `${parts[1]}-${parts[2]} (${weekday[new Date(`${day}T00:00:00Z`).getUTCDay()]})` : '일별 매출';
+            const entry = (renderSalesTab._trendSource || []).find(item => item.date === day);
+            if (!entry || entry.revenue === null || entry.revenue === undefined) {
+                detail.textContent = `${label} 미수집`;
+                return;
+            }
+            const channels = Array.isArray(entry.channels) ? entry.channels : [];
+            const amount = (...names) => {
+                const item = channels.find(channel => names.includes(channel.channel));
+                if (!item) return '0원';
+                return item.revenue !== null && item.revenue !== undefined ? fmtWon(item.revenue) : '미수집';
+            };
+            const coupang = amount('coupang_growth', 'coupang', 'rocket_growth');
+            detail.textContent = `${label} 합계 ${fmtWon(entry.revenue)} · ${entry.hasCoupangDaily === false ? '쿠팡 미포함(미수집)' : '쿠팡 ' + coupang} · 스마트스토어 ${amount('smartstore')} · 카페24 ${amount('cafe24')}`;
+        }
+
+        function selectSalesTrendDate(day) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !(renderSalesTab._trendDates || []).includes(day)) return;
+            const previous = document.getElementById('salesTrendBar-' + renderSalesTab._trendDate);
+            if (previous) {
+                previous.style.outline = '';
+                previous.setAttribute('aria-pressed', 'false');
+            }
+            renderSalesTab._trendDate = day;
+            const selected = document.getElementById('salesTrendBar-' + day);
+            if (selected) {
+                selected.style.outline = '2px solid #0f172a';
+                selected.style.outlineOffset = '-2px';
+                selected.setAttribute('aria-pressed', 'true');
+            }
+            renderSalesTrendDayDetail(day);
         }
 
         function renderSalesTab(d) {
@@ -15778,6 +15818,10 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     };
                 });
             }
+            const coupangDailyByDate = new Map(trendList.map(item => [item.date, item.hasCoupangDaily]));
+            renderSalesTab._trendSource = rawTrend.map(item => ({
+                ...item, hasCoupangDaily: coupangDailyByDate.get(item.date) ?? item.hasCoupangDaily
+            }));
 
             // 필터 채널별 그래프 바 색상 지정 (전체는 중립 슬레이트)
             let chartBarColor = 'bg-slate-700';
@@ -15800,6 +15844,16 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                     });
                 }
             }
+            renderSalesTab._trendDates = trendList.map(item => item.date);
+            const latestTrendDay = [...rawTrend].reverse().find(item => item.revenue !== null && item.revenue !== undefined)?.date
+                || [...trendList].reverse().find(item => item.revenue !== null && item.revenue !== undefined)?.date
+                || trendList[trendList.length - 1]?.date;
+            if (renderSalesTab._trendDateMonth !== salesTrendMonthSelected ||
+                !renderSalesTab._trendDates.includes(renderSalesTab._trendDate)) {
+                renderSalesTab._trendDate = latestTrendDay;
+            }
+            renderSalesTab._trendDateMonth = salesTrendMonthSelected;
+            if (typeof renderSalesTrendDayDetail === 'function') renderSalesTrendDayDetail(renderSalesTab._trendDate);
             const legendWrap = document.getElementById('salesTrendLegend');
             if (legendWrap) {
                 legendWrap.innerHTML = `
@@ -15895,10 +15949,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                         const barTitle = isCoupangMissing ? `쿠팡 일별 미수집 (${t.date}: ${hasData ? fmtWon(rev) : '0원'})` : tooltipText;
 
                         return `
-                            <div class="flex-1 flex flex-col items-center group relative" style="min-width:44px" title="${escapeHtml(barTitle)}" data-sales-date="${escapeHtml(t.date || '')}" data-sales-latest="${isLatest}">
-                                <div class="opacity-0 group-hover:opacity-100 transition absolute -top-8 px-2 py-1 bg-slate-900 text-white rounded text-[10px] font-mono whitespace-nowrap z-20 pointer-events-none shadow-md">
-                                    ${tooltipText}
-                                </div>
+                            <button type="button" class="flex-1 flex flex-col items-center group relative cursor-pointer" style="min-width:44px;${t.date === renderSalesTab._trendDate ? 'outline:2px solid #0f172a;outline-offset:-2px' : ''}" title="${escapeHtml(barTitle)}" aria-label="${escapeHtml(tooltipText)}" id="salesTrendBar-${escapeHtml(t.date || '')}" data-sales-date="${escapeHtml(t.date || '')}" data-sales-latest="${isLatest}" aria-pressed="${t.date === renderSalesTab._trendDate}" onclick="selectSalesTrendDate('${/^\d{4}-\d{2}-\d{2}$/.test(t.date || '') ? t.date : ''}')">
                                 ${topLabel}
                                 ${isCoupangMissing ? '<span class="text-[8px] leading-none text-slate-500 whitespace-nowrap tracking-tight">쿠팡 미포함</span>' : ''}
                                 <!-- 양수 막대 영역 (기준선 위) -->
@@ -15914,7 +15965,7 @@ const IS_SHARE_MODE = Boolean({{ 'true' if is_share_mode|default(false) else 'fa
                                 </div>
                                 ${isNeg ? `<span class="text-[10px] font-mono font-bold text-rose-600 truncate">-${Math.abs(rev) >= 10000 ? Math.round(Math.abs(rev) / 10000) + '만' : fmtNum(Math.abs(rev))}</span>` : ''}
                                 <span class="text-[10px] font-mono text-slate-500 whitespace-nowrap">${dateShort}일</span>
-                            </div>
+                            </button>
                         `;
                     }).join('');
 
